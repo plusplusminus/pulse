@@ -14,11 +14,14 @@
 -- a synced_comments row — rows without a matching comment body are left alone to
 -- avoid accidentally deleting events for comments that were never synced.
 
+-- Mirrors JS `isClientFacing(body)` which calls `body.trimStart()` before
+-- matching the prefix — apply ltrim() to the body text so comments like
+-- "   heyclient hi" are preserved here the same way they are in the app.
 DELETE FROM notification_events ne
 USING synced_comments sc
 WHERE ne.entity_type = 'comment'
   AND ne.entity_id = sc.linear_id
-  AND COALESCE(sc.data->>'body', '') !~* '^@?(heyclient|pulse)[[:space:]]?';
+  AND ltrim(COALESCE(sc.data->>'body', '')) !~* '^@?(heyclient|pulse)[[:space:]]?';
 
 -- Also clear any notification_reads rows that now reference deleted events
 -- (FK with ON DELETE CASCADE may already handle this; the NOT EXISTS guard is

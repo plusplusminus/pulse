@@ -23,14 +23,31 @@ WITH hidden AS (
     AND htm.hidden_label_ids IS NOT NULL
     AND array_length(htm.hidden_label_ids, 1) > 0
 ),
--- Issue label ids are stored under data->'labels' as [{ id, ... }, ...].
--- Extract them as a text[] per synced issue so we can use && (overlap).
+-- Issue label ids can live in either shape depending on the source of the
+-- synced row:
+--   * Linear webhook payloads store them as `labelIds: string[]` at the top
+--     level of data.
+--   * Initial sync / GraphQL pulls store them as `labels: [{id, ...}, ...]`.
+-- Extract both and union them into a single text[] per issue, so the overlap
+-- check below works regardless of which shape is present.
 issue_label_ids AS (
   SELECT
     si.linear_id AS issue_linear_id,
     COALESCE(
       ARRAY(
-        SELECT jsonb_array_elements(si.data->'labels')->>'id'
+        SELECT elem->>'id'
+        FROM jsonb_array_elements(
+          CASE WHEN jsonb_typeof(si.data->'labels') = 'array'
+               THEN si.data->'labels'
+               ELSE '[]'::jsonb END
+        ) AS elem
+        UNION
+        SELECT elem
+        FROM jsonb_array_elements_text(
+          CASE WHEN jsonb_typeof(si.data->'labelIds') = 'array'
+               THEN si.data->'labelIds'
+               ELSE '[]'::jsonb END
+        ) AS elem
       ),
       ARRAY[]::text[]
     ) AS label_ids
