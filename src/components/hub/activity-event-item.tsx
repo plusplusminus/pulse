@@ -40,8 +40,10 @@ function getEntityUrl(
   const meta = event.metadata || {};
   const teamKey = meta.team_key;
 
+  // Keep the Activity tab active so the details panel opens in-place instead
+  // of switching to the Tasks tab.
   if (event.entity_type === "issue" && teamKey) {
-    return `/hub/${hubSlug}/${teamKey}?issue=${event.entity_id}`;
+    return `/hub/${hubSlug}/${teamKey}?tab=activity&issue=${event.entity_id}`;
   }
   if (event.entity_type === "project" && teamKey) {
     return `/hub/${hubSlug}/${teamKey}/projects/${event.entity_id}`;
@@ -49,9 +51,8 @@ function getEntityUrl(
   if (event.entity_type === "cycle" && teamKey) {
     return `/hub/${hubSlug}/${teamKey}/cycles/${event.entity_id}`;
   }
-  // comment navigates to the issue it belongs to
   if (event.entity_type === "comment" && meta.issue_id && teamKey) {
-    return `/hub/${hubSlug}/${teamKey}?issue=${meta.issue_id}`;
+    return `/hub/${hubSlug}/${teamKey}?tab=activity&issue=${meta.issue_id}`;
   }
   return null;
 }
