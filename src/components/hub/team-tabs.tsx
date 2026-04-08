@@ -16,6 +16,8 @@ import { cn } from "@/lib/utils";
 import { CycleCardPills } from "./cycle-card-pills";
 import { ProjectIssueList } from "./project-issue-list";
 import { ActivityFeed } from "./activity-feed";
+import { IssueDetailPanel } from "./issue-detail-panel";
+import { useCanInteract } from "@/hooks/use-can-interact";
 import { RoadmapView } from "./roadmap-view";
 
 type Tab = "issues" | "projects" | "roadmap" | "cycles" | "initiatives" | "milestones" | "activity";
@@ -310,11 +312,47 @@ export function TeamTabs({
       )}
 
       {activeTab === "activity" && (
-        <div className="p-6 max-w-4xl overflow-y-auto">
-          <ActivityFeed hubId={hubId} hubSlug={hubSlug} teamId={teamId} />
-        </div>
+        <>
+          <div className="p-6 max-w-4xl overflow-y-auto">
+            <ActivityFeed hubId={hubId} hubSlug={hubSlug} teamId={teamId} />
+          </div>
+          <ActivityIssueDetail hubId={hubId} />
+        </>
       )}
     </div>
+  );
+}
+
+// Mounted only while the Activity tab is active. Reads `?issue=` from the URL
+// and renders the issue panel in place, so clicking an activity item keeps the
+// Activity tab active instead of bouncing the user to the Tasks tab.
+function ActivityIssueDetail({ hubId }: { hubId: string }) {
+  const canInteract = useCanInteract();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  // Pass the URL issue id explicitly as the `issueId` prop (rather than letting
+  // the panel fall back to reading it from the URL). The panel's internal
+  // `closing` state is only reset by a useEffect that watches the `issueId`
+  // prop flipping truthy — without this, clicking a second activity item after
+  // closing the first would leave the panel stuck closed.
+  const urlIssueId = searchParams.get("issue");
+
+  const handleClose = () => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("issue");
+    const qs = params.toString();
+    router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+  };
+
+  return (
+    <IssueDetailPanel
+      issueId={urlIssueId}
+      hubId={hubId}
+      isViewOnly={!canInteract}
+      onClose={handleClose}
+    />
   );
 }
 

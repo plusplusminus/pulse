@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { withHubAuth, type HubAuthError } from "@/lib/hub-auth"
 import { supabaseAdmin } from "@/lib/supabase"
+import { isClientFacing } from "@/lib/hub-read"
 
 export async function GET(
   request: Request,
@@ -54,8 +55,14 @@ export async function GET(
       return NextResponse.json({ error: "Failed to fetch notifications" }, { status: 500 })
     }
 
-    const hasMore = (events?.length ?? 0) > limit
-    const page = (events || []).slice(0, limit)
+    // Defensive filter: drop comment events whose underlying Linear comment
+    // is not client-facing (missing the heyclient/pulse prefix). Emit-time
+    // filtering already excludes these going forward; this guards against
+    // stale rows written before that filter existed.
+    const filtered = await filterClientFacingCommentEvents(events || [])
+
+    const hasMore = filtered.length > limit
+    const page = filtered.slice(0, limit)
 
     // Fetch read status for this user
     const eventIds = page.map((e) => e.id)
@@ -88,6 +95,47 @@ export async function GET(
     console.error("GET /api/hub/[hubId]/notifications error:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
+}
+
+type NotificationEventRow = {
+  id: string
+  hub_id: string
+  team_id: string | null
+  event_type: string
+  entity_type: string
+  entity_id: string
+  actor_name: string | null
+  summary: string
+  metadata: Record<string, unknown> | null
+  created_at: string
+}
+
+async function filterClientFacingCommentEvents(
+  events: NotificationEventRow[]
+): Promise<NotificationEventRow[]> {
+  const commentIds = events
+    .filter((e) => e.entity_type === "comment")
+    .map((e) => e.entity_id)
+
+  if (commentIds.length === 0) return events
+
+  const { data: rows } = await supabaseAdmin
+    .from("synced_comments")
+    .select("linear_id, data")
+    .in("linear_id", commentIds)
+
+  const clientFacing = new Set<string>()
+  for (const row of rows || []) {
+    const body = ((row.data as { body?: string } | null)?.body) ?? ""
+    if (isClientFacing(body)) {
+      clientFacing.add(row.linear_id as string)
+    }
+  }
+
+  return events.filter((e) => {
+    if (e.entity_type !== "comment") return true
+    return clientFacing.has(e.entity_id)
+  })
 }
 
 function encodeCursor(createdAt: string, id: string): string {
