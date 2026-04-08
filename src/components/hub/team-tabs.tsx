@@ -332,6 +332,13 @@ function ActivityIssueDetail({ hubId }: { hubId: string }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
+  // Pass the URL issue id explicitly as the `issueId` prop (rather than letting
+  // the panel fall back to reading it from the URL). The panel's internal
+  // `closing` state is only reset by a useEffect that watches the `issueId`
+  // prop flipping truthy — without this, clicking a second activity item after
+  // closing the first would leave the panel stuck closed.
+  const urlIssueId = searchParams.get("issue");
+
   const handleClose = () => {
     const params = new URLSearchParams(searchParams.toString());
     params.delete("issue");
@@ -341,7 +348,7 @@ function ActivityIssueDetail({ hubId }: { hubId: string }) {
 
   return (
     <IssueDetailPanel
-      issueId={null}
+      issueId={urlIssueId}
       hubId={hubId}
       isViewOnly={!canInteract}
       onClose={handleClose}
