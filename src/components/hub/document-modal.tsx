@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { linearImageComponents } from "@/lib/image-proxy";
 import { FileText, X } from "lucide-react";
 
 import type { ProjectDocument } from "./project-tabs";
@@ -80,7 +81,7 @@ export function DocumentModal({
         {/* Content */}
         <div className="flex-1 overflow-auto px-6 py-5">
           <div className="prose prose-sm dark:prose-invert max-w-none prose-headings:text-sm prose-headings:font-semibold prose-headings:mt-6 prose-headings:mb-2 prose-p:text-[13px] prose-p:leading-relaxed prose-p:my-2.5 prose-code:text-xs prose-pre:text-xs prose-pre:my-3 prose-ul:text-[13px] prose-ul:my-2.5 prose-ol:text-[13px] prose-ol:my-2.5 prose-li:my-0.5 prose-hr:my-5">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={linearImageComponents}>
               {doc.content!}
             </ReactMarkdown>
           </div>

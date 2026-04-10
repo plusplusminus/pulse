@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { withAdminAuth } from "@/lib/admin-auth";
 import { supabaseAdmin } from "@/lib/supabase";
 import { pushCommentToLinear } from "@/lib/linear-push";
+import { isAdminLinearConnected } from "@/lib/admin-linear-oauth";
 
 export async function POST() {
   try {
@@ -9,6 +10,12 @@ export async function POST() {
     if ("error" in auth) {
       return NextResponse.json({ error: auth.error }, { status: auth.status });
     }
+
+    const { user } = auth;
+
+    // Use admin's personal Linear token if connected
+    const adminConnected = await isAdminLinearConnected(user.id);
+    const adminUserId = adminConnected ? user.id : undefined;
 
     // Fetch all failed hub comments
     const { data: failedComments, error: fetchError } = await supabaseAdmin
@@ -34,13 +41,14 @@ export async function POST() {
     let failed = 0;
 
     for (const comment of failedComments) {
-      const linearBody = `**${comment.author_name}:** ${comment.body}`;
-
       try {
         const linearCommentId = await pushCommentToLinear(
           comment.issue_linear_id,
-          linearBody,
-          comment.parent_comment_id ?? undefined
+          comment.body,
+          comment.parent_comment_id ?? undefined,
+          undefined,
+          { authorName: comment.author_name },
+          adminUserId
         );
 
         await supabaseAdmin

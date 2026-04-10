@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useHub } from "@/contexts/hub-context";
 import { useCanInteract } from "@/hooks/use-can-interact";
+import { useAdminLinearGate } from "@/hooks/use-admin-linear-gate";
 import { FormModal } from "@/components/hub/form-modal";
 import { SubmissionHistory } from "@/components/hub/submission-history";
 import {
@@ -29,6 +30,7 @@ import {
   Mail,
   Phone,
   Megaphone,
+  Unplug,
   type LucideIcon,
 } from "lucide-react";
 
@@ -74,6 +76,7 @@ export function HubSidebar() {
   const pathname = usePathname();
   const { hubId, hubSlug, hubName, teams } = useHub();
   const canInteract = useCanInteract();
+  const { blocked: adminLinearBlocked } = useAdminLinearGate();
 
   // Fetch available forms
   useEffect(() => {
@@ -203,31 +206,63 @@ export function HubSidebar() {
       {/* Actions (CTAs) */}
       {canInteract && (
         <div className="px-1.5 py-2 border-t border-border shrink-0 space-y-1">
-          {!collapsed && (
-            <div className="px-2 pb-0.5">
-              <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
-                Quick Actions
-              </span>
-            </div>
-          )}
-          {forms.map((form) => {
-            const Icon = (form.button_icon && buttonIconMap[form.button_icon])
-              || formTypeIcons[form.type]
-              || FileText;
-            const label = form.button_label || form.name;
-            return (
-              <button
-                key={form.id}
-                onClick={() => setActiveFormId(form.id)}
-                className={ctaClasses}
-                title={collapsed ? label : undefined}
-                aria-label={collapsed ? label : undefined}
+          {adminLinearBlocked ? (
+            /* PPM admin without Linear connection — show connect prompt */
+            !collapsed ? (
+              <div className="px-2 py-2">
+                <div className="flex items-start gap-2 rounded-md border border-border bg-muted/50 px-3 py-2.5">
+                  <Unplug className="w-3.5 h-3.5 text-muted-foreground mt-0.5 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-xs text-foreground leading-snug">
+                      Connect Linear to submit requests
+                    </p>
+                    <Link
+                      href="/admin/settings/linear"
+                      className="text-[11px] font-medium text-primary hover:text-primary/80 mt-1 inline-block transition-colors"
+                    >
+                      Connect account &rarr;
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <Link
+                href="/admin/settings/linear"
+                className="flex items-center justify-center px-2 py-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                title="Connect Linear account"
               >
-                <Icon className="w-4 h-4 shrink-0" />
-                {!collapsed && <span className="truncate">{label}</span>}
-              </button>
-            );
-          })}
+                <Unplug className="w-4 h-4" />
+              </Link>
+            )
+          ) : (
+            <>
+              {!collapsed && (
+                <div className="px-2 pb-0.5">
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
+                    Quick Actions
+                  </span>
+                </div>
+              )}
+              {forms.map((form) => {
+                const Icon = (form.button_icon && buttonIconMap[form.button_icon])
+                  || formTypeIcons[form.type]
+                  || FileText;
+                const label = form.button_label || form.name;
+                return (
+                  <button
+                    key={form.id}
+                    onClick={() => setActiveFormId(form.id)}
+                    className={ctaClasses}
+                    title={collapsed ? label : undefined}
+                    aria-label={collapsed ? label : undefined}
+                  >
+                    <Icon className="w-4 h-4 shrink-0" />
+                    {!collapsed && <span className="truncate">{label}</span>}
+                  </button>
+                );
+              })}
+            </>
+          )}
         </div>
       )}
 

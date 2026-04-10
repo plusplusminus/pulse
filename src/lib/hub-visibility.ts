@@ -117,3 +117,28 @@ export async function isInitiativeVisibleToHub(
 
   return false;
 }
+
+/**
+ * Returns true if an issue carrying any of the given label IDs should be hidden
+ * from the hub, based on the team's `hidden_label_ids` config.
+ */
+export async function hasHiddenLabelInHub(
+  hubId: string,
+  teamId: string,
+  labelIds: string[]
+): Promise<boolean> {
+  if (!labelIds || labelIds.length === 0) return false;
+
+  const { data, error } = await supabaseAdmin
+    .from("hub_team_mappings")
+    .select("hidden_label_ids")
+    .eq("hub_id", hubId)
+    .eq("linear_team_id", teamId)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (error || !data) return false;
+  const hidden = (data.hidden_label_ids as string[] | null) ?? [];
+  if (hidden.length === 0) return false;
+  return labelIds.some((id) => hidden.includes(id));
+}

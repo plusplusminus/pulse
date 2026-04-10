@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { withHubAuth, type HubAuthError } from "@/lib/hub-auth";
 import { supabaseAdmin } from "@/lib/supabase";
+import { isAdminLinearConnected } from "@/lib/admin-linear-oauth";
 
 // GET: Current user's membership info for a hub
 export async function GET(
@@ -27,6 +28,12 @@ export async function GET(
       .eq("id", hubId)
       .single();
 
+    // For admin users, check if their Linear account is connected
+    let linearConnected: boolean | undefined;
+    if (role === "admin") {
+      linearConnected = await isAdminLinearConnected(user.id);
+    }
+
     return NextResponse.json({
       userId: user.id,
       email: user.email,
@@ -36,6 +43,7 @@ export async function GET(
       hubId,
       hubName: hub?.name ?? null,
       isViewOnly: role === "view_only",
+      ...(role === "admin" && { linearConnected }),
     });
   } catch (error) {
     console.error("GET /api/hubs/[hubId]/me error:", error);

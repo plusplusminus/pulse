@@ -6,8 +6,10 @@ import { POSTHOG_EVENTS } from "@/lib/posthog-events";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CommentComposer } from "./comment-composer";
+import { AdminLinearConnectBanner } from "./admin-linear-connect-banner";
 import { LabelEditor } from "./label-editor";
 import { ImageLightbox } from "./image-lightbox";
+import { useAdminLinearGate } from "@/hooks/use-admin-linear-gate";
 import {
   MessageSquare,
   Loader2,
@@ -37,6 +39,7 @@ export function IssueFullView({
   hubId: string;
 }) {
   const { isViewOnly } = useHub();
+  const { blocked: adminLinearBlocked } = useAdminLinearGate();
   const [issue, setIssue] = useState<IssueDetail | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [hubLabels, setHubLabels] = useState<Array<{ id: string; name: string; color: string }>>([]);
@@ -277,25 +280,29 @@ export function IssueFullView({
       {/* Comment composer — sticky at bottom */}
       {!isViewOnly && (
         <div className="max-w-2xl mx-auto w-full px-6">
-          <CommentComposer
-            hubId={hubId}
-            issueLinearId={issue.id}
-            replyingTo={replyingTo}
-            onCancelReply={() => setReplyingTo(null)}
-            onCommentAdded={(comment) => {
-              if (comment.parentId) {
-                setComments((prev) =>
-                  prev.map((c) =>
-                    c.linearId === comment.parentId || c.id === comment.parentId
-                      ? { ...c, children: [...(c.children ?? []), comment] }
-                      : c
-                  )
-                );
-              } else {
-                setComments((prev) => [...prev, comment]);
-              }
-            }}
-          />
+          {adminLinearBlocked ? (
+            <AdminLinearConnectBanner context="comment" />
+          ) : (
+            <CommentComposer
+              hubId={hubId}
+              issueLinearId={issue.id}
+              replyingTo={replyingTo}
+              onCancelReply={() => setReplyingTo(null)}
+              onCommentAdded={(comment) => {
+                if (comment.parentId) {
+                  setComments((prev) =>
+                    prev.map((c) =>
+                      c.linearId === comment.parentId || c.id === comment.parentId
+                        ? { ...c, children: [...(c.children ?? []), comment] }
+                        : c
+                    )
+                  );
+                } else {
+                  setComments((prev) => [...prev, comment]);
+                }
+              }}
+            />
+          )}
         </div>
       )}
 

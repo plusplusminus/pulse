@@ -34,7 +34,11 @@ const PRIORITY_LABELS: Record<number, string> = {
 
 function formatFieldValue(field: FormField, val: unknown): string {
   if (typeof val === "boolean") return val ? "Yes" : "No";
-  if (Array.isArray(val)) return val.join(", ");
+  if (Array.isArray(val)) {
+    return val
+      .map((v) => resolveOptionLabel(field, String(v)))
+      .join(", ");
+  }
 
   const strVal = String(val).trim();
 
@@ -46,7 +50,22 @@ function formatFieldValue(field: FormField, val: unknown): string {
     }
   }
 
+  // Resolve select/radio option values to their human-readable labels
+  if (field.field_type === "select" || field.field_type === "radio") {
+    return resolveOptionLabel(field, strVal);
+  }
+
   return strVal;
+}
+
+/**
+ * Look up the human-readable label for a select/radio option value.
+ * Falls back to the raw value if no matching option is found.
+ */
+function resolveOptionLabel(field: FormField, value: string): string {
+  if (!field.options?.length) return value;
+  const match = field.options.find((o) => o.value === value);
+  return match?.label ?? value;
 }
 
 /**
@@ -251,14 +270,19 @@ export async function processFormSubmission(
   // 6. Create issue in Linear
   const syncStart = Date.now();
   try {
-    const issue = await createIssueInLinear({
-      teamId,
-      title,
-      description: description || undefined,
-      priority: priority ?? undefined,
-      labelIds: labelIds.length > 0 ? labelIds : undefined,
-      projectId: projectId ?? undefined,
-    });
+    const authorName = user.name || user.email;
+    const issue = await createIssueInLinear(
+      {
+        teamId,
+        title,
+        description: description || undefined,
+        priority: priority ?? undefined,
+        labelIds: labelIds.length > 0 ? labelIds : undefined,
+        projectId: projectId ?? undefined,
+      },
+      undefined,
+      { authorName },
+    );
 
     // 7a. Success — update row
     await supabaseAdmin
@@ -400,13 +424,18 @@ export async function retrySubmission(
 
   const syncStart = Date.now();
   try {
-    const issue = await createIssueInLinear({
-      teamId,
-      title: submission.derived_title,
-      description: description || undefined,
-      priority: priority ?? undefined,
-      labelIds: labelIds.length > 0 ? labelIds : undefined,
-    });
+    const retryAuthorName = submission.submitter_name || submission.submitter_email;
+    const issue = await createIssueInLinear(
+      {
+        teamId,
+        title: submission.derived_title,
+        description: description || undefined,
+        priority: priority ?? undefined,
+        labelIds: labelIds.length > 0 ? labelIds : undefined,
+      },
+      undefined,
+      { authorName: retryAuthorName },
+    );
 
     await supabaseAdmin
       .from("form_submissions")

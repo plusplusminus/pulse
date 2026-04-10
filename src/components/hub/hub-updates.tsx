@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { linearImageComponents } from "@/lib/image-proxy";
 import { cn } from "@/lib/utils";
 import { ChevronRight, FileText, Loader2 } from "lucide-react";
 
@@ -185,7 +186,7 @@ function UpdateCard({
       {expanded && (
         <div className="px-4 pb-4 pt-0">
           <div className="prose prose-sm dark:prose-invert max-w-none prose-headings:text-sm prose-headings:font-semibold prose-p:text-[13px] prose-p:leading-relaxed prose-code:text-xs prose-pre:text-xs prose-ul:text-[13px] prose-ol:text-[13px]">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={linearImageComponents}>
               {update.body}
             </ReactMarkdown>
           </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { ListOrdered, Calculator } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -78,6 +78,21 @@ export function ProjectTabs({
   const [priorityMode, setPriorityMode] = useState<"rank" | "rice">(
     (searchParams.get("priorityMode") as "rank" | "rice") || "rank"
   );
+  // Exclude started (In Progress/In Review), completed, and cancelled tasks from priority views
+  const priorityTasks = useMemo(
+    () =>
+      issues
+        .filter((issue) => !["started", "completed", "cancelled"].includes(issue.state.type))
+        .map((issue) => ({
+          id: issue.id,
+          title: issue.title,
+          identifier: issue.identifier,
+          status: issue.state,
+          labels: issue.labels,
+        })),
+    [issues]
+  );
+
   const hasOverviewContent =
     isOverviewOnly ||
     !!project.content ||
@@ -191,27 +206,9 @@ export function ProjectTabs({
           </div>
 
           {priorityMode === "rank" ? (
-            <TaskRankingView
-              projectId={projectId}
-              tasks={issues.map((issue) => ({
-                id: issue.id,
-                title: issue.title,
-                identifier: issue.identifier,
-                status: issue.state,
-                labels: issue.labels,
-              }))}
-            />
+            <TaskRankingView projectId={projectId} tasks={priorityTasks} />
           ) : (
-            <TaskRiceScoringView
-              projectId={projectId}
-              tasks={issues.map((issue) => ({
-                id: issue.id,
-                title: issue.title,
-                identifier: issue.identifier,
-                status: issue.state,
-                labels: issue.labels,
-              }))}
-            />
+            <TaskRiceScoringView projectId={projectId} tasks={priorityTasks} />
           )}
         </div>
       )}

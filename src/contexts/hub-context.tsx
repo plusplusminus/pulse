@@ -29,6 +29,8 @@ export type HubContextValue = {
   role: HubMemberRole;
   isViewOnly: boolean;
   isLoading: boolean;
+  /** True if admin has connected their Linear account. Only set for admin role. */
+  linearConnected?: boolean;
 };
 
 const HubContext = createContext<HubContextValue | null>(null);
@@ -59,6 +61,7 @@ export function HubProvider({
     role: HubMemberRole;
     isViewOnly: boolean;
     isLoading: boolean;
+    linearConnected?: boolean;
   }>({
     userId: "",
     email: "",
@@ -81,6 +84,7 @@ export function HubProvider({
           lastName: string | null;
           role: HubMemberRole;
           isViewOnly: boolean;
+          linearConnected?: boolean;
         };
         setAuthState({
           userId: data.userId,
@@ -90,6 +94,7 @@ export function HubProvider({
           role: data.role,
           isViewOnly: data.isViewOnly,
           isLoading: false,
+          linearConnected: data.linearConnected,
         });
       } catch {
         setAuthState((prev) => ({ ...prev, isLoading: false }));

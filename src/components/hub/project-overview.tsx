@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import { captureEvent } from "@/lib/posthog-client";
 import { POSTHOG_EVENTS } from "@/lib/posthog-events";
 import remarkGfm from "remark-gfm";
+import { linearImageComponents } from "@/lib/image-proxy";
 import { FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -239,7 +240,7 @@ export function ProjectOverview({ project, links, documents }: ProjectOverviewPr
         )}>
           {project.content ? (
             <div className="prose prose-sm dark:prose-invert max-w-prose prose-headings:text-sm prose-headings:font-semibold prose-headings:mt-6 prose-headings:mb-2 prose-p:text-[13px] prose-p:leading-relaxed prose-p:my-2.5 prose-code:text-xs prose-pre:text-xs prose-pre:my-3 prose-ul:text-[13px] prose-ul:my-2.5 prose-ol:text-[13px] prose-ol:my-2.5 prose-li:my-0.5 prose-hr:my-5">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={linearImageComponents}>
                 {project.content}
               </ReactMarkdown>
             </div>

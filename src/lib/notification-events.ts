@@ -5,8 +5,10 @@ import {
   isProjectVisibleToHub,
   isProjectOverviewOnlyInHub,
   isInitiativeVisibleToHub,
+  hasHiddenLabelInHub,
   type HubInfo,
 } from "@/lib/hub-visibility";
+import { isClientFacing } from "@/lib/hub-read";
 import { processImmediateEmails } from "@/lib/notification-delivery";
 
 // -- Types -------------------------------------------------------------------
@@ -100,6 +102,8 @@ function extractActorName(data: Record<string, unknown>): string | null {
   // For other entities, the actor info is not reliably available.
   const user = data.user as { name?: string } | undefined;
   if (user?.name) return user.name;
+  const creator = data.creator as { name?: string } | undefined;
+  if (creator?.name) return creator.name;
   const assignee = data.assignee as { name?: string } | undefined;
   if (assignee?.name) return assignee.name;
   return null;
@@ -152,7 +156,7 @@ function generateIssueSummary(
     return {
       eventType: "new_issue",
       summary: `New issue ${identifier}: ${title}`,
-      metadata: { title },
+      metadata: {},
     };
   }
 
@@ -267,19 +271,25 @@ async function resolveCommentAuthor(data: Record<string, unknown>): Promise<stri
 async function generateCommentSummary(
   action: string,
   data: Record<string, unknown>
-): Promise<{ eventType: NotificationEventType; summary: string; metadata: Record<string, unknown> } | null> {
+): Promise<{ eventType: NotificationEventType; summary: string; metadata: Record<string, unknown>; actorName?: string } | null> {
   if (action === "remove") return null;
+
+  const body = (data.body as string) ?? "";
+
+  // Only notify clients about comments with the trigger prefix (heyclient, pulse).
+  // Internal comments must never reach the client notification pipeline.
+  if (!isClientFacing(body)) return null;
 
   const userName = await resolveCommentAuthor(data);
   const issueIdentifier =
     (data.issue as { identifier?: string })?.identifier ?? "an issue";
-  const body = (data.body as string) ?? "";
   const excerpt = body.length > 100 ? body.slice(0, 100) + "..." : body;
 
   if (action === "create") {
     return {
       eventType: "comment",
-      summary: `New comment on ${issueIdentifier} by ${userName}`,
+      summary: `New comment on ${issueIdentifier}`,
+      actorName: userName,
       metadata: {
         excerpt,
         _issue_id: (data.issue as { id?: string })?.id,
@@ -291,7 +301,8 @@ async function generateCommentSummary(
   // action === "update" — comment edited
   return {
     eventType: "comment",
-    summary: `Comment updated on ${issueIdentifier} by ${userName}`,
+    summary: `Comment updated on ${issueIdentifier}`,
+    actorName: userName,
     metadata: {
       excerpt,
       _issue_id: (data.issue as { id?: string })?.id,
@@ -488,30 +499,71 @@ async function resolveTargetHubs(
   return [];
 }
 
+async function resolveIssueLabelIds(
+  type: string,
+  data: Record<string, unknown>
+): Promise<string[]> {
+  if (type === "Issue") {
+    const ids = data.labelIds as string[] | undefined;
+    if (Array.isArray(ids)) return ids;
+    const labels = data.labels as Array<{ id: string }> | undefined;
+    if (Array.isArray(labels)) return labels.map((l) => l.id).filter(Boolean);
+    return [];
+  }
+  if (type === "Comment") {
+    const issueId = (data.issue as { id?: string })?.id;
+    if (!issueId) return [];
+    const { data: row } = await supabaseAdmin
+      .from("synced_issues")
+      .select("data")
+      .eq("linear_id", issueId)
+      .maybeSingle();
+    const issueData = (row?.data as Record<string, unknown> | null) ?? null;
+    if (!issueData) return [];
+    const labels = issueData.labels as Array<{ id: string }> | undefined;
+    if (Array.isArray(labels)) return labels.map((l) => l.id).filter(Boolean);
+    const ids = issueData.labelIds as string[] | undefined;
+    if (Array.isArray(ids)) return ids;
+    return [];
+  }
+  return [];
+}
+
 async function filterHubsByVisibility(
   hubs: HubInfo[],
   type: string,
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
+  teamId: string | null
 ): Promise<HubInfo[]> {
   // For issues and comments, skip notifications when the project is overview-only
+  // or when the issue carries a hidden label for the hub's team mapping.
   if (type === "Issue" || type === "Comment") {
     const projectId = type === "Issue"
       ? (data.project as { id?: string })?.id ?? (data.projectId as string)
       : (data.issue as { project?: { id?: string } })?.project?.id;
 
-    if (projectId) {
-      const results = await Promise.all(
-        hubs.map(async (hub) => {
+    // Resolve the label IDs on the underlying issue. For Issue events the
+    // labelIds are on the webhook payload; for Comment events we must look up
+    // the parent issue from synced_issues since Linear's comment webhook does
+    // not include the parent's labels.
+    const labelIds = await resolveIssueLabelIds(type, data);
+
+    const results = await Promise.all(
+      hubs.map(async (hub) => {
+        if (projectId) {
           const visible = await isProjectVisibleToHub(hub.id, projectId);
           if (!visible) return { hub, include: false };
           const overviewOnly = await isProjectOverviewOnlyInHub(hub.id, projectId);
-          return { hub, include: !overviewOnly };
-        })
-      );
-      return results.filter((r) => r.include).map((r) => r.hub);
-    }
-    // No project — visible to all team-mapped hubs
-    return hubs;
+          if (overviewOnly) return { hub, include: false };
+        }
+        if (teamId && labelIds.length > 0) {
+          const hidden = await hasHiddenLabelInHub(hub.id, teamId, labelIds);
+          if (hidden) return { hub, include: false };
+        }
+        return { hub, include: true };
+      })
+    );
+    return results.filter((r) => r.include).map((r) => r.hub);
   }
 
   if (type === "Initiative") {
@@ -549,7 +601,7 @@ export async function emitNotificationEventsForWebhook(
     if (!entityType) return;
 
     // Generate summary based on entity type
-    let result: { eventType: NotificationEventType; summary: string; metadata: Record<string, unknown> } | null = null;
+    let result: { eventType: NotificationEventType; summary: string; metadata: Record<string, unknown>; actorName?: string } | null = null;
 
     switch (type) {
       case "Issue":
@@ -575,7 +627,7 @@ export async function emitNotificationEventsForWebhook(
     const teamId = extractTeamId(type, data);
     const teamKey = extractTeamKey(type, data);
     const entityId = (data.id as string) ?? "unknown";
-    const actorName = extractActorName(data);
+    const actorName = result.actorName ?? extractActorName(data);
 
     // Enrich metadata with team_key for deep linking in UI
     const metadata: Record<string, unknown> = {
@@ -587,7 +639,7 @@ export async function emitNotificationEventsForWebhook(
     const allHubs = await resolveTargetHubs(type, data, teamId);
     if (allHubs.length === 0) return;
 
-    const visibleHubs = await filterHubsByVisibility(allHubs, type, data);
+    const visibleHubs = await filterHubsByVisibility(allHubs, type, data, teamId);
     if (visibleHubs.length === 0) return;
 
     // Emit one event per hub

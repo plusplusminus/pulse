@@ -160,7 +160,7 @@ export function mapRowToLinearIssue(row: {
   };
 }
 
-const CLIENT_FACING_PREFIX = /^@?heyclient[\s\n]?/i;
+const CLIENT_FACING_PREFIX = /^@?(?:heyclient|pulse)[\s\n]?/i;
 
 /**
  * Check if a comment body is client-facing (starts with heyclient).
@@ -809,7 +809,7 @@ export async function fetchHubComments(
       .order("created_at", { ascending: true }),
     supabaseAdmin
       .from("hub_comments")
-      .select("id, linear_comment_id, parent_comment_id, author_name, author_email, body, push_status, push_error, created_at, updated_at")
+      .select("id, linear_comment_id, parent_comment_id, user_id, author_name, author_email, body, push_status, push_error, created_at, updated_at")
       .eq("hub_id", hubId)
       .eq("issue_linear_id", issueLinearId)
       .order("created_at", { ascending: true }),
@@ -869,7 +869,7 @@ export async function fetchHubComments(
     push_status: row.push_status as string | undefined,
     push_error: row.push_error as string | undefined,
     user: {
-      id: "",
+      id: row.user_id as string,
       name: row.author_name,
     },
     isHubComment: true,

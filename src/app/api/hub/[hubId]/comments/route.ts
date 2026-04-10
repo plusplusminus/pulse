@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { withHubAuthWrite, type HubAuthError } from "@/lib/hub-auth";
 import { supabaseAdmin } from "@/lib/supabase";
 import { pushCommentToLinear } from "@/lib/linear-push";
-import { logSyncEvent } from "@/lib/sync-logger";
 import { isPPMAdmin } from "@/lib/ppm-admin";
+import { isAdminLinearConnected } from "@/lib/admin-linear-oauth";
+import { logSyncEvent } from "@/lib/sync-logger";
 
 export async function POST(
   request: Request,
@@ -38,6 +39,24 @@ export async function POST(
       .filter(Boolean)
       .join(" ") || user.email;
 
+    // Check if user is a PPM admin (their personal Linear token will be used if available)
+    const isAdmin = await isPPMAdmin(user.id, user.email);
+
+    // PPM admins must connect their Linear account before creating comments
+    if (isAdmin) {
+      const connected = await isAdminLinearConnected(user.id);
+      if (!connected) {
+        return NextResponse.json(
+          {
+            error: "linear_not_connected",
+            message:
+              "Connect your Linear account in admin settings before creating issues/comments",
+          },
+          { status: 403 }
+        );
+      }
+    }
+
     // Insert comment locally
     const { data: comment, error: insertError } = await supabaseAdmin
       .from("hub_comments")
@@ -62,13 +81,6 @@ export async function POST(
       );
     }
 
-    // PPM admins have Linear accounts — skip createAsUser so their comment
-    // posts as their actual Linear identity via the personal workspace token.
-    const isAdmin = await isPPMAdmin(user.id, user.email);
-    const author = isAdmin
-      ? undefined
-      : { authorName, authorAvatarUrl: user.profilePictureUrl ?? undefined };
-
     // Push to Linear with author attribution (createAsUser if OAuth app configured)
     try {
       const linearCommentId = await pushCommentToLinear(
@@ -76,7 +88,11 @@ export async function POST(
         body.trim(),
         parentId,
         undefined,
-        author
+        {
+          authorName,
+          authorAvatarUrl: user.profilePictureUrl ?? undefined,
+        },
+        isAdmin ? user.id : undefined
       );
 
       await supabaseAdmin
@@ -160,6 +176,7 @@ export async function PATCH(
       );
     }
 
+    const { user } = auth;
     const { commentId } = (await request.json()) as { commentId?: string };
     if (!commentId) {
       return NextResponse.json(
@@ -167,6 +184,10 @@ export async function PATCH(
         { status: 400 }
       );
     }
+
+    // Check if user is a PPM admin (use their personal Linear token if available)
+    const isAdmin = await isPPMAdmin(user.id, user.email);
+    const adminUserId = isAdmin ? user.id : undefined;
 
     // Fetch the failed comment
     const { data: comment, error: fetchError } = await supabaseAdmin
@@ -195,7 +216,8 @@ export async function PATCH(
         undefined,
         {
           authorName: comment.author_name,
-        }
+        },
+        adminUserId
       );
 
       await supabaseAdmin
