@@ -51,7 +51,7 @@ export async function POST(
       );
     }
 
-    // Check if already a member by email (idempotent)
+    // Check if already a member by email
     const { data: existing } = await supabaseAdmin
       .from("hub_members")
       .select("*")
@@ -60,7 +60,36 @@ export async function POST(
       .single();
 
     if (existing) {
-      return NextResponse.json(existing);
+      // Already accepted — true idempotency
+      if (existing.user_id) {
+        return NextResponse.json(existing);
+      }
+
+      // Still invited — resend WorkOS invitation
+      try {
+        const invitation = await workos.userManagement.sendInvitation({
+          email,
+          organizationId: hub.workos_org_id,
+          inviterUserId: user.id,
+          expiresInDays: 30,
+        });
+
+        await supabaseAdmin
+          .from("hub_members")
+          .update({ workos_invitation_id: invitation.id })
+          .eq("id", existing.id);
+
+        return NextResponse.json({
+          ...existing,
+          workos_invitation_id: invitation.id,
+        });
+      } catch (error) {
+        console.error("WorkOS resend invitation error:", error);
+        return NextResponse.json(
+          { error: "Failed to resend invitation" },
+          { status: 500 }
+        );
+      }
     }
 
     // Send WorkOS invitation
