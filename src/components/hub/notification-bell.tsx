@@ -356,8 +356,8 @@ function getEventHref(
       return null;
     case "comment":
       // Comments link to the parent issue
-      if (meta.issue_id && teamKey) {
-        return `/hub/${hubSlug}/${teamKey}?issue=${meta.issue_id}`;
+      if (meta._issue_id && teamKey) {
+        return `/hub/${hubSlug}/${teamKey}?issue=${meta._issue_id}`;
       }
       return null;
     case "project":

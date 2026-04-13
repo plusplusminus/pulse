@@ -51,8 +51,8 @@ function getEntityUrl(
   if (event.entity_type === "cycle" && teamKey) {
     return `/hub/${hubSlug}/${teamKey}/cycles/${event.entity_id}`;
   }
-  if (event.entity_type === "comment" && meta.issue_id && teamKey) {
-    return `/hub/${hubSlug}/${teamKey}?tab=activity&issue=${meta.issue_id}`;
+  if (event.entity_type === "comment" && meta._issue_id && teamKey) {
+    return `/hub/${hubSlug}/${teamKey}?tab=activity&issue=${meta._issue_id}`;
   }
   return null;
 }
