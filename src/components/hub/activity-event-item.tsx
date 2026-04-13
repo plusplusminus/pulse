@@ -51,8 +51,6 @@ function getEntityUrl(
   if (event.entity_type === "cycle" && teamKey) {
     return `/hub/${hubSlug}/${teamKey}/cycles/${event.entity_id}`;
   }
-  // Fallback to legacy `issue_id` for events created before commit 6ccaad2
-  // renamed the field to `_issue_id`.
   const commentIssueId = meta._issue_id ?? meta.issue_id;
   if (event.entity_type === "comment" && commentIssueId && teamKey) {
     return `/hub/${hubSlug}/${teamKey}?tab=activity&issue=${commentIssueId}`;

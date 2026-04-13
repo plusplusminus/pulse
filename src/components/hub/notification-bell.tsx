@@ -355,8 +355,6 @@ function getEventHref(
       }
       return null;
     case "comment": {
-      // Comments link to the parent issue. Fallback to legacy `issue_id`
-      // for events created before commit 6ccaad2 renamed the field.
       const commentIssueId = meta._issue_id ?? meta.issue_id;
       if (commentIssueId && teamKey) {
         return `/hub/${hubSlug}/${teamKey}?issue=${commentIssueId}`;
