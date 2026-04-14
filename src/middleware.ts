@@ -57,8 +57,12 @@ export default async function middleware(request: NextRequest) {
           return handleAuthkitHeaders(request, headers, { redirect: loginUrl.toString() })
         }
       } else {
-        // No org, not admin — deny
-        return new NextResponse('Forbidden', { status: 403 })
+        // Authenticated but no org — redirect to the hub login page so the
+        // user can sign in through the org-specific flow. This commonly
+        // happens when a user completed email/code auth without a prior org
+        // invitation acceptance (e.g. the callback was broken).
+        const loginUrl = new URL(`/hub/${slug}/login`, request.url)
+        return handleAuthkitHeaders(request, headers, { redirect: loginUrl.toString() })
       }
     }
 
