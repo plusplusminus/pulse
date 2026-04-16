@@ -7,7 +7,7 @@ import { POSTHOG_EVENTS } from "@/lib/posthog-events";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
-import { proxyLinearImageUrl } from "@/lib/image-proxy";
+import { proxyLinearUrl, isLinearCdnUrl, getFileIcon } from "@/lib/image-proxy";
 import { CommentComposer } from "./comment-composer";
 import { AdminLinearConnectBanner } from "./admin-linear-connect-banner";
 import { LabelEditor } from "./label-editor";
@@ -39,11 +39,6 @@ import {
   IterationCw,
   Zap,
   RotateCcw,
-  FileText,
-  FileSpreadsheet,
-  Archive,
-  File,
-  Image,
   ImageOff,
   ExternalLink,
   Link,
@@ -99,33 +94,6 @@ export type HistoryEntry = {
 
 // -- Custom ReactMarkdown components ─────────────────────────────────────────
 
-const FILE_ICON_MAP: Record<string, typeof File> = {
-  pdf: FileText,
-  doc: FileText,
-  docx: FileText,
-  txt: FileText,
-  rtf: FileText,
-  xls: FileSpreadsheet,
-  xlsx: FileSpreadsheet,
-  csv: FileSpreadsheet,
-  zip: Archive,
-  rar: Archive,
-  "7z": Archive,
-  gz: Archive,
-  tar: Archive,
-  png: Image,
-  jpg: Image,
-  jpeg: Image,
-  gif: Image,
-  webp: Image,
-  svg: Image,
-};
-
-function getFileIcon(filename: string) {
-  const ext = filename.split(".").pop()?.toLowerCase() ?? "";
-  return FILE_ICON_MAP[ext] ?? File;
-}
-
 function MarkdownImage({
   src,
   alt,
@@ -135,7 +103,7 @@ function MarkdownImage({
   onImageClick: (src: string, alt?: string) => void;
 }) {
   const [broken, setBroken] = useState(false);
-  const imgSrc = typeof src === "string" ? proxyLinearImageUrl(src) : undefined;
+  const imgSrc = typeof src === "string" ? proxyLinearUrl(src) : undefined;
 
   if (broken || !imgSrc) {
     return (
@@ -177,12 +145,13 @@ export function useMarkdownComponents(onImageClick: (src: string, alt?: string) 
       <MarkdownImage {...props} onImageClick={onImageClick} />
     ),
     a: ({ href, children, ...props }: React.ComponentPropsWithoutRef<"a">) => {
-      // Detect Supabase storage file attachment links
-      if (href && href.includes("comment-attachments/")) {
+      // Detect file attachment links (Supabase storage or Linear CDN)
+      const isAttachment = href && (href.includes("comment-attachments/") || isLinearCdnUrl(href));
+      if (isAttachment) {
         try {
-          // Prefer the markdown link text (e.g. "report.pdf") over the UUID storage key
+          const proxiedHref = isLinearCdnUrl(href!) ? proxyLinearUrl(href!) : href!;
           const childText = typeof children === "string" ? children.trim() : "";
-          const url = new URL(href, window.location.origin);
+          const url = new URL(href!, window.location.origin);
           const pathParts = url.pathname.split("/");
           const storageFilename = decodeURIComponent(pathParts[pathParts.length - 1]);
           const displayName = childText || storageFilename;
@@ -190,7 +159,7 @@ export function useMarkdownComponents(onImageClick: (src: string, alt?: string) 
 
           return (
             <a
-              href={href}
+              href={proxiedHref}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-border bg-muted/50 hover:bg-muted text-foreground no-underline transition-colors text-xs"
