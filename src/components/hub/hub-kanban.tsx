@@ -130,11 +130,11 @@ export function HubKanban({
   }
 
   return (
-    <div className="flex gap-1 overflow-x-auto pb-4 px-1">
+    <div className="flex gap-1 pb-4 px-1">
       {columns.map(([key, column]) => (
         <div key={key} className="flex-shrink-0 w-80 sm:w-[356px]">
           {/* Column header */}
-          <div className="flex items-center gap-2 p-3 mb-2">
+          <div className="flex items-center gap-2 p-3 mb-2 sticky top-0 z-10 bg-background">
             {column.type === "status" ? (
               <StatusIcon type={column.statusType ?? ""} color={column.color} />
             ) : (
