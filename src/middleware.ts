@@ -3,7 +3,13 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { lookupHubBySlug, lookupPPMAdmin } from '@/lib/edge-db'
 
 export default async function middleware(request: NextRequest) {
-  const { session, headers, authorizationUrl } = await authkit(request)
+  // On Vercel preview deployments, derive the redirect URI from the request
+  // so the OAuth callback returns to the preview URL instead of production.
+  const redirectUri = process.env.VERCEL_ENV === 'preview'
+    ? `${request.nextUrl.origin}/auth/callback`
+    : undefined
+
+  const { session, headers, authorizationUrl } = await authkit(request, { redirectUri })
   const { pathname } = request.nextUrl
 
   // Enforce auth on protected PPM routes
