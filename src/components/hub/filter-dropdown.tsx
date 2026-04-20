@@ -11,7 +11,7 @@ export function CheckboxFilterDropdown({
   label,
   icon,
 }: {
-  items: Array<{ id: string; name: string; color?: string }>;
+  items: Array<{ id: string; name: string; color?: string; description?: string }>;
   selected: string[];
   onChange: (ids: string[]) => void;
   label: string;
@@ -84,7 +84,12 @@ export function CheckboxFilterDropdown({
                   className="w-2 h-2 rounded-full shrink-0"
                   style={{ backgroundColor: item.color || "var(--muted-foreground)" }}
                 />
-                <span className="truncate">{item.name}</span>
+                <span className="truncate">
+                  {item.name}
+                  {item.description && (
+                    <span className="text-muted-foreground font-normal ml-1">{item.description}</span>
+                  )}
+                </span>
               </button>
             );
           })}
