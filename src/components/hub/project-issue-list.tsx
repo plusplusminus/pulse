@@ -539,7 +539,7 @@ export function ProjectIssueList({
 
       {/* Content area */}
       {viewMode === "kanban" ? (
-        <div className="flex-1 overflow-x-auto overflow-y-auto p-4">
+        <div className="flex-1 overflow-x-auto overflow-y-auto px-4 pb-4">
           <HubKanban issues={sorted} groupBy={groupBy} onIssueClick={setSelectedIssueId} />
         </div>
       ) : (
