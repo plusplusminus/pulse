@@ -8,6 +8,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { proxyLinearUrl, isLinearCdnUrl, getFileIcon } from "@/lib/image-proxy";
+import { LinearDocEmbed, extractLinearDocSlug } from "./linear-doc-embed";
 import { CommentComposer } from "./comment-composer";
 import { AdminLinearConnectBanner } from "./admin-linear-connect-banner";
 import { LabelEditor } from "./label-editor";
@@ -139,12 +140,18 @@ function MarkdownImage({
   );
 }
 
-export function useMarkdownComponents(onImageClick: (src: string, alt?: string) => void): Components {
+export function useMarkdownComponents(onImageClick: (src: string, alt?: string) => void, hubId?: string): Components {
   return useMemo(() => ({
     img: (props: React.ComponentPropsWithoutRef<"img">) => (
       <MarkdownImage {...props} onImageClick={onImageClick} />
     ),
     a: ({ href, children, ...props }: React.ComponentPropsWithoutRef<"a">) => {
+      // Linear document embeds
+      if (href && hubId && extractLinearDocSlug(href)) {
+        const linkText = typeof children === "string" ? children.trim() : "Document";
+        return <LinearDocEmbed href={href} hubId={hubId} linkText={linkText} />;
+      }
+
       // Detect file attachment links (Supabase storage or Linear CDN)
       const isAttachment = href && (href.includes("comment-attachments/") || isLinearCdnUrl(href));
       if (isAttachment) {
@@ -181,7 +188,7 @@ export function useMarkdownComponents(onImageClick: (src: string, alt?: string) 
         </a>
       );
     },
-  }), [onImageClick]);
+  }), [onImageClick, hubId]);
 }
 
 export function IssueDetailPanel({
@@ -218,7 +225,7 @@ export function IssueDetailPanel({
   const [linkCopied, setLinkCopied] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const mdComponents = useMarkdownComponents((src, alt) => setLightboxImage({ src, alt }));
+  const mdComponents = useMarkdownComponents((src, alt) => setLightboxImage({ src, alt }), hubId);
 
   // Track whether panel is being explicitly closed to avoid URL-driven reopen
   const [closing, setClosing] = useState(false);
