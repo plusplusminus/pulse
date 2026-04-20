@@ -62,15 +62,35 @@ type GroupBy = "status" | "label";
 type SortField = "priority" | "dueDate" | "createdAt";
 type SortDir = "asc" | "desc";
 
-// Status type ordering for grouping
-const STATUS_ORDER: Record<string, number> = {
-  triage: 0,
-  backlog: 1,
-  unstarted: 2,
-  started: 3,
-  completed: 4,
-  cancelled: 5,
+// Status name ordering for grouping. Explicit names take priority;
+// anything not listed falls back to type-based ordering.
+const STATUS_NAME_ORDER: Record<string, number> = {
+  "In Progress": 1,
+  "Today": 2,
+  "Blocked": 3,
+  "Todo": 4,
+  "In Review": 5,
+  "Staging Review": 6,
+  "Prod Review": 7,
+  "Awaiting Feedback": 8,
+  "Backlog": 9,
+  "Done": 10,
+  "Cancelled": 11,
+  "Duplicate": 12,
 };
+
+const STATUS_TYPE_ORDER: Record<string, number> = {
+  started: 20,
+  unstarted: 30,
+  backlog: 40,
+  triage: 50,
+  completed: 60,
+  cancelled: 70,
+};
+
+function statusSortOrder(name: string, type?: string): number {
+  return STATUS_NAME_ORDER[name] ?? STATUS_TYPE_ORDER[type ?? ""] ?? 99;
+}
 
 export function ProjectIssueList({
   issues: initialIssues,
@@ -291,9 +311,7 @@ export function ProjectIssueList({
     }
 
     return Array.from(map.entries()).sort(([, a], [, b]) => {
-      const oa = STATUS_ORDER[a.statusType ?? ""] ?? 1;
-      const ob = STATUS_ORDER[b.statusType ?? ""] ?? 1;
-      return oa - ob;
+      return statusSortOrder(a.label, a.statusType) - statusSortOrder(b.label, b.statusType);
     });
   }, [sorted, groupBy]);
 
