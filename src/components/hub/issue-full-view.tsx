@@ -52,7 +52,7 @@ export function IssueFullView({
   const [linkCopied, setLinkCopied] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const mdComponents = useMarkdownComponents((src, alt) => setLightboxImage({ src, alt }));
+  const mdComponents = useMarkdownComponents((src, alt) => setLightboxImage({ src, alt }), hubId);
 
   // Fetch issue data
   useEffect(() => {
