@@ -87,7 +87,7 @@ export function ProjectIssueList({
   issues: Issue[];
   states: Array<{ id: string; name: string; color: string; type: string }>;
   labels: Array<{ id: string; name: string; color: string }>;
-  cycles?: Array<{ id: string; name: string; number: number }>;
+  cycles?: Array<{ id: string; name: string; number: number; startsAt?: string | null; endsAt?: string | null }>;
   hubSlug: string;
   teamKey: string;
   teamId: string;
@@ -505,7 +505,11 @@ export function ProjectIssueList({
           {/* Cycle filter */}
           {cycles && cycles.length > 0 && (
             <CheckboxFilterDropdown
-              items={cycles.map((c) => ({ id: c.id, name: c.name || `Cycle ${c.number}` }))}
+              items={cycles.map((c) => ({
+                id: c.id,
+                name: c.name || `Cycle ${c.number}`,
+                description: formatCycleDateRange(c.startsAt, c.endsAt),
+              }))}
               selected={filters.cycleIds}
               onChange={(next) => updateFilters({ ...filters, cycleIds: next })}
               label="Cycle"
@@ -731,4 +735,14 @@ function priorityLabel(p: number): string {
 function formatShortDate(dateStr: string): string {
   const d = new Date(dateStr);
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function formatCycleDateRange(
+  startsAt?: string | null,
+  endsAt?: string | null
+): string | undefined {
+  if (!startsAt || !endsAt) return undefined;
+  const fmt = (s: string) =>
+    new Date(s).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return `${fmt(startsAt)} – ${fmt(endsAt)}`;
 }

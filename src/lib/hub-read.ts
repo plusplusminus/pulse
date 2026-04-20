@@ -1385,7 +1385,7 @@ export async function fetchHubMetadata(
 
   const statesMap = new Map<string, { id: string; name: string; color: string; type: string }>();
   const labelsMap = new Map<string, { id: string; name: string; color: string }>();
-  const cyclesMap = new Map<string, { id: string; name: string; number: number }>();
+  const cyclesMap = new Map<string, { id: string; name: string; number: number; startsAt: string | null; endsAt: string | null }>();
 
   // For scoping cycle extraction to only visible issues
   const metaAllowedProjectIds = mergeProjectVisibility(mappings);
@@ -1435,15 +1435,35 @@ export async function fetchHubMetadata(
       const projectVisible = pid
         ? (!metaAllowedProjectIds || metaAllowedProjectIds.includes(pid)) && !metaOverviewOnlyIds.has(pid)
         : metaIncludeUnassigned;
-      if (projectVisible) {
+      if (projectVisible && !cyclesMap.has(cycle.id)) {
         cyclesMap.set(cycle.id, {
           id: cycle.id,
           name: cycle.name ?? "",
           number: cycle.number ?? 0,
+          startsAt: null,
+          endsAt: null,
         });
       }
     }
     // No assignees — intentionally omitted for client hub view
+  }
+
+  // Enrich cycles with date ranges from synced_cycles
+  const cycleIds = Array.from(cyclesMap.keys());
+  if (cycleIds.length > 0) {
+    const { data: cycleRows } = await supabaseAdmin
+      .from("synced_cycles")
+      .select("linear_id, data")
+      .in("linear_id", cycleIds);
+
+    for (const row of cycleRows ?? []) {
+      const d = row.data as Record<string, unknown>;
+      const entry = cyclesMap.get(row.linear_id as string);
+      if (entry) {
+        entry.startsAt = (d.startsAt as string) ?? null;
+        entry.endsAt = (d.endsAt as string) ?? null;
+      }
+    }
   }
 
   return {
