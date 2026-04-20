@@ -61,7 +61,7 @@ export function CheckboxFilterDropdown({
       </button>
 
       {open && (
-        <div className="absolute top-full left-0 mt-1 z-50 w-56 max-h-64 overflow-y-auto rounded-md border border-border bg-popover shadow-md py-1">
+        <div className="absolute top-full left-0 mt-1 z-50 w-fit min-w-56 max-h-64 overflow-y-auto rounded-md border border-border bg-popover shadow-md py-1 whitespace-nowrap">
           {items.map((item) => {
             const isSelected = selected.includes(item.id);
             return (
