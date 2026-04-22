@@ -67,6 +67,7 @@ type ProjectData = {
   lead?: { id?: string; name?: string };
   labels?: Array<{ id: string; name: string; color: string }>;
   teams?: Array<{ id: string; name: string; key: string }>;
+  teamIds?: string[];
   initiatives?: Array<{ id: string; name: string }>;
   milestones?: Array<{ id: string; name: string; targetDate?: string }>;
   links?: Array<{ id: string; label: string; url: string; createdAt: string }>;
@@ -255,7 +256,11 @@ export function mapRowToProject(row: {
       ? { id: d.lead.id ?? "", name: d.lead.name ?? "" }
       : undefined,
     labels: Array.isArray(d.labels) ? d.labels : [],
-    teams: Array.isArray(d.teams) ? d.teams : [],
+    teams: Array.isArray(d.teams)
+      ? d.teams
+      : Array.isArray(d.teamIds)
+        ? d.teamIds.map((id) => ({ id, name: "", key: "" }))
+        : [],
     initiatives: Array.isArray(d.initiatives) ? d.initiatives : [],
     milestones: Array.isArray(d.milestones) ? d.milestones : [],
     links: Array.isArray(d.links) ? d.links : [],
@@ -1015,11 +1020,14 @@ export async function fetchHubTeamStats(hubId: string) {
     if (allowedProjectIds && !allowedProjectIds.includes(proj.linear_id)) continue;
     const d = proj.data as Record<string, unknown>;
     const projTeams = d.teams as Array<{ id: string }> | undefined;
-    if (Array.isArray(projTeams)) {
-      for (const pt of projTeams) {
-        const teamStat = stats.get(pt.id);
-        if (teamStat) teamStat.projectCount++;
-      }
+    const projTeamIds = Array.isArray(projTeams)
+      ? projTeams.map((t) => t.id)
+      : Array.isArray(d.teamIds)
+        ? (d.teamIds as string[])
+        : [];
+    for (const tid of projTeamIds) {
+      const teamStat = stats.get(tid);
+      if (teamStat) teamStat.projectCount++;
     }
   }
 

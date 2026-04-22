@@ -34,13 +34,20 @@ export async function GET(
       );
     }
 
-    // Filter projects that belong to the given team
+    // Filter projects that belong to the given team.
+    // Two shapes exist in synced_projects.data:
+    //   - Initial-sync / reconcile: data.teams = [{id, name, key}, ...]
+    //   - Webhook-created rows:     data.teamIds = ["<uuid>", ...]
+    // We check both so newly-created projects appear before reconcile runs.
     const filtered = (projects ?? []).filter((p) => {
       const data = p.data as Record<string, unknown>;
       if (Array.isArray(data?.teams)) {
         return (data.teams as Array<{ id?: string }>).some(
           (t) => t.id === teamId
         );
+      }
+      if (Array.isArray(data?.teamIds)) {
+        return (data.teamIds as string[]).includes(teamId);
       }
       if (data?.team && typeof data.team === "object") {
         return (data.team as { id?: string }).id === teamId;
