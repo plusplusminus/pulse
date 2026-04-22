@@ -86,6 +86,10 @@ function extractTeamId(type: string, data: Record<string, unknown>): string | nu
       return team?.id ?? null;
     }
     case "Project": {
+      // Webhook payloads: data.teamIds (string[]).
+      // Initial-sync / reconcile payloads: data.teams ([{ id, name, key }, ...]).
+      const teamIds = data.teamIds as string[] | undefined;
+      if (Array.isArray(teamIds) && teamIds.length > 0) return teamIds[0];
       const teams = data.teams as Array<{ id: string }> | undefined;
       return teams?.[0]?.id ?? null;
     }
@@ -625,7 +629,17 @@ export async function emitNotificationEventsForWebhook(
     if (!result) return;
 
     const teamId = extractTeamId(type, data);
-    const teamKey = extractTeamKey(type, data);
+    let teamKey = extractTeamKey(type, data);
+    // Project webhook payloads only include teamIds (UUIDs, no key). Resolve
+    // the key from synced_teams so downstream deep-links have the team prefix.
+    if (!teamKey && teamId) {
+      const { data: team } = await supabaseAdmin
+        .from("synced_teams")
+        .select("key")
+        .eq("linear_id", teamId)
+        .maybeSingle();
+      teamKey = team?.key ?? null;
+    }
     const entityId = (data.id as string) ?? "unknown";
     const actorName = result.actorName ?? extractActorName(data);
 
