@@ -1,5 +1,9 @@
 import crypto from "crypto";
 import { supabaseAdmin } from "./supabase";
+import {
+  issueContextFromData,
+  attachPulseLinksOnCreate,
+} from "./attachment-sync";
 
 // -- Signature verification --------------------------------------------------
 
@@ -179,6 +183,11 @@ export async function handleIssueEvent(
   if (error) {
     console.error("Failed to upsert synced_issue:", error);
     throw error;
+  }
+
+  if (action === "create") {
+    const ctx = await issueContextFromData(data);
+    if (ctx) void attachPulseLinksOnCreate(ctx);
   }
 }
 
