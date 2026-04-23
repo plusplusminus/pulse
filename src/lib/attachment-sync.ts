@@ -36,7 +36,15 @@ const ATTACHMENT_CREATE_MUTATION = `
   }
 `;
 
-async function linearMutation<T>(
+const ISSUE_ATTACHMENTS_QUERY = `
+  query IssueAttachments($id: String!) {
+    issue(id: $id) {
+      attachments { nodes { id url } }
+    }
+  }
+`;
+
+async function linearGraphQL<T>(
   query: string,
   variables: Record<string, unknown>
 ): Promise<T | null> {
@@ -60,7 +68,7 @@ async function linearMutation<T>(
     }
     return json.data ?? null;
   } catch (err) {
-    console.error("[attachment-sync] Linear mutation failed:", err);
+    console.error("[attachment-sync] Linear request failed:", err);
     return null;
   }
 }
@@ -120,22 +128,38 @@ export async function issueContextFromData(
 }
 
 /**
- * Create a "View in Pulse" Linear attachment on a newly-created issue for
- * every hub that the issue is currently visible in.
- *
- * Applies the same visibility rules as the hub UI: the issue's project must
- * be visible and not overview-only, and the issue must not carry any of the
- * hub's configured hidden labels.
+ * Load an IssueContext for a Linear issue id by reading the latest
+ * synced_issues row. Returns null if we have no record of the issue or
+ * can't resolve a team key.
+ */
+export async function loadIssueContext(
+  issueLinearId: string
+): Promise<IssueContext | null> {
+  const { data } = await supabaseAdmin
+    .from("synced_issues")
+    .select("data")
+    .eq("linear_id", issueLinearId)
+    .maybeSingle();
+  if (!data?.data) return null;
+  return issueContextFromData(data.data as Record<string, unknown>);
+}
+
+/**
+ * Ensure the issue has a "View in Pulse" attachment for every hub that
+ * the issue is visible in. Skips hubs that already have an attachment
+ * pointing to the Pulse URL, so this is safe to call repeatedly.
  *
  * Fire-and-forget: swallows errors so the caller is never affected.
- * Scope is create-only — we don't track which attachments we made, so we
- * can't remove or update them later if visibility changes.
  */
-export async function attachPulseLinksOnCreate(
+export async function ensurePulseAttachmentsForIssue(
   issue: IssueContext
 ): Promise<void> {
   try {
     const hubs = await getHubsForTeam(issue.teamId);
+    if (hubs.length === 0) return;
+
+    // Find which qualifying hubs don't yet have our attachment.
+    const needed: Array<{ hub: (typeof hubs)[number]; url: string; title: string }> = [];
 
     for (const hub of hubs) {
       if (issue.projectId) {
@@ -155,17 +179,30 @@ export async function attachPulseLinksOnCreate(
         );
         if (hidden) continue;
       }
-
       const url = buildPulseIssueUrl(hub.slug, issue.teamKey, issue.linearId);
-      const title = `View in Pulse — ${hub.name}`;
+      needed.push({ hub, url, title: `View in Pulse — ${hub.name}` });
+    }
 
-      await linearMutation(ATTACHMENT_CREATE_MUTATION, {
+    if (needed.length === 0) return;
+
+    // Fetch existing attachments once and skip any hub whose URL is already present.
+    const existing = await linearGraphQL<{
+      issue?: { attachments?: { nodes?: Array<{ id: string; url: string }> } };
+    }>(ISSUE_ATTACHMENTS_QUERY, { id: issue.linearId });
+
+    const existingUrls = new Set(
+      existing?.issue?.attachments?.nodes?.map((n) => n.url) ?? []
+    );
+
+    for (const { url, title } of needed) {
+      if (existingUrls.has(url)) continue;
+      await linearGraphQL(ATTACHMENT_CREATE_MUTATION, {
         issueId: issue.linearId,
         url,
         title,
       });
     }
   } catch (err) {
-    console.error("[attachPulseLinksOnCreate] unexpected error:", err);
+    console.error("[ensurePulseAttachmentsForIssue] unexpected error:", err);
   }
 }
