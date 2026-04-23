@@ -2,8 +2,7 @@ import crypto from "crypto";
 import { supabaseAdmin } from "./supabase";
 import {
   issueContextFromData,
-  syncIssueAttachments,
-  removeAllAttachmentsForIssue,
+  attachPulseLinksOnCreate,
 } from "./attachment-sync";
 
 // -- Signature verification --------------------------------------------------
@@ -172,7 +171,6 @@ export async function handleIssueEvent(
       .delete()
       .eq("user_id", userId)
       .eq("linear_id", issue.id);
-    void removeAllAttachmentsForIssue(issue.id);
     return;
   }
 
@@ -187,8 +185,10 @@ export async function handleIssueEvent(
     throw error;
   }
 
-  const ctx = await issueContextFromData(data);
-  if (ctx) void syncIssueAttachments(ctx);
+  if (action === "create") {
+    const ctx = await issueContextFromData(data);
+    if (ctx) void attachPulseLinksOnCreate(ctx);
+  }
 }
 
 // -- Comment event handler ---------------------------------------------------

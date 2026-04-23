@@ -19,7 +19,11 @@ function getAppUrl(): string {
   return "http://localhost:3000";
 }
 
-function buildPulseIssueUrl(hubSlug: string, teamKey: string, issueLinearId: string): string {
+function buildPulseIssueUrl(
+  hubSlug: string,
+  teamKey: string,
+  issueLinearId: string
+): string {
   return `${getAppUrl()}/hub/${hubSlug}/${teamKey}?issue=${issueLinearId}`;
 }
 
@@ -29,12 +33,6 @@ const ATTACHMENT_CREATE_MUTATION = `
       success
       attachment { id }
     }
-  }
-`;
-
-const ATTACHMENT_DELETE_MUTATION = `
-  mutation AttachmentDelete($id: String!) {
-    attachmentDelete(id: $id) { success }
   }
 `;
 
@@ -77,11 +75,11 @@ export type IssueContext = {
 
 /**
  * Extract an IssueContext from a raw webhook payload or synced_issues.data blob.
- * Returns null if the payload is missing fields we can't recover.
+ * Returns null if we can't determine the team key (required for the Pulse URL).
  *
- * Webhook payloads provide `teamId` (string); initial-sync blobs provide
- * `team: {id, key}`. We resolve the team key from synced_teams when the
- * webhook-shape payload doesn't carry it.
+ * Webhook payloads carry `teamId` (string); initial-sync blobs carry
+ * `team: {id, key}`. When the webhook shape lacks `team.key`, resolve it from
+ * `synced_teams` by ID.
  */
 export async function issueContextFromData(
   data: Record<string, unknown>
@@ -122,17 +120,23 @@ export async function issueContextFromData(
 }
 
 /**
- * Reconcile Linear attachments for a single issue so that there is exactly
- * one attachment per hub the issue is visible in. Creates missing attachments
- * and removes any that no longer qualify.
+ * Create a "View in Pulse" Linear attachment on a newly-created issue for
+ * every hub that the issue is currently visible in.
  *
- * Fire-and-forget: swallows errors so a failure here never affects the caller.
+ * Applies the same visibility rules as the hub UI: the issue's project must
+ * be visible and not overview-only, and the issue must not carry any of the
+ * hub's configured hidden labels.
+ *
+ * Fire-and-forget: swallows errors so the caller is never affected.
+ * Scope is create-only — we don't track which attachments we made, so we
+ * can't remove or update them later if visibility changes.
  */
-export async function syncIssueAttachments(issue: IssueContext): Promise<void> {
+export async function attachPulseLinksOnCreate(
+  issue: IssueContext
+): Promise<void> {
   try {
     const hubs = await getHubsForTeam(issue.teamId);
 
-    const qualifyingHubIds = new Set<string>();
     for (const hub of hubs) {
       if (issue.projectId) {
         const visible = await isProjectVisibleToHub(hub.id, issue.projectId);
@@ -151,93 +155,17 @@ export async function syncIssueAttachments(issue: IssueContext): Promise<void> {
         );
         if (hidden) continue;
       }
-      qualifyingHubIds.add(hub.id);
-    }
-
-    const { data: existing } = await supabaseAdmin
-      .from("hub_issue_attachments")
-      .select("hub_id, linear_attachment_id")
-      .eq("issue_linear_id", issue.linearId);
-
-    const existingByHub = new Map<string, string>(
-      (existing ?? []).map((r) => [
-        r.hub_id as string,
-        r.linear_attachment_id as string,
-      ])
-    );
-
-    // Remove attachments for hubs that no longer qualify.
-    for (const [hubId, attachmentId] of existingByHub) {
-      if (qualifyingHubIds.has(hubId)) continue;
-      const result = await linearMutation<{
-        attachmentDelete?: { success?: boolean };
-      }>(ATTACHMENT_DELETE_MUTATION, { id: attachmentId });
-      if (result?.attachmentDelete?.success) {
-        await supabaseAdmin
-          .from("hub_issue_attachments")
-          .delete()
-          .eq("issue_linear_id", issue.linearId)
-          .eq("hub_id", hubId);
-      }
-    }
-
-    // Create attachments for qualifying hubs that don't already have one.
-    for (const hub of hubs) {
-      if (!qualifyingHubIds.has(hub.id)) continue;
-      if (existingByHub.has(hub.id)) continue;
 
       const url = buildPulseIssueUrl(hub.slug, issue.teamKey, issue.linearId);
       const title = `View in Pulse — ${hub.name}`;
 
-      const result = await linearMutation<{
-        attachmentCreate?: { success?: boolean; attachment?: { id: string } };
-      }>(ATTACHMENT_CREATE_MUTATION, {
+      await linearMutation(ATTACHMENT_CREATE_MUTATION, {
         issueId: issue.linearId,
         url,
         title,
       });
-      const attachmentId = result?.attachmentCreate?.attachment?.id;
-      if (!attachmentId) continue;
-
-      await supabaseAdmin.from("hub_issue_attachments").upsert(
-        {
-          issue_linear_id: issue.linearId,
-          hub_id: hub.id,
-          linear_attachment_id: attachmentId,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "issue_linear_id,hub_id" }
-      );
     }
   } catch (err) {
-    console.error("[syncIssueAttachments] unexpected error:", err);
-  }
-}
-
-/**
- * Remove every Pulse-created attachment for an issue — used when the issue
- * itself is deleted from Linear.
- */
-export async function removeAllAttachmentsForIssue(
-  issueLinearId: string
-): Promise<void> {
-  try {
-    const { data: rows } = await supabaseAdmin
-      .from("hub_issue_attachments")
-      .select("linear_attachment_id")
-      .eq("issue_linear_id", issueLinearId);
-
-    for (const row of rows ?? []) {
-      await linearMutation(ATTACHMENT_DELETE_MUTATION, {
-        id: row.linear_attachment_id as string,
-      });
-    }
-
-    await supabaseAdmin
-      .from("hub_issue_attachments")
-      .delete()
-      .eq("issue_linear_id", issueLinearId);
-  } catch (err) {
-    console.error("[removeAllAttachmentsForIssue] error:", err);
+    console.error("[attachPulseLinksOnCreate] unexpected error:", err);
   }
 }
