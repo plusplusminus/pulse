@@ -2,7 +2,8 @@ import crypto from "crypto";
 import { supabaseAdmin } from "./supabase";
 import {
   issueContextFromData,
-  attachPulseLinksOnCreate,
+  loadIssueContext,
+  ensurePulseAttachmentsForIssue,
 } from "./attachment-sync";
 
 // -- Signature verification --------------------------------------------------
@@ -187,7 +188,7 @@ export async function handleIssueEvent(
 
   if (action === "create") {
     const ctx = await issueContextFromData(data);
-    if (ctx) void attachPulseLinksOnCreate(ctx);
+    if (ctx) void ensurePulseAttachmentsForIssue(ctx);
   }
 }
 
@@ -218,6 +219,14 @@ export async function handleCommentEvent(
   if (error) {
     console.error("Failed to upsert synced_comment:", error);
     throw error;
+  }
+
+  if (action === "create") {
+    const issueId = (comment.issue as { id?: string } | undefined)?.id;
+    if (issueId) {
+      const ctx = await loadIssueContext(issueId);
+      if (ctx) void ensurePulseAttachmentsForIssue(ctx);
+    }
   }
 }
 
