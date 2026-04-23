@@ -1,5 +1,10 @@
 import crypto from "crypto";
 import { supabaseAdmin } from "./supabase";
+import {
+  issueContextFromData,
+  syncIssueAttachments,
+  removeAllAttachmentsForIssue,
+} from "./attachment-sync";
 
 // -- Signature verification --------------------------------------------------
 
@@ -167,6 +172,7 @@ export async function handleIssueEvent(
       .delete()
       .eq("user_id", userId)
       .eq("linear_id", issue.id);
+    void removeAllAttachmentsForIssue(issue.id);
     return;
   }
 
@@ -180,6 +186,9 @@ export async function handleIssueEvent(
     console.error("Failed to upsert synced_issue:", error);
     throw error;
   }
+
+  const ctx = await issueContextFromData(data);
+  if (ctx) void syncIssueAttachments(ctx);
 }
 
 // -- Comment event handler ---------------------------------------------------
