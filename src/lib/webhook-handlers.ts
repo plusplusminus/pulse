@@ -5,6 +5,8 @@ import {
   loadIssueContext,
   ensurePulseAttachmentsForIssue,
 } from "./attachment-sync";
+import { isClientFacing } from "./hub-read";
+import { reactPulseOnComment } from "./pulse-reaction";
 
 // -- Signature verification --------------------------------------------------
 
@@ -226,6 +228,12 @@ export async function handleCommentEvent(
     if (issueId) {
       const ctx = await loadIssueContext(issueId);
       if (ctx) void ensurePulseAttachmentsForIssue(ctx);
+    }
+
+    // Confirm client-facing Linear comments made it into Pulse by adding
+    // the :pulse: reaction on the original Linear comment.
+    if (comment.body && isClientFacing(comment.body)) {
+      void reactPulseOnComment(comment.id);
     }
   }
 }
