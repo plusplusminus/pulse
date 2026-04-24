@@ -78,6 +78,63 @@ async function resolveWriteToken(
 
 // -- Comment mutations ────────────────────────────────────────────────────────
 
+const PULSE_REACTION_EMOJI = "pulse";
+
+const REACTION_CREATE_MUTATION = `
+  mutation ReactionCreate($commentId: String!, $emoji: String!) {
+    reactionCreate(input: { commentId: $commentId, emoji: $emoji }) {
+      success
+    }
+  }
+`;
+
+/**
+ * Add a :pulse: reaction to a Linear comment so Pulse-originated comments
+ * are visually distinguishable from native Linear comments. Uses the same
+ * token that just posted the comment (so attribution matches).
+ *
+ * Fail-soft: any error here is logged and swallowed — the caller has already
+ * succeeded in posting the comment itself.
+ */
+async function addPulseReaction(
+  commentId: string,
+  token: string,
+  rateLimiter?: LinearRateLimiter
+): Promise<void> {
+  if (rateLimiter && !rateLimiter.canProceed()) return;
+  try {
+    const res = await fetch(LINEAR_API, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: linearAuthHeader(token.trim()),
+      },
+      body: JSON.stringify({
+        query: REACTION_CREATE_MUTATION,
+        variables: { commentId, emoji: PULSE_REACTION_EMOJI },
+      }),
+    });
+    if (rateLimiter) rateLimiter.updateFromResponse(res);
+    if (!res.ok) {
+      console.warn(
+        `[pulse-reaction] Linear API ${res.status}: ${await res.text()}`
+      );
+      return;
+    }
+    const json = (await res.json()) as {
+      errors?: Array<{ message: string }>;
+    };
+    if (json.errors) {
+      console.warn(
+        "[pulse-reaction] GraphQL errors:",
+        json.errors.map((e) => e.message).join(", ")
+      );
+    }
+  } catch (err) {
+    console.warn("[pulse-reaction] request failed:", err);
+  }
+}
+
 const COMMENT_CREATE_MUTATION = `
   mutation CommentCreate($issueId: String!, $body: String!, $parentId: String, $createAsUser: String, $displayIconUrl: String) {
     commentCreate(input: { issueId: $issueId, body: $body, parentId: $parentId, createAsUser: $createAsUser, displayIconUrl: $displayIconUrl }) {
@@ -202,7 +259,9 @@ export async function pushCommentToLinear(
       throw new Error("Linear commentCreate returned unsuccessful");
     }
 
-    return json.data.commentCreate.comment.id;
+    const commentId = json.data.commentCreate.comment.id;
+    await addPulseReaction(commentId, token, rateLimiter);
+    return commentId;
   }
 
   throw new Error("Linear rate limit: max retries exceeded");
