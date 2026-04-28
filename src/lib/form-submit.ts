@@ -1,10 +1,11 @@
 import { supabaseAdmin, type FormField, type FormSubmission } from "./supabase";
-import { createIssueInLinear } from "./linear-push";
+import { createIssueInLinear, updateIssueTitle } from "./linear-push";
 import {
   fetchFormWithFields,
   fetchHubFormConfig,
 } from "./form-read";
 import { logSyncEvent } from "./sync-logger";
+import { applyEmojiToTitle, classifyIssueEmoji } from "./issue-emoji";
 
 // -- Types ────────────────────────────────────────────────────────────────────
 
@@ -135,6 +136,38 @@ export function buildIssueDescription(
   }
 
   return parts.join("\n\n");
+}
+
+// -- Emoji reconciliation ────────────────────────────────────────────────────
+
+/**
+ * After an issue is created, classify it by labels + priority and prepend
+ * the appropriate emoji to its title (if any). Returns the final title that
+ * should be persisted to `form_submissions.derived_title`.
+ *
+ * Idempotent: applying the same emoji twice is a no-op, both for the title
+ * string itself and for the Linear API call (skipped when nothing changes).
+ */
+async function reconcileEmojiOnCreate(issue: {
+  id: string;
+  title: string;
+  priority: number;
+  labels: Array<{ id: string; name: string; color: string }>;
+}): Promise<string> {
+  const newEmoji = classifyIssueEmoji(issue.labels, issue.priority);
+  const finalTitle = applyEmojiToTitle(issue.title, newEmoji);
+  if (finalTitle !== issue.title) {
+    try {
+      await updateIssueTitle(issue.id, finalTitle);
+    } catch (err) {
+      console.error(
+        `[issue-emoji] Failed to update title for ${issue.id}:`,
+        err
+      );
+      return issue.title;
+    }
+  }
+  return finalTitle;
 }
 
 // -- Submission pipeline ─────────────────────────────────────────────────────
@@ -284,6 +317,9 @@ export async function processFormSubmission(
       { authorName },
     );
 
+    // 6b. Apply emoji prefix based on labels + priority returned by Linear.
+    const finalTitle = await reconcileEmojiOnCreate(issue);
+
     // 7a. Success — update row
     await supabaseAdmin
       .from("form_submissions")
@@ -291,6 +327,7 @@ export async function processFormSubmission(
         sync_status: "synced",
         linear_issue_id: issue.id,
         linear_issue_identifier: issue.identifier,
+        derived_title: finalTitle,
         sync_attempted_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
@@ -437,12 +474,15 @@ export async function retrySubmission(
       { authorName: retryAuthorName },
     );
 
+    const finalTitle = await reconcileEmojiOnCreate(issue);
+
     await supabaseAdmin
       .from("form_submissions")
       .update({
         sync_status: "synced",
         linear_issue_id: issue.id,
         linear_issue_identifier: issue.identifier,
+        derived_title: finalTitle,
         sync_error: null,
         sync_attempted_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),

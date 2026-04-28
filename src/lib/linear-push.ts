@@ -289,6 +289,69 @@ export async function updateIssueLabels(
   return json.data.issueUpdate.issue?.labels?.nodes ?? [];
 }
 
+// -- Title updates ────────────────────────────────────────────────────────────
+
+const ISSUE_UPDATE_TITLE_MUTATION = `
+  mutation IssueUpdateTitle($issueId: String!, $title: String!) {
+    issueUpdate(id: $issueId, input: { title: $title }) {
+      success
+      issue {
+        id
+        title
+      }
+    }
+  }
+`;
+
+/**
+ * Update the title of a Linear issue. Used for the Pulse emoji-prefix
+ * reconciliation flow (see issue-emoji.ts).
+ */
+export async function updateIssueTitle(
+  issueLinearId: string,
+  title: string,
+  rateLimiter?: LinearRateLimiter
+): Promise<void> {
+  if (rateLimiter && !rateLimiter.canProceed()) {
+    throw new RateLimitDeferredError("updateIssueTitle deferred due to rate limit");
+  }
+
+  const token = await getWorkspaceToken();
+
+  const res = await fetch(LINEAR_API, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: linearAuthHeader(token.trim()),
+    },
+    body: JSON.stringify({
+      query: ISSUE_UPDATE_TITLE_MUTATION,
+      variables: { issueId: issueLinearId, title },
+    }),
+  });
+
+  if (rateLimiter) {
+    rateLimiter.updateFromResponse(res);
+  }
+
+  if (!res.ok) {
+    throw new Error(`Linear API ${res.status}: ${await res.text()}`);
+  }
+
+  const json = (await res.json()) as {
+    data?: { issueUpdate?: { success: boolean } };
+    errors?: Array<{ message: string }>;
+  };
+
+  if (json.errors) {
+    throw new Error(`GraphQL: ${json.errors.map((e) => e.message).join(", ")}`);
+  }
+
+  if (!json.data?.issueUpdate?.success) {
+    throw new Error("Linear issueUpdate returned unsuccessful");
+  }
+}
+
 // -- Issue creation ──────────────────────────────────────────────────────────
 
 const ISSUE_CREATE_MUTATION = `

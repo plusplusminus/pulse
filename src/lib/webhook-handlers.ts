@@ -7,6 +7,12 @@ import {
 } from "./attachment-sync";
 import { isClientFacing } from "./hub-read";
 import { reactPulseOnComment } from "./pulse-reaction";
+import { updateIssueTitle } from "./linear-push";
+import {
+  applyEmojiToTitle,
+  classifyIssueEmoji,
+  extractLeadingEmoji,
+} from "./issue-emoji";
 
 // -- Signature verification --------------------------------------------------
 
@@ -192,6 +198,67 @@ export async function handleIssueEvent(
     const ctx = await issueContextFromData(data);
     if (ctx) void ensurePulseAttachmentsForIssue(ctx);
   }
+
+  if (action === "update") {
+    void reconcileIssueEmojiOnUpdate(issue);
+  }
+}
+
+// -- Emoji reconciliation ---------------------------------------------------
+
+/**
+ * On issue update, recompute the expected leading emoji from labels + priority
+ * and update the title if it has drifted. No-op if nothing changed (which is
+ * also why our own title-update webhooks don't loop here).
+ */
+async function reconcileIssueEmojiOnUpdate(
+  issue: LinearIssueData
+): Promise<void> {
+  if (!issue.id || typeof issue.title !== "string") return;
+  const newEmoji = classifyIssueEmoji(issue.labels, issue.priority);
+  const newTitle = applyEmojiToTitle(issue.title, newEmoji);
+  if (newTitle === issue.title) return;
+  try {
+    await updateIssueTitle(issue.id, newTitle);
+  } catch (err) {
+    console.error(
+      `[issue-emoji] Failed to reconcile title for ${issue.id}:`,
+      err
+    );
+  }
+}
+
+/**
+ * On comment create, fill in the emoji prefix on the parent issue's title
+ * if it doesn't already have one. Never replaces an existing prefix —
+ * full reconciliation only runs on issue-update events.
+ */
+async function backfillIssueEmojiFromComment(issueId: string): Promise<void> {
+  const { data, error } = await supabaseAdmin
+    .from("synced_issues")
+    .select("data")
+    .eq("linear_id", issueId)
+    .maybeSingle();
+  if (error || !data?.data) return;
+
+  const issue = data.data as LinearIssueData;
+  if (!issue.id || typeof issue.title !== "string") return;
+
+  const { emoji: existing } = extractLeadingEmoji(issue.title);
+  if (existing) return;
+
+  const newEmoji = classifyIssueEmoji(issue.labels, issue.priority);
+  if (!newEmoji) return;
+
+  const newTitle = applyEmojiToTitle(issue.title, newEmoji);
+  try {
+    await updateIssueTitle(issue.id, newTitle);
+  } catch (err) {
+    console.error(
+      `[issue-emoji] Failed to backfill title for ${issueId}:`,
+      err
+    );
+  }
 }
 
 // -- Comment event handler ---------------------------------------------------
@@ -228,6 +295,7 @@ export async function handleCommentEvent(
     if (issueId) {
       const ctx = await loadIssueContext(issueId);
       if (ctx) void ensurePulseAttachmentsForIssue(ctx);
+      void backfillIssueEmojiFromComment(issueId);
     }
 
     // Confirm client-facing Linear comments made it into Pulse by adding
