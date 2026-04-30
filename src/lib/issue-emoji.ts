@@ -22,7 +22,6 @@ export const KNOWN_EMOJIS = [
 
 const BUG_LABELS = ["bug", "defect"];
 const FEATURE_LABELS = ["feature", "improvement"];
-const EMERGENCY_LABEL = "emergency sos";
 
 const PRIORITY_URGENT = 1;
 const PRIORITY_HIGH = 2;
@@ -31,12 +30,38 @@ const PRIORITY_LOW = 4;
 
 type LabelLike = { name?: string | null };
 
+/**
+ * Linear label names can be compound (e.g. "Bug / Defect", "Feature/Improvement")
+ * or simple ("Bug"). Split on slashes and commas so a compound name matches any
+ * of its constituent parts.
+ */
+function normalizeLabelName(name: string): string[] {
+  return name
+    .split(/[/,]/)
+    .map((part) => part.trim().toLowerCase())
+    .filter((s) => s.length > 0);
+}
+
 function hasLabel(labels: LabelLike[] | undefined, candidates: string[]): boolean {
   if (!labels?.length) return false;
-  const names = labels
-    .map((l) => l.name?.trim().toLowerCase())
-    .filter((n): n is string => !!n);
-  return candidates.some((c) => names.includes(c));
+  for (const label of labels) {
+    if (!label.name) continue;
+    const parts = normalizeLabelName(label.name);
+    if (parts.some((p) => candidates.includes(p))) return true;
+  }
+  return false;
+}
+
+/**
+ * Match the Emergency SoS label tolerantly — observed variants include
+ * "Emergency SoS" and "EMERGENCY SOS!!". Substring match on the lowercased
+ * name handles capitalisation, punctuation, and minor renames.
+ */
+function hasEmergencyLabel(labels: LabelLike[] | undefined): boolean {
+  if (!labels?.length) return false;
+  return labels.some(
+    (l) => !!l.name && l.name.toLowerCase().includes("emergency sos")
+  );
 }
 
 /**
@@ -52,7 +77,7 @@ export function classifyIssueEmoji(
   labels: LabelLike[] | undefined,
   priority: number | undefined
 ): string | null {
-  if (priority === PRIORITY_URGENT || hasLabel(labels, [EMERGENCY_LABEL])) {
+  if (priority === PRIORITY_URGENT || hasEmergencyLabel(labels)) {
     return URGENT_EMOJI;
   }
 

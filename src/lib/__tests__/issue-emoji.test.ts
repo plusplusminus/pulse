@@ -27,9 +27,11 @@ describe("classifyIssueEmoji", () => {
       expect(classifyIssueEmoji([{ name: "Emergency SoS" }], undefined)).toBe(URGENT_EMOJI);
     });
 
-    it("matches Emergency SoS case-insensitively", () => {
+    it("matches Emergency SoS case-insensitively and tolerates punctuation", () => {
       expect(classifyIssueEmoji([{ name: "emergency sos" }], 0)).toBe(URGENT_EMOJI);
       expect(classifyIssueEmoji([{ name: "EMERGENCY SOS" }], 0)).toBe(URGENT_EMOJI);
+      // Real-world variant in the workspace.
+      expect(classifyIssueEmoji([{ name: "EMERGENCY SOS!!" }], 0)).toBe(URGENT_EMOJI);
     });
   });
 
@@ -43,6 +45,20 @@ describe("classifyIssueEmoji", () => {
     it("treats Defect as bug", () => {
       expect(classifyIssueEmoji([{ name: "Defect" }], 2)).toBe(BUG_HIGH_EMOJI);
       expect(classifyIssueEmoji([{ name: "defect" }], 4)).toBe(BUG_LOW_EMOJI);
+    });
+
+    it('treats compound "Bug / Defect" label as bug', () => {
+      expect(classifyIssueEmoji([{ name: "Bug / Defect" }], 2)).toBe(BUG_HIGH_EMOJI);
+      expect(classifyIssueEmoji([{ name: "Bug/Defect" }], 3)).toBe(BUG_MEDIUM_EMOJI);
+      expect(classifyIssueEmoji([{ name: "bug / defect" }], 4)).toBe(BUG_LOW_EMOJI);
+    });
+
+    it('compound bug label takes precedence over Feature when both present', () => {
+      // Real-world case: SS-30 had labels [Feature, "Bug / Defect"] @ priority High,
+      // and was wrongly classified as Feature (🟣) before the split-name fix.
+      expect(
+        classifyIssueEmoji([{ name: "Feature" }, { name: "Bug / Defect" }], 2)
+      ).toBe(BUG_HIGH_EMOJI);
     });
 
     it("returns null when bug-labelled but priority is 0 (No priority)", () => {
