@@ -395,7 +395,16 @@ export function FormModal({
     if (field.is_hidden) return null;
 
     const hasError = validationErrors.has(field.field_key);
-    const value = fieldValues[field.field_key] || "";
+    const rawValue = fieldValues[field.field_key] || "";
+
+    // Urgent priority is admin-only (set via target_priority or hidden defaults).
+    // Strip it from any submitter-visible priority dropdown, and normalize a
+    // stale "1" out of the bound value so it can't round-trip on submit.
+    const isPriorityField = field.linear_field === "priority";
+    const visibleOptions = isPriorityField
+      ? field.options.filter((o) => o.value !== "1")
+      : field.options;
+    const value = isPriorityField && rawValue === "1" ? "" : rawValue;
 
     // Label field with linear_field mapping — render multi-select label picker
     if (field.linear_field === "label_ids") {
@@ -463,7 +472,7 @@ export function FormModal({
             <SelectValue placeholder={field.placeholder || "Select an option"} />
           </SelectTrigger>
           <SelectContent>
-            {field.options.map((opt) => (
+            {visibleOptions.map((opt) => (
               <SelectItem key={opt.value} value={opt.value}>
                 {opt.label}
               </SelectItem>
@@ -473,7 +482,7 @@ export function FormModal({
       ),
       radio: () => (
         <div className="space-y-2">
-          {field.options.map((opt) => (
+          {visibleOptions.map((opt) => (
             <label
               key={opt.value}
               className="flex items-center gap-2.5 text-sm cursor-pointer"

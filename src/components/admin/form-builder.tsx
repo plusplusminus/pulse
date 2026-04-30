@@ -716,7 +716,6 @@ export function FormBuilder({ form, hubId, hubTeams }: FormBuilderProps) {
                         is_hidden: false,
                         linear_field: "priority",
                         options: [
-                          { value: "1", label: "Urgent" },
                           { value: "2", label: "High" },
                           { value: "3", label: "Medium" },
                           { value: "4", label: "Low" },
