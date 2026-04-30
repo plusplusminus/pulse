@@ -1,7 +1,10 @@
 // Survey: which label names are actually in use in Pulse-tracked issues?
+// Survey: which label names are actually in use in Pulse-tracked issues?
+//
+// Usage (Node 20.6+):
+//   node --env-file=.env.local scripts/audit-labels.mjs
+
 import { createClient } from "@supabase/supabase-js";
-import { config } from "dotenv";
-config({ path: ".env.local" });
 
 const sb = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
