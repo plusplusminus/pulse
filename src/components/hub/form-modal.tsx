@@ -395,13 +395,16 @@ export function FormModal({
     if (field.is_hidden) return null;
 
     const hasError = validationErrors.has(field.field_key);
-    const value = fieldValues[field.field_key] || "";
+    const rawValue = fieldValues[field.field_key] || "";
 
     // Urgent priority is admin-only (set via target_priority or hidden defaults).
-    // Strip it from any submitter-visible priority dropdown.
-    const visibleOptions = field.linear_field === "priority"
+    // Strip it from any submitter-visible priority dropdown, and normalize a
+    // stale "1" out of the bound value so it can't round-trip on submit.
+    const isPriorityField = field.linear_field === "priority";
+    const visibleOptions = isPriorityField
       ? field.options.filter((o) => o.value !== "1")
       : field.options;
+    const value = isPriorityField && rawValue === "1" ? "" : rawValue;
 
     // Label field with linear_field mapping — render multi-select label picker
     if (field.linear_field === "label_ids") {
