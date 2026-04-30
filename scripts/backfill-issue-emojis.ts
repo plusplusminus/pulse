@@ -2,12 +2,9 @@
 // classifier in src/lib/issue-emoji.ts, and update the title in Linear when
 // it differs. Pass --apply to actually call Linear; default is dry-run.
 //
-// Usage:
-//   node scripts/backfill-issue-emojis.mjs           # dry-run
-//   node scripts/backfill-issue-emojis.mjs --apply   # update Linear titles
-
-import { config } from "dotenv";
-config({ path: ".env.local" });
+// Usage (Node 20.6+):
+//   node --env-file=.env.local --import tsx scripts/backfill-issue-emojis.ts
+//   node --env-file=.env.local --import tsx scripts/backfill-issue-emojis.ts --apply
 
 import { createClient } from "@supabase/supabase-js";
 import {
