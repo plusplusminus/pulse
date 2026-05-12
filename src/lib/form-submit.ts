@@ -12,6 +12,8 @@ import {
 import { logSyncEvent } from "./sync-logger";
 import { applyEmojiToTitle, classifyIssueEmoji } from "./issue-emoji";
 import { isImageMimeType, publicAttachmentUrl } from "./hub-upload";
+import { filterToAllowedLabelIds } from "./linear-label-validation";
+import * as Sentry from "@sentry/nextjs";
 
 const FORM_ATTACHMENTS_BUCKET = "form-attachments";
 
@@ -282,7 +284,26 @@ export async function processFormSubmission(
         .split(",")
         .filter(Boolean)
     : [];
-  const labelIds = [...new Set([...defaultLabelIds, ...userLabelIds])];
+  const requestedLabelIds = [...new Set([...defaultLabelIds, ...userLabelIds])];
+
+  // Defensive filter: drop label IDs Linear doesn't recognise for this team.
+  // One stale ID otherwise fails the whole `issueCreate` mutation
+  // (`Entity not found in validateAccess: labelIds`) and kills the submission.
+  // On Linear-lookup failure we keep the original list — better to attempt
+  // the call with possibly-stale IDs than to fail legitimate submissions
+  // because Linear is briefly unreachable.
+  const { allowed: labelIds, dropped: droppedLabelIds } =
+    await filterToAllowedLabelIds(teamId, requestedLabelIds);
+  if (droppedLabelIds.length > 0) {
+    Sentry.captureMessage(
+      "Form submission dropped stale label IDs",
+      {
+        level: "warning",
+        tags: { surface: "form-submission-labels" },
+        extra: { teamId, formId, hubId, droppedLabelIds, requestedLabelIds },
+      }
+    );
+  }
 
   // 3. Extract Linear-mapped field values
   const titleField = form.fields.find((f) => f.linear_field === "title");
@@ -397,9 +418,16 @@ export async function processFormSubmission(
       confirmationMessage,
     };
   } catch (err) {
-    // 7b. Failure — update row
+    // 7b. Failure — update row, log to Sentry, surface failure to caller.
+    // Catch-and-store keeps the submission retryable but used to hide every
+    // sync error from observability; capture it explicitly here.
     const syncError =
       err instanceof Error ? err.message : "Unknown error creating issue";
+
+    Sentry.captureException(err, {
+      tags: { surface: "form-submission-sync" },
+      extra: { submissionId, formId, hubId, teamId, labelIds, droppedLabelIds },
+    });
 
     await supabaseAdmin
       .from("form_submissions")
@@ -481,7 +509,30 @@ export async function retrySubmission(
     submission.hub_id,
     submission.form_id
   );
-  const labelIds = hubConfig?.target_label_ids ?? form.target_label_ids ?? [];
+  const requestedLabelIds =
+    hubConfig?.target_label_ids ?? form.target_label_ids ?? [];
+
+  // Same defensive filter as the initial submission path — strip label IDs
+  // Linear no longer recognises so one stale ID can't keep the retry failing.
+  const { allowed: labelIds, dropped: droppedLabelIds } =
+    await filterToAllowedLabelIds(teamId, requestedLabelIds);
+  if (droppedLabelIds.length > 0) {
+    Sentry.captureMessage(
+      "Form submission retry dropped stale label IDs",
+      {
+        level: "warning",
+        tags: { surface: "form-submission-retry-labels" },
+        extra: {
+          teamId,
+          formId: submission.form_id,
+          hubId: submission.hub_id,
+          submissionId,
+          droppedLabelIds,
+          requestedLabelIds,
+        },
+      }
+    );
+  }
 
   // Rebuild description from saved field values. Prefer the rich metadata
   // recorded by PULSE-349; fall back to attachment_paths for older rows that
@@ -564,6 +615,18 @@ export async function retrySubmission(
   } catch (err) {
     const syncError =
       err instanceof Error ? err.message : "Unknown error creating issue";
+
+    Sentry.captureException(err, {
+      tags: { surface: "form-submission-retry" },
+      extra: {
+        submissionId,
+        formId: submission.form_id,
+        hubId: submission.hub_id,
+        teamId,
+        labelIds,
+        droppedLabelIds,
+      },
+    });
 
     await supabaseAdmin
       .from("form_submissions")

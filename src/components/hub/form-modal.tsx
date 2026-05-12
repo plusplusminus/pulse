@@ -61,7 +61,7 @@ type FormData = {
   fields: FormField[];
 };
 
-type SubmitState = "idle" | "submitting" | "success" | "error";
+type SubmitState = "idle" | "submitting" | "success" | "partial" | "error";
 
 export function FormModal({
   formId,
@@ -414,6 +414,7 @@ export function FormModal({
       const data = (await res.json()) as {
         confirmationMessage?: string;
         errorMessage?: string;
+        syncStatus?: "synced" | "failed";
       };
 
       if (!res.ok) {
@@ -422,9 +423,24 @@ export function FormModal({
         return;
       }
 
-      setResponseMessage(data.confirmationMessage || form?.confirmation_message || "Submitted successfully");
-      setSubmitState("success");
-      captureEvent(POSTHOG_EVENTS.form_submitted, { formName: 'modal', formId, hubId });
+      // The submission row was saved, but Linear sync can still have failed.
+      // Surface that distinction to the user instead of a green checkmark.
+      if (data.syncStatus === "failed") {
+        setResponseMessage(
+          "We saved your submission, but we couldn't sync it to our task system right now. " +
+            "We'll keep retrying automatically — no action needed from you."
+        );
+        setSubmitState("partial");
+      } else {
+        setResponseMessage(data.confirmationMessage || form?.confirmation_message || "Submitted successfully");
+        setSubmitState("success");
+      }
+      captureEvent(POSTHOG_EVENTS.form_submitted, {
+        formName: 'modal',
+        formId,
+        hubId,
+        syncStatus: data.syncStatus ?? "synced",
+      });
       onSubmitted();
     } catch {
       setResponseMessage(form?.error_message || "Something went wrong");
@@ -736,16 +752,20 @@ export function FormModal({
     );
   };
 
-  // Success / Error result screens
-  if (submitState === "success" || submitState === "error") {
+  // Success / Partial / Error result screens
+  if (submitState === "success" || submitState === "partial" || submitState === "error") {
+    const headingByState = {
+      success: "Submitted",
+      partial: "Saved — sync pending",
+      error: "Error",
+    } as const;
+    const heading = headingByState[submitState];
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center">
         <div className="absolute inset-0 bg-black/50" onClick={onClose} />
         <div className="relative w-full max-w-lg rounded-lg border border-border bg-background shadow-lg mx-4">
           <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-            <h2 className="text-sm font-semibold text-foreground">
-              {submitState === "success" ? "Submitted" : "Error"}
-            </h2>
+            <h2 className="text-sm font-semibold text-foreground">{heading}</h2>
             <button
               onClick={onClose}
               className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
@@ -756,6 +776,8 @@ export function FormModal({
           <div className="px-5 py-8 flex flex-col items-center gap-3 text-center">
             {submitState === "success" ? (
               <CheckCircle2 className="w-8 h-8 text-green-500" />
+            ) : submitState === "partial" ? (
+              <AlertCircle className="w-8 h-8 text-amber-500" />
             ) : (
               <AlertCircle className="w-8 h-8 text-destructive" />
             )}

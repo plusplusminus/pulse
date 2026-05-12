@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { withAdminAuth } from "@/lib/admin-auth";
 import { supabaseAdmin } from "@/lib/supabase";
 import { fetchAllGlobalForms } from "@/lib/form-read";
+import { fetchAllowedTeamLabelIds } from "@/lib/linear-label-validation";
 
 /**
  * GET: List all global forms (active and inactive).
@@ -91,6 +92,28 @@ export async function POST(request: Request) {
         { error: "name is required" },
         { status: 400 }
       );
+    }
+
+    // Same save-time label validation as the PATCH route — keep stale IDs
+    // out of new form templates.
+    if (
+      Array.isArray(body.target_label_ids) &&
+      body.target_label_ids.length > 0 &&
+      body.target_team_id
+    ) {
+      const allowed = await fetchAllowedTeamLabelIds(body.target_team_id);
+      if (allowed) {
+        const invalid = body.target_label_ids.filter((id) => !allowed.has(id));
+        if (invalid.length > 0) {
+          return NextResponse.json(
+            {
+              error: `These label IDs no longer exist in Linear for the selected team: ${invalid.join(", ")}`,
+              invalidLabelIds: invalid,
+            },
+            { status: 400 }
+          );
+        }
+      }
     }
 
     if (!body.type || !["bug", "feature", "custom"].includes(body.type)) {
