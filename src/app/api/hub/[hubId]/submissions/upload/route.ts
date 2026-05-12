@@ -1,10 +1,17 @@
 import { NextResponse } from "next/server";
 import { withHubAuthWrite, type HubAuthError } from "@/lib/hub-auth";
 import { supabaseAdmin } from "@/lib/supabase";
+import {
+  publicAttachmentUrl,
+  sanitizeFilename,
+  validateUploadRequest,
+} from "@/lib/hub-upload";
+
+const BUCKET = "form-attachments";
 
 /**
  * POST: Get a signed upload URL for form attachments.
- * Only allows image/* content types.
+ * Allowed types and size limits are defined centrally in `lib/hub-upload.ts`.
  */
 export async function POST(
   request: Request,
@@ -21,33 +28,21 @@ export async function POST(
       );
     }
 
-    const body = (await request.json()) as {
-      filename?: string;
-      contentType?: string;
-    };
-
-    if (!body.filename || !body.contentType) {
+    const body = (await request.json()) as Record<string, unknown>;
+    const validated = validateUploadRequest(body);
+    if ("error" in validated) {
       return NextResponse.json(
-        { error: "filename and contentType are required" },
-        { status: 400 }
+        { error: validated.error },
+        { status: validated.status }
       );
     }
 
-    // Only allow images
-    if (!body.contentType.startsWith("image/")) {
-      return NextResponse.json(
-        { error: "Only image files are allowed" },
-        { status: 400 }
-      );
-    }
-
-    // Sanitize filename
-    const sanitized = body.filename.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const ext = sanitized.split(".").pop() || "png";
+    const sanitized = sanitizeFilename(validated.filename);
+    const ext = sanitized.split(".").pop() || "bin";
     const storagePath = `${hubId}/${crypto.randomUUID()}.${ext}`;
 
     const { data: signedData, error } = await supabaseAdmin.storage
-      .from("form-attachments")
+      .from(BUCKET)
       .createSignedUploadUrl(storagePath);
 
     if (error || !signedData) {
@@ -56,14 +51,17 @@ export async function POST(
       );
     }
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const publicUrl = `${supabaseUrl}/storage/v1/object/public/form-attachments/${storagePath}`;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!supabaseUrl) {
+      throw new Error("NEXT_PUBLIC_SUPABASE_URL is not configured");
+    }
 
     return NextResponse.json({
       signedUrl: signedData.signedUrl,
       storagePath,
-      publicUrl,
+      publicUrl: publicAttachmentUrl(supabaseUrl, BUCKET, storagePath),
       token: signedData.token,
+      maxSize: validated.maxSize,
     });
   } catch (error) {
     console.error(

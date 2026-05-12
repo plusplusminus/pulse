@@ -18,14 +18,30 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { X, Loader2, Upload, CheckCircle2, AlertCircle, Plus, Check, ChevronDown, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { FormField, FormFieldType } from "@/lib/supabase";
+import {
+  ACCEPT_ATTRIBUTE,
+  ALLOWED_MIME_TYPES,
+  IMAGE_MAX_SIZE,
+  OTHER_MAX_SIZE,
+  isImageMimeType,
+  maxSizeForMimeType,
+} from "@/lib/hub-upload";
+import { getFileIcon } from "@/lib/image-proxy";
 
 const MAX_FILES_PER_FIELD = 10;
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 type Attachment = {
   storagePath: string;
-  previewUrl: string;
+  previewUrl: string | null;
   fileName: string;
+  contentType: string;
+  fileSize: number;
 };
 
 type LinearLabel = {
@@ -95,7 +111,7 @@ export function FormModal({
     return () => {
       for (const fieldAttachments of Object.values(attachmentsRef.current)) {
         for (const att of fieldAttachments) {
-          URL.revokeObjectURL(att.previewUrl);
+          if (att.previewUrl) URL.revokeObjectURL(att.previewUrl);
         }
       }
     };
@@ -196,6 +212,7 @@ export function FormModal({
           body: JSON.stringify({
             filename: file.name,
             contentType: file.type,
+            fileSize: file.size,
           }),
         });
         if (!res.ok) throw new Error("Upload failed");
@@ -217,8 +234,12 @@ export function FormModal({
 
         return {
           storagePath,
-          previewUrl: URL.createObjectURL(file),
+          previewUrl: isImageMimeType(file.type)
+            ? URL.createObjectURL(file)
+            : null,
           fileName: file.name,
+          contentType: file.type,
+          fileSize: file.size,
         };
       } catch {
         return null;
@@ -234,33 +255,47 @@ export function FormModal({
       const remaining = MAX_FILES_PER_FIELD - existing.length;
 
       if (remaining <= 0) {
-        setFileErrors((prev) => ({ ...prev, [fieldKey]: `Maximum ${MAX_FILES_PER_FIELD} images allowed` }));
+        setFileErrors((prev) => ({ ...prev, [fieldKey]: `Maximum ${MAX_FILES_PER_FIELD} files allowed` }));
         return;
       }
 
-      // Pre-filter: reject oversized files before they consume upload slots
+      // Pre-filter: reject unsupported MIME types and oversized files before
+      // they consume upload slots. Per-type limits match the server-side
+      // allowlist in lib/hub-upload.ts.
       const allFiles = Array.from(files);
-      const oversized = allFiles.filter((f) => f.size > MAX_FILE_SIZE);
-      const validFiles = allFiles.filter((f) => f.size <= MAX_FILE_SIZE);
+      const rejected: string[] = [];
+      const validFiles: File[] = [];
 
-      if (oversized.length > 0) {
+      for (const f of allFiles) {
+        if (!ALLOWED_MIME_TYPES.has(f.type)) {
+          rejected.push(`"${f.name}" — unsupported file type`);
+          continue;
+        }
+        if (f.size > maxSizeForMimeType(f.type)) {
+          const limitMB = Math.round(maxSizeForMimeType(f.type) / 1024 / 1024);
+          rejected.push(`"${f.name}" — exceeds ${limitMB}MB limit`);
+          continue;
+        }
+        validFiles.push(f);
+      }
+
+      if (rejected.length > 0) {
         setFileErrors((prev) => ({
           ...prev,
-          [fieldKey]: `${oversized.length} file${oversized.length === 1 ? " was" : "s were"} over 10MB and skipped`,
+          [fieldKey]: rejected.length === 1
+            ? `Skipped ${rejected[0]}`
+            : `Skipped ${rejected.length} files (${rejected.join("; ")})`,
         }));
       }
 
       if (validFiles.length === 0) {
-        if (oversized.length === 0) {
-          setFileErrors((prev) => ({ ...prev, [fieldKey]: null }));
-        }
         return;
       }
 
       const filesToUpload = validFiles.slice(0, remaining);
       if (filesToUpload.length < validFiles.length) {
-        setFileErrors((prev) => ({ ...prev, [fieldKey]: `Only ${remaining} more image${remaining === 1 ? "" : "s"} can be added (max ${MAX_FILES_PER_FIELD})` }));
-      } else if (oversized.length === 0) {
+        setFileErrors((prev) => ({ ...prev, [fieldKey]: `Only ${remaining} more file${remaining === 1 ? "" : "s"} can be added (max ${MAX_FILES_PER_FIELD})` }));
+      } else if (rejected.length === 0) {
         setFileErrors((prev) => ({ ...prev, [fieldKey]: null }));
       }
 
@@ -314,7 +349,7 @@ export function FormModal({
     setAttachments((prev) => {
       const current = prev[fieldKey] ?? [];
       const removed = current[index];
-      if (removed) {
+      if (removed?.previewUrl) {
         URL.revokeObjectURL(removed.previewUrl);
       }
       const updated = current.filter((_, i) => i !== index);
@@ -355,8 +390,14 @@ export function FormModal({
     setSubmitState("submitting");
 
     try {
-      // Flatten all attachment paths from all fields
-      const allPaths = Object.values(attachments).flat().map((a) => a.storagePath);
+      // Flatten all attachments across fields. Send rich metadata so the
+      // server can pick the right markdown format (inline image vs file link)
+      // and preserve the original filename in the issue description.
+      const allAttachments = Object.values(attachments).flat().map((a) => ({
+        path: a.storagePath,
+        fileName: a.fileName,
+        contentType: a.contentType,
+      }));
 
       const res = await fetch(`/api/hub/${hubId}/submissions`, {
         method: "POST",
@@ -364,7 +405,7 @@ export function FormModal({
         body: JSON.stringify({
           formId,
           fieldValues,
-          attachmentPaths: allPaths,
+          attachments: allAttachments,
           teamId: selectedTeamId || null,
           projectId: selectedProjectId && selectedProjectId !== "__none__" ? selectedProjectId : null,
         }),
@@ -519,13 +560,19 @@ export function FormModal({
         const uploading = uploadingCounts[fieldKey] ?? 0;
         const fileError = fileErrors[fieldKey];
         const canAddMore = fieldAttachments.length < MAX_FILES_PER_FIELD;
+        const imageAttachments = fieldAttachments
+          .map((att, idx) => ({ att, idx }))
+          .filter((x) => isImageMimeType(x.att.contentType));
+        const fileAttachments = fieldAttachments
+          .map((att, idx) => ({ att, idx }))
+          .filter((x) => !isImageMimeType(x.att.contentType));
 
         return (
           <div>
             <input
               ref={(el) => { fileInputRefs.current[fieldKey] = el; }}
               type="file"
-              accept="image/*"
+              accept={ACCEPT_ATTRIBUTE}
               multiple
               className="hidden"
               onChange={(e) => {
@@ -538,16 +585,17 @@ export function FormModal({
               }}
             />
 
-            {/* Thumbnail grid */}
-            {(fieldAttachments.length > 0 || uploading > 0) && (
+            {/* Image thumbnail grid */}
+            {(imageAttachments.length > 0 || uploading > 0) && (
               <div className="grid grid-cols-5 gap-1.5 mb-2">
-                {fieldAttachments.map((att, idx) => (
+                {imageAttachments.map(({ att, idx }) => (
                   <div
                     key={att.storagePath}
                     className="relative group aspect-square rounded-md overflow-hidden border border-border bg-accent/30"
                   >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={att.previewUrl}
+                      src={att.previewUrl ?? undefined}
                       alt={att.fileName}
                       className="w-full h-full object-cover"
                     />
@@ -585,6 +633,35 @@ export function FormModal({
               </div>
             )}
 
+            {/* Non-image file chips */}
+            {fileAttachments.length > 0 && (
+              <div className="flex flex-col gap-1.5 mb-2">
+                {fileAttachments.map(({ att, idx }) => {
+                  const Icon = getFileIcon(att.fileName);
+                  return (
+                    <div
+                      key={att.storagePath}
+                      className="group flex items-center gap-2.5 px-2.5 py-1.5 rounded-md border border-border bg-muted/30 hover:bg-muted/60 transition-colors"
+                    >
+                      <Icon className="w-4 h-4 text-muted-foreground shrink-0" />
+                      <div className="flex-1 min-w-0 flex items-baseline gap-2">
+                        <span className="text-sm text-foreground truncate">{att.fileName}</span>
+                        <span className="text-xs text-muted-foreground/70 shrink-0">{formatFileSize(att.fileSize)}</span>
+                      </div>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${att.fileName}`}
+                        onClick={() => removeAttachment(fieldKey, idx)}
+                        className="p-0.5 rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-foreground hover:bg-accent transition-all"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             {/* Initial upload button (empty state) */}
             {fieldAttachments.length === 0 && uploading === 0 && (
               <button
@@ -593,23 +670,40 @@ export function FormModal({
                 className="flex items-center gap-2 px-3 py-2 text-sm border border-input rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors w-full"
               >
                 <Upload className="w-4 h-4" />
-                Choose images...
+                Choose files...
               </button>
             )}
 
-            {/* File count */}
+            {/* Add-more button when only non-image files are present (image grid hides it) */}
+            {fileAttachments.length > 0 && imageAttachments.length === 0 && uploading === 0 && canAddMore && (
+              <button
+                type="button"
+                onClick={() => fileInputRefs.current[fieldKey]?.click()}
+                className="flex items-center gap-2 px-2.5 py-1.5 text-xs border border-dashed border-border rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors w-full justify-center"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Add another file
+              </button>
+            )}
+
+            {/* File count + size hints */}
             {fieldAttachments.length > 0 && (
               <p className="text-xs text-muted-foreground mt-1">
-                {fieldAttachments.length} image{fieldAttachments.length === 1 ? "" : "s"} attached
+                {fieldAttachments.length} file{fieldAttachments.length === 1 ? "" : "s"} attached
                 {fieldAttachments.length < MAX_FILES_PER_FIELD && (
                   <span className="text-muted-foreground/60"> ({MAX_FILES_PER_FIELD - fieldAttachments.length} remaining)</span>
                 )}
               </p>
             )}
+            {fieldAttachments.length === 0 && uploading === 0 && (
+              <p className="text-xs text-muted-foreground/70 mt-1">
+                Images, PDFs, Word, Excel, ZIP, or text — up to {Math.round(IMAGE_MAX_SIZE / 1024 / 1024)}MB images, {Math.round(OTHER_MAX_SIZE / 1024 / 1024)}MB others
+              </p>
+            )}
 
             {/* Errors */}
             {hasError && fieldAttachments.length === 0 && (
-              <p className="text-xs text-destructive mt-1">At least one image is required</p>
+              <p className="text-xs text-destructive mt-1">At least one file is required</p>
             )}
             {fileError && (
               <p className="text-xs text-destructive mt-1">{fileError}</p>

@@ -379,7 +379,14 @@ export type FormSubmission = {
   sync_error: string | null
   sync_attempted_at: string | null
   attachment_paths: string[]
+  attachment_metadata: AttachmentMetadata[]
   created_at: string
   updated_at: string
+}
+
+export type AttachmentMetadata = {
+  path: string
+  fileName: string
+  contentType: string
 }
 

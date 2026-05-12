@@ -8,6 +8,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { proxyLinearUrl, isLinearCdnUrl, getFileIcon } from "@/lib/image-proxy";
+import { isHubAttachmentUrl } from "@/lib/hub-upload";
 import { LinearDocEmbed, extractLinearDocSlug } from "./linear-doc-embed";
 import { CommentComposer } from "./comment-composer";
 import { AdminLinearConnectBanner } from "./admin-linear-connect-banner";
@@ -152,8 +153,9 @@ export function useMarkdownComponents(onImageClick: (src: string, alt?: string) 
         return <LinearDocEmbed href={href} hubId={hubId} linkText={linkText} />;
       }
 
-      // Detect file attachment links (Supabase storage or Linear CDN)
-      const isAttachment = href && (href.includes("comment-attachments/") || isLinearCdnUrl(href));
+      // Detect file attachment links — either a Pulse hub Supabase bucket
+      // (comment-attachments / form-attachments) or a Linear CDN URL.
+      const isAttachment = href && (isHubAttachmentUrl(href) || isLinearCdnUrl(href));
       if (isAttachment) {
         try {
           const proxiedHref = isLinearCdnUrl(href!) ? proxyLinearUrl(href!) : href!;
