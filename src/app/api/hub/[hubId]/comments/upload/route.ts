@@ -1,37 +1,17 @@
 import { NextResponse } from "next/server";
 import { withHubAuthWrite, type HubAuthError } from "@/lib/hub-auth";
 import { supabaseAdmin } from "@/lib/supabase";
+import {
+  publicAttachmentUrl,
+  sanitizeFilename,
+  validateUploadRequest,
+} from "@/lib/hub-upload";
 
-const ALLOWED_MIME_TYPES = new Set([
-  // Images
-  "image/png",
-  "image/jpeg",
-  "image/gif",
-  "image/webp",
-  "image/svg+xml",
-  // Documents
-  "application/pdf",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  // Spreadsheets
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  // Archives
-  "application/zip",
-  // Text
-  "text/plain",
-]);
-
-const IMAGE_MAX_SIZE = 10 * 1024 * 1024; // 10MB
-const OTHER_MAX_SIZE = 25 * 1024 * 1024; // 25MB
-
-function isImageMimeType(contentType: string): boolean {
-  return contentType.startsWith("image/");
-}
+const BUCKET = "comment-attachments";
 
 /**
  * POST: Get a signed upload URL for comment file attachments.
- * Allows images, documents, spreadsheets, archives, and plain text.
+ * Allowed types and size limits are defined centrally in `lib/hub-upload.ts`.
  */
 export async function POST(
   request: Request,
@@ -48,42 +28,21 @@ export async function POST(
       );
     }
 
-    const body = (await request.json()) as {
-      filename?: string;
-      contentType?: string;
-      fileSize?: number;
-    };
-
-    if (!body.filename || !body.contentType || typeof body.fileSize !== "number") {
+    const body = (await request.json()) as Record<string, unknown>;
+    const validated = validateUploadRequest(body);
+    if ("error" in validated) {
       return NextResponse.json(
-        { error: "filename, contentType, and fileSize are required" },
-        { status: 400 }
+        { error: validated.error },
+        { status: validated.status }
       );
     }
 
-    if (!Number.isFinite(body.fileSize) || body.fileSize <= 0) {
-      return NextResponse.json(
-        { error: "fileSize must be a positive number" },
-        { status: 400 }
-      );
-    }
-
-    if (!ALLOWED_MIME_TYPES.has(body.contentType)) {
-      return NextResponse.json(
-        {
-          error: `File type "${body.contentType}" is not allowed. Accepted types: images (PNG, JPEG, GIF, WebP, SVG), documents (PDF, Word, Excel), archives (ZIP), and plain text.`,
-        },
-        { status: 400 }
-      );
-    }
-
-    // Sanitize filename and extract extension
-    const sanitized = body.filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const sanitized = sanitizeFilename(validated.filename);
     const ext = sanitized.split(".").pop() || "bin";
     const storagePath = `${hubId}/comments/${crypto.randomUUID()}.${ext}`;
 
     const { data: signedData, error } = await supabaseAdmin.storage
-      .from("comment-attachments")
+      .from(BUCKET)
       .createSignedUploadUrl(storagePath);
 
     if (error || !signedData) {
@@ -97,27 +56,12 @@ export async function POST(
       throw new Error("NEXT_PUBLIC_SUPABASE_URL is not configured");
     }
 
-    const maxSize = isImageMimeType(body.contentType)
-      ? IMAGE_MAX_SIZE
-      : OTHER_MAX_SIZE;
-
-    // Server-side file size validation
-    if (body.fileSize > maxSize) {
-      const limitMB = Math.round(maxSize / 1024 / 1024);
-      return NextResponse.json(
-        { error: `File exceeds the ${limitMB}MB size limit` },
-        { status: 400 }
-      );
-    }
-
-    const publicUrl = `${supabaseUrl}/storage/v1/object/public/comment-attachments/${storagePath}`;
-
     return NextResponse.json({
       signedUrl: signedData.signedUrl,
       storagePath,
-      publicUrl,
+      publicUrl: publicAttachmentUrl(supabaseUrl, BUCKET, storagePath),
       token: signedData.token,
-      maxSize,
+      maxSize: validated.maxSize,
     });
   } catch (error) {
     console.error(

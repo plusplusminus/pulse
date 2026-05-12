@@ -1,4 +1,9 @@
-import { supabaseAdmin, type FormField, type FormSubmission } from "./supabase";
+import {
+  supabaseAdmin,
+  type AttachmentMetadata,
+  type FormField,
+  type FormSubmission,
+} from "./supabase";
 import { createIssueInLinear, updateIssueTitle } from "./linear-push";
 import {
   fetchFormWithFields,
@@ -6,6 +11,39 @@ import {
 } from "./form-read";
 import { logSyncEvent } from "./sync-logger";
 import { applyEmojiToTitle, classifyIssueEmoji } from "./issue-emoji";
+import { isImageMimeType, publicAttachmentUrl } from "./hub-upload";
+
+const FORM_ATTACHMENTS_BUCKET = "form-attachments";
+
+type AttachmentForDescription = AttachmentMetadata & { url: string };
+
+/**
+ * Convert stored attachment metadata into the shape used by description
+ * building. Falls back to an image-typed entry per legacy `attachment_paths`
+ * row when no rich metadata has been recorded for a submission (true for any
+ * row created before PULSE-349 — those flows were image-only).
+ */
+function resolveAttachmentsForDescription(
+  metadata: AttachmentMetadata[] | null | undefined,
+  paths: string[] | null | undefined,
+  supabaseUrl: string
+): AttachmentForDescription[] {
+  if (metadata && metadata.length > 0) {
+    return metadata.map((m) => ({
+      ...m,
+      url: publicAttachmentUrl(supabaseUrl, FORM_ATTACHMENTS_BUCKET, m.path),
+    }));
+  }
+  return (paths ?? []).map((path) => {
+    const fileName = path.split("/").pop() ?? path;
+    return {
+      path,
+      fileName,
+      contentType: "image/*",
+      url: publicAttachmentUrl(supabaseUrl, FORM_ATTACHMENTS_BUCKET, path),
+    };
+  });
+}
 
 // -- Types ────────────────────────────────────────────────────────────────────
 
@@ -77,7 +115,7 @@ function resolveOptionLabel(field: FormField, value: string): string {
 export function buildIssueDescription(
   fields: FormField[],
   fieldValues: Record<string, unknown>,
-  attachmentUrls: string[],
+  attachments: AttachmentForDescription[],
   submitter?: { name?: string | null; email: string }
 ): string {
   const parts: string[] = [];
@@ -126,12 +164,18 @@ export function buildIssueDescription(
     parts.push(customParts.join("\n\n"));
   }
 
-  // Attachments
-  if (attachmentUrls.length > 0) {
+  // Attachments — images render inline, everything else as a file link so it
+  // shows as a clickable chip rather than a broken image in Linear or Pulse.
+  if (attachments.length > 0) {
     parts.push("---");
     parts.push("## Attachments");
-    for (const url of attachmentUrls) {
-      parts.push(`![attachment](${url})`);
+    for (const att of attachments) {
+      const label = att.fileName || "attachment";
+      parts.push(
+        isImageMimeType(att.contentType)
+          ? `![${label}](${att.url})`
+          : `[${label}](${att.url})`
+      );
     }
   }
 
@@ -186,7 +230,7 @@ export async function processFormSubmission(
   formId: string,
   hubId: string,
   fieldValues: Record<string, unknown>,
-  attachmentPaths: string[],
+  attachments: AttachmentMetadata[],
   user: SubmissionUser,
   clientTeamId?: string,
   clientProjectId?: string,
@@ -265,14 +309,16 @@ export async function processFormSubmission(
 
   // 4. Build description
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const attachmentUrls = attachmentPaths.map(
-    (path) => `${supabaseUrl}/storage/v1/object/public/form-attachments/${path}`
+  const attachmentsForDescription = resolveAttachmentsForDescription(
+    attachments,
+    attachments.map((a) => a.path),
+    supabaseUrl
   );
 
   const description = buildIssueDescription(
     form.fields,
     fieldValues,
-    attachmentUrls,
+    attachmentsForDescription,
     { name: user.name, email: user.email }
   );
 
@@ -291,7 +337,8 @@ export async function processFormSubmission(
       field_values: fieldValues,
       derived_title: title,
       sync_status: "pending",
-      attachment_paths: attachmentPaths,
+      attachment_paths: attachments.map((a) => a.path),
+      attachment_metadata: attachments,
     })
     .select("id")
     .single();
@@ -436,17 +483,20 @@ export async function retrySubmission(
   );
   const labelIds = hubConfig?.target_label_ids ?? form.target_label_ids ?? [];
 
-  // Rebuild description from saved field values
+  // Rebuild description from saved field values. Prefer the rich metadata
+  // recorded by PULSE-349; fall back to attachment_paths for older rows that
+  // predate that column (always image-only by construction).
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const attachmentUrls = (submission.attachment_paths ?? []).map(
-    (path: string) =>
-      `${supabaseUrl}/storage/v1/object/public/form-attachments/${path}`
+  const attachmentsForDescription = resolveAttachmentsForDescription(
+    submission.attachment_metadata,
+    submission.attachment_paths,
+    supabaseUrl
   );
 
   const description = buildIssueDescription(
     form.fields,
     submission.field_values,
-    attachmentUrls,
+    attachmentsForDescription,
     { name: submission.submitter_name, email: submission.submitter_email }
   );
 

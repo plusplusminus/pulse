@@ -4,10 +4,41 @@ import {
   withHubAuthWrite,
   type HubAuthError,
 } from "@/lib/hub-auth";
-import { supabaseAdmin } from "@/lib/supabase";
+import { supabaseAdmin, type AttachmentMetadata } from "@/lib/supabase";
 import { processFormSubmission } from "@/lib/form-submit";
+import { ALLOWED_MIME_TYPES } from "@/lib/hub-upload";
 import { captureServerEvent } from "@/lib/posthog-server";
 import { POSTHOG_EVENTS } from "@/lib/posthog-events";
+
+function normalizeAttachments(
+  raw: unknown,
+  legacyPaths: unknown
+): AttachmentMetadata[] {
+  if (Array.isArray(raw)) {
+    const result: AttachmentMetadata[] = [];
+    for (const entry of raw) {
+      if (!entry || typeof entry !== "object") continue;
+      const e = entry as Record<string, unknown>;
+      if (typeof e.path !== "string" || e.path.length === 0) continue;
+      if (typeof e.fileName !== "string" || e.fileName.length === 0) continue;
+      if (typeof e.contentType !== "string" || !ALLOWED_MIME_TYPES.has(e.contentType)) continue;
+      result.push({ path: e.path, fileName: e.fileName, contentType: e.contentType });
+    }
+    return result;
+  }
+  // Backward compat: older clients still send `attachmentPaths: string[]`.
+  // Treat each as an image (the only previously supported type).
+  if (Array.isArray(legacyPaths)) {
+    return legacyPaths
+      .filter((p): p is string => typeof p === "string" && p.length > 0)
+      .map((path) => ({
+        path,
+        fileName: path.split("/").pop() ?? path,
+        contentType: "image/*",
+      }));
+  }
+  return [];
+}
 
 /**
  * POST: Submit a form.
@@ -33,6 +64,7 @@ export async function POST(
       formId?: string;
       fieldValues?: Record<string, unknown>;
       attachmentPaths?: string[];
+      attachments?: unknown;
       teamId?: string;
       projectId?: string;
     };
@@ -51,11 +83,13 @@ export async function POST(
       );
     }
 
+    const attachments = normalizeAttachments(body.attachments, body.attachmentPaths);
+
     const result = await processFormSubmission(
       body.formId,
       hubId,
       body.fieldValues,
-      body.attachmentPaths ?? [],
+      attachments,
       {
         id: user.id,
         email: user.email,
