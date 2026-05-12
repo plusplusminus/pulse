@@ -10,34 +10,52 @@ import { ALLOWED_MIME_TYPES } from "@/lib/hub-upload";
 import { captureServerEvent } from "@/lib/posthog-server";
 import { POSTHOG_EVENTS } from "@/lib/posthog-events";
 
+type NormalizeOk = { ok: true; attachments: AttachmentMetadata[] };
+type NormalizeError = { ok: false; error: string };
+
 function normalizeAttachments(
   raw: unknown,
   legacyPaths: unknown
-): AttachmentMetadata[] {
+): NormalizeOk | NormalizeError {
   if (Array.isArray(raw)) {
     const result: AttachmentMetadata[] = [];
-    for (const entry of raw) {
-      if (!entry || typeof entry !== "object") continue;
+    for (let i = 0; i < raw.length; i++) {
+      const entry = raw[i];
+      if (!entry || typeof entry !== "object") {
+        return { ok: false, error: `attachments[${i}] is not an object` };
+      }
       const e = entry as Record<string, unknown>;
-      if (typeof e.path !== "string" || e.path.length === 0) continue;
-      if (typeof e.fileName !== "string" || e.fileName.length === 0) continue;
-      if (typeof e.contentType !== "string" || !ALLOWED_MIME_TYPES.has(e.contentType)) continue;
+      if (typeof e.path !== "string" || e.path.length === 0) {
+        return { ok: false, error: `attachments[${i}].path must be a non-empty string` };
+      }
+      if (typeof e.fileName !== "string" || e.fileName.length === 0) {
+        return { ok: false, error: `attachments[${i}].fileName must be a non-empty string` };
+      }
+      if (typeof e.contentType !== "string" || !ALLOWED_MIME_TYPES.has(e.contentType)) {
+        return {
+          ok: false,
+          error: `attachments[${i}].contentType "${String(e.contentType)}" is not an allowed file type`,
+        };
+      }
       result.push({ path: e.path, fileName: e.fileName, contentType: e.contentType });
     }
-    return result;
+    return { ok: true, attachments: result };
   }
   // Backward compat: older clients still send `attachmentPaths: string[]`.
-  // Treat each as an image (the only previously supported type).
+  // Treat each as an image (the only previously supported type). The legacy
+  // shape only ever carried storage paths produced server-side, so we accept
+  // it permissively rather than 400-ing on stale clients.
   if (Array.isArray(legacyPaths)) {
-    return legacyPaths
+    const attachments = legacyPaths
       .filter((p): p is string => typeof p === "string" && p.length > 0)
       .map((path) => ({
         path,
         fileName: path.split("/").pop() ?? path,
         contentType: "image/*",
       }));
+    return { ok: true, attachments };
   }
-  return [];
+  return { ok: true, attachments: [] };
 }
 
 /**
@@ -83,13 +101,16 @@ export async function POST(
       );
     }
 
-    const attachments = normalizeAttachments(body.attachments, body.attachmentPaths);
+    const normalized = normalizeAttachments(body.attachments, body.attachmentPaths);
+    if (!normalized.ok) {
+      return NextResponse.json({ error: normalized.error }, { status: 400 });
+    }
 
     const result = await processFormSubmission(
       body.formId,
       hubId,
       body.fieldValues,
-      attachments,
+      normalized.attachments,
       {
         id: user.id,
         email: user.email,

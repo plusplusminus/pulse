@@ -128,24 +128,68 @@ describe("hub-upload validation", () => {
   });
 
   describe("isHubAttachmentUrl", () => {
-    it("matches comment-attachments URLs", () => {
+    const HOST = "x.supabase.co";
+
+    it("matches comment-attachments URLs on the allowed host", () => {
       expect(
         isHubAttachmentUrl(
-          "https://x.supabase.co/storage/v1/object/public/comment-attachments/hub-1/comments/abc.pdf"
+          "https://x.supabase.co/storage/v1/object/public/comment-attachments/hub-1/comments/abc.pdf",
+          HOST
         )
       ).toBe(true);
     });
-    it("matches form-attachments URLs", () => {
+    it("matches form-attachments URLs on the allowed host", () => {
       expect(
         isHubAttachmentUrl(
-          "https://x.supabase.co/storage/v1/object/public/form-attachments/hub-1/abc.pdf"
+          "https://x.supabase.co/storage/v1/object/public/form-attachments/hub-1/abc.pdf",
+          HOST
         )
       ).toBe(true);
+    });
+    it("rejects spoofed attachment paths on a foreign host", () => {
+      expect(
+        isHubAttachmentUrl(
+          "https://evil.example.com/comment-attachments/spoof.pdf",
+          HOST
+        )
+      ).toBe(false);
+      expect(
+        isHubAttachmentUrl(
+          "https://evil.example.com/form-attachments/spoof.pdf",
+          HOST
+        )
+      ).toBe(false);
+    });
+    it("rejects non-HTTP(S) schemes", () => {
+      expect(
+        isHubAttachmentUrl(
+          "javascript:alert('/comment-attachments/')",
+          HOST
+        )
+      ).toBe(false);
+      expect(
+        isHubAttachmentUrl(
+          "data:text/plain,/comment-attachments/foo",
+          HOST
+        )
+      ).toBe(false);
+    });
+    it("rejects malformed URLs", () => {
+      expect(isHubAttachmentUrl("not a url", HOST)).toBe(false);
+      expect(isHubAttachmentUrl("", HOST)).toBe(false);
+    });
+    it("returns false when no allowed host is configured", () => {
+      expect(
+        isHubAttachmentUrl(
+          "https://x.supabase.co/storage/v1/object/public/comment-attachments/hub-1/abc.pdf",
+          null
+        )
+      ).toBe(false);
     });
     it("does not match unrelated URLs", () => {
-      expect(isHubAttachmentUrl("https://example.com/file.pdf")).toBe(false);
+      expect(isHubAttachmentUrl("https://example.com/file.pdf", HOST)).toBe(false);
       expect(
-        isHubAttachmentUrl("https://uploads.linear.app/abc/file.pdf")
+        isHubAttachmentUrl("https://uploads.linear.app/abc/file.pdf", HOST)
       ).toBe(false);
     });
   });

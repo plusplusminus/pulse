@@ -134,11 +134,41 @@ const HUB_ATTACHMENT_BUCKET_SEGMENTS = [
   "/form-attachments/",
 ];
 
+function deriveSupabaseHost(): string | null {
+  const raw = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!raw) return null;
+  try {
+    return new URL(raw).hostname;
+  } catch {
+    return null;
+  }
+}
+
+const ALLOWED_SUPABASE_HOST = deriveSupabaseHost();
+
 /**
- * True when `url` points at a Pulse hub attachment in Supabase storage.
+ * True when `url` points at a Pulse hub attachment in our Supabase storage.
  * Used by the markdown renderer to decide whether to swap a plain `<a>` for
  * a styled file chip.
+ *
+ * Hostname is checked against `NEXT_PUBLIC_SUPABASE_URL` so an attacker can't
+ * spoof a Pulse-styled file chip by putting `/comment-attachments/` in their
+ * own URL path. `allowedHost` is exposed for tests; production callers omit it.
  */
-export function isHubAttachmentUrl(url: string): boolean {
-  return HUB_ATTACHMENT_BUCKET_SEGMENTS.some((segment) => url.includes(segment));
+export function isHubAttachmentUrl(
+  url: string,
+  allowedHost: string | null = ALLOWED_SUPABASE_HOST
+): boolean {
+  if (!allowedHost) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
+  if (parsed.hostname !== allowedHost) return false;
+  return HUB_ATTACHMENT_BUCKET_SEGMENTS.some((segment) =>
+    parsed.pathname.includes(segment)
+  );
 }
