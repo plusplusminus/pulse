@@ -129,10 +129,11 @@ export function publicAttachmentUrl(
   return `${supabaseUrl}/storage/v1/object/public/${bucket}/${storagePath}`;
 }
 
-const HUB_ATTACHMENT_BUCKET_SEGMENTS = [
-  "/comment-attachments/",
-  "/form-attachments/",
-];
+const HUB_ATTACHMENT_BUCKETS = ["comment-attachments", "form-attachments"];
+
+const HUB_ATTACHMENT_PATH_PREFIXES = HUB_ATTACHMENT_BUCKETS.map(
+  (bucket) => `/storage/v1/object/public/${bucket}/`
+);
 
 function deriveSupabaseHost(): string | null {
   const raw = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -168,7 +169,10 @@ export function isHubAttachmentUrl(
   }
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
   if (parsed.hostname !== allowedHost) return false;
-  return HUB_ATTACHMENT_BUCKET_SEGMENTS.some((segment) =>
-    parsed.pathname.includes(segment)
+  // Match the canonical Supabase storage path so a non-bucket path that
+  // merely happens to contain the bucket name (e.g. as a filename) cannot
+  // pose as a hub attachment.
+  return HUB_ATTACHMENT_PATH_PREFIXES.some((prefix) =>
+    parsed.pathname.startsWith(prefix)
   );
 }

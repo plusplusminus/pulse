@@ -160,6 +160,34 @@ describe("hub-upload validation", () => {
         )
       ).toBe(false);
     });
+    it("rejects URLs that smuggle the bucket name in a query string", () => {
+      expect(
+        isHubAttachmentUrl(
+          "https://example.com/file.pdf?path=/form-attachments/hub-1/abc.pdf",
+          HOST
+        )
+      ).toBe(false);
+      expect(
+        isHubAttachmentUrl(
+          "https://x.supabase.co/file.pdf?path=/comment-attachments/abc.pdf",
+          HOST
+        )
+      ).toBe(false);
+    });
+    it("rejects allowed-host URLs whose path is not the canonical storage prefix", () => {
+      expect(
+        isHubAttachmentUrl(
+          "https://x.supabase.co/some-other/path/comment-attachments/abc.pdf",
+          HOST
+        )
+      ).toBe(false);
+      expect(
+        isHubAttachmentUrl(
+          "https://x.supabase.co/storage/v1/object/public/other-bucket/comment-attachments/abc.pdf",
+          HOST
+        )
+      ).toBe(false);
+    });
     it("rejects non-HTTP(S) schemes", () => {
       expect(
         isHubAttachmentUrl(
