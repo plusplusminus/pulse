@@ -37,6 +37,7 @@ const EVENT_TYPE_ORDER = [
   'status_change',
   'comment',
   'project_update',
+  'health_update',
   'cycle_update',
   'initiative_update',
 ]

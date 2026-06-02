@@ -7,6 +7,7 @@ import {
   FolderOpen,
   RefreshCw,
   Flag,
+  Activity,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -31,6 +32,7 @@ const EVENT_ICONS: Record<string, typeof MessageSquare> = {
   project_update: FolderOpen,
   cycle_update: RefreshCw,
   initiative_update: Flag,
+  health_update: Activity,
 };
 
 function getEntityUrl(
