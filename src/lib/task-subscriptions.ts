@@ -151,15 +151,21 @@ export async function autoSubscribe(
   issueLinearId: string,
   source: TaskSubscriptionSource
 ): Promise<void> {
-  const { error } = await supabaseAdmin.from("hub_task_subscriptions").upsert(
-    {
-      hub_id: hubId,
-      user_id: userId,
-      issue_linear_id: issueLinearId,
-      state: "subscribed",
-      source,
-    },
-    { onConflict: "hub_id,user_id,issue_linear_id", ignoreDuplicates: true }
-  );
-  if (error) console.error("autoSubscribe error:", error);
+  // Fire-and-forget: never throw, so callers can `void` this without risking an
+  // unhandled rejection if the upsert (or its underlying request) fails.
+  try {
+    const { error } = await supabaseAdmin.from("hub_task_subscriptions").upsert(
+      {
+        hub_id: hubId,
+        user_id: userId,
+        issue_linear_id: issueLinearId,
+        state: "subscribed",
+        source,
+      },
+      { onConflict: "hub_id,user_id,issue_linear_id", ignoreDuplicates: true }
+    );
+    if (error) console.error("autoSubscribe error:", error);
+  } catch (err) {
+    console.error("autoSubscribe failed:", err);
+  }
 }
