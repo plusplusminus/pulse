@@ -8,7 +8,7 @@ import {
   hasHiddenLabelInHub,
   type HubInfo,
 } from "@/lib/hub-visibility";
-import { isClientFacing } from "@/lib/hub-read";
+import { isClientFacing, stripClientPrefix } from "@/lib/hub-read";
 import { processImmediateEmails } from "@/lib/notification-delivery";
 
 // -- Types -------------------------------------------------------------------
@@ -246,16 +246,10 @@ async function generateIssueSummary(
     };
   }
 
-  // Title change
+  // Title change (rename) — intentionally not notified. Renames are low-signal
+  // for clients (PULSE-357), so no event is emitted for a pure rename.
   if (updatedFrom.title !== undefined) {
-    return {
-      eventType: "status_change",
-      summary: `Issue ${identifier} renamed to "${title}"`,
-      metadata: {
-        old_title: updatedFrom.title,
-        new_title: title,
-      },
-    };
+    return null;
   }
 
   // Assignee change
@@ -309,7 +303,9 @@ async function generateCommentSummary(
   const userName = await resolveCommentAuthor(data);
   const issueIdentifier =
     (data.issue as { identifier?: string })?.identifier ?? "an issue";
-  const excerpt = body.length > 100 ? body.slice(0, 100) + "..." : body;
+  // Include the full comment (no truncation), with the heyclient/pulse trigger
+  // prefix stripped so clients see only the message itself (PULSE-357).
+  const excerpt = stripClientPrefix(body).trim();
 
   if (action === "create") {
     return {
