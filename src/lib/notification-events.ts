@@ -505,12 +505,27 @@ const HEALTH_LABELS: Record<string, string> = {
  */
 async function generateHealthUpdateSummary(
   action: string,
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
+  updatedFrom?: Record<string, unknown>
 ): Promise<{ eventType: NotificationEventType; summary: string; metadata: Record<string, unknown>; actorName?: string } | null> {
   if (action === "remove") return null;
 
   const body = (data.body as string) ?? "";
   if (!isClientFacing(body)) return null;
+
+  // On edits, only notify when the update's content actually changed (body or
+  // health) — avoids re-notifying on trivial metadata edits. When updatedFrom is
+  // absent we can't tell what changed, so we notify; this also covers an internal
+  // update later edited to add the heyclient/pulse prefix (that's a body change).
+  if (
+    action === "update" &&
+    updatedFrom &&
+    Object.keys(updatedFrom).length > 0 &&
+    updatedFrom.body === undefined &&
+    updatedFrom.health === undefined
+  ) {
+    return null;
+  }
 
   const projectId =
     (data.project as { id?: string })?.id ?? (data.projectId as string) ?? "";
@@ -667,7 +682,11 @@ async function filterHubsByVisibility(
     return results.filter((r) => r.visible).map((r) => r.hub);
   }
 
-  // Project health updates: only hubs that can see the project.
+  // Project health updates: only hubs that can see the project. Unlike issues/
+  // comments we deliberately do NOT exclude overview-only projects — a health
+  // update is project-overview content (PULSE-359 surfaces derived health in the
+  // overview that overview-only hubs DO see), so suppressing it there would hide
+  // health from exactly the hubs configured to show only the overview.
   if (type === "ProjectUpdate") {
     const projectId =
       (data.project as { id?: string })?.id ?? (data.projectId as string);
@@ -764,7 +783,7 @@ export async function emitNotificationEventsForWebhook(
         result = generateInitiativeSummary(action, data, updatedFrom);
         break;
       case "ProjectUpdate":
-        result = await generateHealthUpdateSummary(action, data);
+        result = await generateHealthUpdateSummary(action, data, updatedFrom);
         break;
     }
 
