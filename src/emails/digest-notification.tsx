@@ -28,13 +28,15 @@ export interface DigestNotificationProps {
   dateRange: string
 }
 
-// Display order for event types in digest emails
+// Display order for event types in digest emails (must match the event_type
+// values stored on notification_events).
 const EVENT_TYPE_ORDER = [
-  'project_update',
-  'issue_created',
-  'new_comment',
+  'new_issue',
   'status_change',
-  'label_change',
+  'comment',
+  'project_update',
+  'cycle_update',
+  'initiative_update',
 ]
 
 export function DigestNotification({

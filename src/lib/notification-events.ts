@@ -146,13 +146,35 @@ function extractName(data: Record<string, unknown>): string {
   return (data.name as string) ?? (data.title as string) ?? "unknown";
 }
 
+/**
+ * Resolve a Linear workflow-state UUID to its human name by looking at any
+ * synced issue currently in that state. Best-effort: returns null when the
+ * state can't be found (or on any error) so callers can omit it gracefully.
+ */
+async function resolveStateName(stateId: unknown): Promise<string | null> {
+  if (typeof stateId !== "string" || stateId.trim() === "") return null;
+  try {
+    const { data } = await supabaseAdmin
+      .from("synced_issues")
+      .select("state_name")
+      .eq("data->state->>id", stateId)
+      .limit(1)
+      .maybeSingle();
+    const name = (data as { state_name?: string } | null)?.state_name;
+    return name && name.trim() !== "" ? name : null;
+  } catch (error) {
+    console.error("resolveStateName: lookup failed:", error);
+    return null;
+  }
+}
+
 // -- Summary generation ------------------------------------------------------
 
-function generateIssueSummary(
+async function generateIssueSummary(
   action: string,
   data: Record<string, unknown>,
   updatedFrom?: Record<string, unknown>
-): { eventType: NotificationEventType; summary: string; metadata: Record<string, unknown> } | null {
+): Promise<{ eventType: NotificationEventType; summary: string; metadata: Record<string, unknown> } | null> {
   const identifier = extractIdentifier(data);
   const title = (data.title as string) ?? "";
 
@@ -176,19 +198,19 @@ function generateIssueSummary(
   if (!updatedFrom || Object.keys(updatedFrom).length === 0) return null;
 
   // Status change
-  const oldState = updatedFrom.stateId ?? updatedFrom.state;
-  if (oldState !== undefined) {
+  const oldStateId = updatedFrom.stateId ?? updatedFrom.state;
+  if (oldStateId !== undefined) {
     const newStateName = (data.state as { name?: string })?.name ?? "unknown";
-    // updatedFrom contains the old value for changed fields.
-    // For state changes, Linear sends the old stateId but not the old state name directly.
-    // We can check if there's a labelIds or priorityLabel too.
+    // Linear's webhook only sends the old stateId (a UUID), not the old state
+    // name. Resolve it from synced issues so the email shows a readable status
+    // instead of a raw ID; omit the old status entirely if it can't be resolved.
+    const oldStateName = await resolveStateName(oldStateId);
     return {
       eventType: "status_change",
-      summary: `Issue ${identifier} moved to ${newStateName}`,
+      summary: title ? `${identifier}: ${title}` : `Issue ${identifier}`,
       metadata: {
-        new_state: newStateName,
-        old_state_id: oldState,
-        title,
+        ...(oldStateName ? { old_status: oldStateName } : {}),
+        new_status: newStateName,
       },
     };
   }
@@ -609,7 +631,7 @@ export async function emitNotificationEventsForWebhook(
 
     switch (type) {
       case "Issue":
-        result = generateIssueSummary(action, data, updatedFrom);
+        result = await generateIssueSummary(action, data, updatedFrom);
         break;
       case "Comment":
         result = await generateCommentSummary(action, data);

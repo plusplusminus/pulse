@@ -10,6 +10,7 @@ import {
 } from '@react-email/components'
 import { EmailHeader } from './components/email-header'
 import { EmailFooter } from './components/email-footer'
+import { formatMetadataEntries } from './components/format-metadata'
 
 export interface ImmediateNotificationProps {
   hubName: string
@@ -25,9 +26,6 @@ export interface ImmediateNotificationProps {
   deepLinkUrl: string
 }
 
-/** Keys prefixed with _ are internal / used for linking — never shown in the email */
-const HIDDEN_KEYS = new Set(['team_key', 'excerpt', '_issue_id', '_issue_identifier'])
-
 export function ImmediateNotification({
   hubName,
   hubSlug,
@@ -36,9 +34,7 @@ export function ImmediateNotification({
 }: ImmediateNotificationProps) {
   const previewText = `${event.summary} — ${hubName}`
   const excerpt = event.metadata?.excerpt
-  const visibleMeta = event.metadata
-    ? Object.entries(event.metadata).filter(([k]) => !HIDDEN_KEYS.has(k) && !k.startsWith('_'))
-    : []
+  const visibleMeta = formatMetadataEntries(event.metadata)
 
   return (
     <Html>
@@ -64,9 +60,9 @@ export function ImmediateNotification({
                 {excerpt && (
                   <Text style={excerptStyle}>{excerpt}</Text>
                 )}
-                {visibleMeta.map(([key, value]) => (
-                  <Text key={key} style={metadataLine}>
-                    <span style={{ color: '#888888' }}>{key}:</span> {value}
+                {visibleMeta.map((entry) => (
+                  <Text key={entry.key} style={metadataLine}>
+                    <span style={{ color: '#888888' }}>{entry.label}:</span> {entry.value}
                   </Text>
                 ))}
               </Section>

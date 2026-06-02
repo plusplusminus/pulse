@@ -19,11 +19,16 @@ export type NotificationPreference = {
   timezone: string;
 };
 
-const DEFAULT_PREFERENCE: Omit<NotificationPreference, "event_type"> = {
+// Default timezone for digest delivery timing. Recipients are predominantly
+// South Africa–based, so "09:00" should mean 9am local rather than 9am UTC.
+export const DEFAULT_TIMEZONE = "Africa/Johannesburg";
+export const DEFAULT_DIGEST_TIME = "09:00";
+
+export const DEFAULT_PREFERENCE: Omit<NotificationPreference, "event_type"> = {
   in_app_enabled: true,
   email_mode: "daily",
-  digest_time: "09:00",
-  timezone: "UTC",
+  digest_time: DEFAULT_DIGEST_TIME,
+  timezone: DEFAULT_TIMEZONE,
 };
 
 /**
@@ -82,8 +87,8 @@ export async function upsertPreferences(
     event_type: p.event_type,
     in_app_enabled: p.in_app_enabled ?? true,
     email_mode: p.email_mode ?? "daily",
-    digest_time: p.digest_time ?? "09:00",
-    timezone: p.timezone ?? "UTC",
+    digest_time: p.digest_time ?? DEFAULT_DIGEST_TIME,
+    timezone: p.timezone ?? DEFAULT_TIMEZONE,
     updated_at: new Date().toISOString(),
   }));
 

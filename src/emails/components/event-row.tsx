@@ -1,29 +1,25 @@
 import { Section, Text, Link } from '@react-email/components'
+import { formatMetadataEntries } from './format-metadata'
 
 interface EventRowProps {
   summary: string
   timestamp: string
   deepLinkUrl: string
   actorName?: string
-  metadata?: Record<string, string>
+  metadata?: Record<string, unknown>
 }
 
-const HIDDEN_KEYS = new Set(['_', 'team_key', 'excerpt'])
-
 export function EventRow({ summary, timestamp, deepLinkUrl, actorName, metadata }: EventRowProps) {
-  const meta = metadata ?? {}
-  const project = meta['Project'] || meta['project']
-  const otherMeta = Object.entries(meta)
-    .filter(([k]) => !HIDDEN_KEYS.has(k) && k !== 'team_key' && !k.startsWith('_') && k.toLowerCase() !== 'project')
-    .map(([k, v]) => `${k}: ${v}`)
+  const entries = formatMetadataEntries(metadata)
+  const projectEntry = entries.find((e) => e.key.toLowerCase() === 'project')
+  const detailEntries = entries.filter((e) => e.key.toLowerCase() !== 'project')
 
-  // Build context parts: Project first, then other metadata, then actor · date last
+  // Context line: Project first, then clean metadata labels, then actor · date.
   const parts: string[] = []
-
-  if (project) parts.push(project)
-  parts.push(...otherMeta)
+  if (projectEntry) parts.push(projectEntry.value)
+  for (const entry of detailEntries) parts.push(`${entry.label}: ${entry.value}`)
   if (actorName) parts.push(actorName)
-  parts.push(timestamp)
+  parts.push(formatTimestamp(timestamp))
 
   return (
     <Section style={{ padding: '10px 0', borderBottom: '1px solid #ebebeb' }}>
@@ -38,4 +34,15 @@ export function EventRow({ summary, timestamp, deepLinkUrl, actorName, metadata 
       </Link>
     </Section>
   )
+}
+
+function formatTimestamp(timestamp: string): string {
+  const date = new Date(timestamp)
+  if (isNaN(date.getTime())) return timestamp
+  return date.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
 }
