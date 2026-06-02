@@ -4,7 +4,7 @@
  * PMs author client-facing comments in Linear, where we can't add a mention
  * picker — so a mention is a typed convention: any `@token` in a client-facing
  * (heyclient/pulse) comment body. Each token resolves to at most one hub member,
- * trying in order: explicit `mention_handle` → email local-part.
+ * trying in order: explicit `mention_handle` → email local-part → full email.
  *
  * Resolution is fail-OPEN: a token that matches zero or multiple members is
  * "unresolved" and never silently drops anyone. The caller broadcasts to
@@ -25,9 +25,11 @@ export type MentionResolution = {
 };
 
 // @token at a token boundary. The negative lookbehind keeps the @ from being
-// part of an email or word, so "jane@acme.com" in prose is NOT a mention; we
-// capture only the username portion. Matches @jane, @jane.doe.
-const MENTION_TOKEN = /(?<![\w.@-])@([a-z0-9._+-]+)/gi;
+// part of an email or word, so "jane@acme.com" in prose is NOT a mention. The
+// optional (…@domain.tld) tail lets a PM disambiguate with an explicit
+// @jane@acme.com. Matches @jane, @jane.doe, @jane@acme.com.
+const MENTION_TOKEN =
+  /(?<![\w.@-])@([a-z0-9._+-]+(?:@[a-z0-9.-]+\.[a-z]{2,})?)/gi;
 
 // The client-facing trigger words are not mentions when written as @heyclient.
 const TRIGGER_TOKENS = new Set(["heyclient", "pulse"]);
@@ -81,7 +83,17 @@ export function resolveMentions(
     const tier =
       byHandle.length > 0
         ? byHandle
-        : matchTier(members, (m) => emailLocalPart(m.email) === token);
+        : (() => {
+            const byLocal = matchTier(
+              members,
+              (m) => emailLocalPart(m.email) === token
+            );
+            if (byLocal.length > 0) return byLocal;
+            return matchTier(
+              members,
+              (m) => !!m.email && m.email.toLowerCase() === token
+            );
+          })();
 
     if (tier.length === 1) {
       mentionedUserIds.add(tier[0]);

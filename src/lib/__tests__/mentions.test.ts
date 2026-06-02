@@ -27,8 +27,10 @@ describe("extractMentionTokens", () => {
     expect(extractMentionTokens("@heyclient @pulse @jane")).toEqual(["jane"]);
   });
 
-  it("captures only the username when an email-like token is typed", () => {
-    expect(extractMentionTokens("pulse ping @jane@acme.com")).toEqual(["jane"]);
+  it("captures an explicit full-email token", () => {
+    expect(extractMentionTokens("pulse ping @jane@acme.com")).toEqual([
+      "jane@acme.com",
+    ]);
   });
 
   it("does not treat a prose email as a mention", () => {
@@ -58,6 +60,12 @@ describe("resolveMentions", () => {
   it("disambiguates a shared local-part via an explicit handle", () => {
     const r = resolveMentions("heyclient @janeb hi", members);
     expect(r.mentionedUserIds).toEqual(["u_jane2"]);
+    expect(r.unresolved).toEqual([]);
+  });
+
+  it("disambiguates a shared local-part via an explicit full email", () => {
+    const r = resolveMentions("heyclient @jane@acme.com hi", members);
+    expect(r.mentionedUserIds).toEqual(["u_jane"]);
     expect(r.unresolved).toEqual([]);
   });
 

@@ -387,32 +387,40 @@ export function NotificationPreferencesForm() {
 
               {/* Comment mention-scope (PULSE-362) */}
               {showScope && (
-                <div className="flex flex-wrap items-center gap-2 px-4 pb-3 -mt-0.5">
-                  <span className="text-xs text-muted-foreground">
-                    Email me about:
-                  </span>
-                  <div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5">
-                    {COMMENT_SCOPE_OPTIONS.map((opt) => (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        aria-pressed={commentScope === opt.id}
-                        onClick={() => {
-                          setCommentScope(opt.id);
-                          setDirty(true);
-                          setFeedback(null);
-                        }}
-                        className={cn(
-                          "px-2.5 py-1 text-xs font-medium rounded-[5px] transition-colors",
-                          commentScope === opt.id
-                            ? "bg-background text-foreground shadow-sm"
-                            : "text-muted-foreground hover:text-foreground"
-                        )}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
+                <div className="px-4 pb-3 -mt-0.5 space-y-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      Email me about:
+                    </span>
+                    <div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5">
+                      {COMMENT_SCOPE_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          aria-pressed={commentScope === opt.id}
+                          onClick={() => {
+                            setCommentScope(opt.id);
+                            setDirty(true);
+                            setFeedback(null);
+                          }}
+                          className={cn(
+                            "px-2.5 py-1 text-xs font-medium rounded-[5px] transition-colors",
+                            commentScope === opt.id
+                              ? "bg-background text-foreground shadow-sm"
+                              : "text-muted-foreground hover:text-foreground"
+                          )}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
+                  {commentScope === "mentions_only" && (
+                    <p className="text-xs text-muted-foreground">
+                      You&apos;ll be emailed only when a team member @mentions you
+                      in a comment.
+                    </p>
+                  )}
                 </div>
               )}
             </div>
