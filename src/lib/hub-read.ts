@@ -247,6 +247,8 @@ export function mapRowToProject(row: {
     priorityLabel: d.priorityLabel ?? priorityToLabel(d.priority ?? 0),
     progress: d.progress ?? 0,
     health: d.health ?? undefined,
+    healthUpdatedAt:
+      (d as { healthUpdatedAt?: string }).healthUpdatedAt ?? undefined,
     startDate: d.startDate ?? undefined,
     targetDate: d.targetDate ?? undefined,
     status: d.status
@@ -1076,7 +1078,7 @@ export async function fetchHubProjects(
   }
 
   // Post-filter: only projects that belong to at least one hub team
-  return (data || [])
+  const projects = (data || [])
     .map((row) =>
       mapRowToProject(
         row as { linear_id: string; data: Record<string, unknown>; created_at: string; updated_at: string }
@@ -1088,6 +1090,149 @@ export async function fetchHubProjects(
       // Otherwise (null = auto-include) ensure the project has at least one team in the hub
       return project.teams.some((t) => teamIds.includes(t.id));
     });
+
+  // Override raw project health with the latest *client-facing* update's health
+  // so clients only ever see opted-in (pulse/heyclient) status — never the raw
+  // internal health. Projects with no client-facing update get no badge.
+  const derivedHealth = await deriveClientFacingHealth(projects.map((p) => p.id));
+  for (const project of projects) {
+    const derived = derivedHealth.get(project.id);
+    project.health = derived?.health ?? undefined;
+    project.healthUpdatedAt = derived?.at ?? undefined;
+  }
+
+  return projects;
+}
+
+/**
+ * Cheap single-project visibility check for a hub — avoids loading every hub
+ * project (and deriving health for all of them) just to validate one id.
+ * Mirrors the visibility rules in fetchHubProjects.
+ */
+export async function isProjectVisibleInHub(
+  hubId: string,
+  projectId: string
+): Promise<boolean> {
+  const mappings = await getHubMappings(hubId);
+  if (mappings.length === 0) return false;
+
+  const allowedProjectIds = mergeProjectVisibility(mappings);
+
+  // Explicit empty array = nothing visible.
+  if (Array.isArray(allowedProjectIds) && allowedProjectIds.length === 0) {
+    return false;
+  }
+
+  // Scoped to a specific set — id must be in it (no DB read needed).
+  if (allowedProjectIds) return allowedProjectIds.includes(projectId);
+
+  // Auto-include (null): the project must belong to at least one hub team.
+  const teamIds = mappings.map((m) => m.linear_team_id);
+  const { data } = await supabaseAdmin
+    .from("synced_projects")
+    .select("data")
+    .eq("user_id", WORKSPACE_USER_ID)
+    .eq("linear_id", projectId)
+    .maybeSingle();
+  if (!data?.data) return false;
+  const d = data.data as { teams?: Array<{ id: string }>; teamIds?: string[] };
+  const projectTeamIds = Array.isArray(d.teams)
+    ? d.teams.map((t) => t.id)
+    : Array.isArray(d.teamIds)
+      ? d.teamIds
+      : [];
+  return projectTeamIds.some((id) => teamIds.includes(id));
+}
+
+export type HubProjectUpdate = {
+  id: string;
+  projectId: string;
+  body: string;
+  health: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/**
+ * For each given project, the health + date of its most recent *client-facing*
+ * health update (pulse/heyclient prefixed). Used to override raw project.health
+ * so clients only see opted-in status. Projects with no client-facing update are
+ * absent from the map (caller leaves health undefined → badge hidden).
+ * Best-effort: on query error returns an empty map (no derived health).
+ */
+export async function deriveClientFacingHealth(
+  projectIds: string[]
+): Promise<Map<string, { health: string | null; at: string }>> {
+  const result = new Map<string, { health: string | null; at: string }>();
+  if (projectIds.length === 0) return result;
+
+  const { data, error } = await supabaseAdmin
+    .from("synced_project_updates")
+    .select("project_id, health, data, created_at")
+    .eq("user_id", WORKSPACE_USER_ID)
+    .in("project_id", projectIds)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("deriveClientFacingHealth error:", error);
+    return result;
+  }
+
+  // Rows are newest-first; the first client-facing update per project wins.
+  for (const row of data || []) {
+    const pid = row.project_id as string | null;
+    if (!pid || result.has(pid)) continue;
+    const body = ((row.data as { body?: string } | null)?.body ?? "").toString();
+    if (!isClientFacing(body)) continue;
+    result.set(pid, {
+      health: (row.health as string | null) ?? null,
+      at: row.created_at as string,
+    });
+  }
+
+  return result;
+}
+
+/**
+ * Fetch the client-facing project health updates for the given project IDs.
+ * Reads synced_project_updates, keeps only pulse/heyclient-prefixed updates,
+ * strips the prefix, newest first. Callers are responsible for passing only
+ * hub-visible project IDs (visibility is enforced upstream).
+ */
+export async function fetchProjectUpdatesForProjectIds(
+  projectIds: string[]
+): Promise<HubProjectUpdate[]> {
+  if (projectIds.length === 0) return [];
+
+  const { data, error } = await supabaseAdmin
+    .from("synced_project_updates")
+    .select("linear_id, project_id, health, data, created_at, updated_at")
+    .eq("user_id", WORKSPACE_USER_ID)
+    .in("project_id", projectIds)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("fetchProjectUpdatesForProjectIds error:", error);
+    throw error;
+  }
+
+  const updates: HubProjectUpdate[] = [];
+  for (const row of data || []) {
+    const body = ((row.data as { body?: string } | null)?.body ?? "").toString();
+    if (!isClientFacing(body)) continue;
+    const stripped = stripClientPrefix(body);
+    if (!stripped) continue; // bare "pulse"/"heyclient" with no content → hide
+    updates.push({
+      id: row.linear_id as string,
+      projectId: row.project_id as string,
+      body: stripped,
+      health: (row.health as string | null) ?? null,
+      createdAt: row.created_at as string,
+      updatedAt: row.updated_at as string,
+    });
+  }
+
+  return updates;
 }
 
 /**

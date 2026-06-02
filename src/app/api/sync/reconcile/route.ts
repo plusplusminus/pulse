@@ -26,6 +26,8 @@ import {
   mapCycleToRow,
   mapCommentToRow,
   batchUpsert,
+  fetchProjectUpdatesForProject,
+  mapProjectUpdateToRow,
 } from "@/lib/initial-sync";
 import { startSyncRun, completeSyncRun, pruneSyncLogs } from "@/lib/sync-logger";
 import { LinearRateLimiter } from "@/lib/linear-rate-limiter";
@@ -180,6 +182,46 @@ function maxRemoteUpdatedAt(entities: Array<{ updatedAt: string }>): Date | null
 }
 
 /**
+ * Fetch + upsert project health updates for the given projects. Reconcile
+ * safety-net for the ProjectUpdate webhook — scoped to the projects already
+ * fetched this pass (changed projects), mirroring how comments are reconciled
+ * only for fetched issues. Upsert-only: deletions are handled by the webhook.
+ */
+async function reconcileProjectUpdates(
+  apiToken: string,
+  projects: Array<{ id: string }>,
+  rateLimiter: LinearRateLimiter
+): Promise<void> {
+  for (const project of projects) {
+    if (!rateLimiter.canProceed()) {
+      console.warn(
+        `[rate-limit] Reconcile: skipping remaining project-update fetches`,
+        rateLimiter.getStatus()
+      );
+      break;
+    }
+    try {
+      const updates = await fetchProjectUpdatesForProject(
+        apiToken,
+        project.id,
+        rateLimiter
+      );
+      if (updates.length > 0) {
+        await batchUpsert(
+          "synced_project_updates",
+          updates.map((u) =>
+            mapProjectUpdateToRow(u, project.id, WORKSPACE_USER_ID)
+          ),
+          "user_id,linear_id"
+        );
+      }
+    } catch (err) {
+      console.error(`Reconcile: project updates for ${project.id} failed:`, err);
+    }
+  }
+}
+
+/**
  * Reconcile all active hubs. Org-level entities (teams, initiatives) are
  * fetched once. Per-team entities are deduplicated across hubs.
  *
@@ -320,6 +362,7 @@ async function reconcileAllHubs(): Promise<HubReconcileResult> {
             );
           }
           result.projectsUpserted += projects.length;
+          await reconcileProjectUpdates(apiToken, projects, rateLimiter);
         }
         console.log(`[diff-check] team ${teamId} projects: ${projectChecksums.length} checked, ${projectDiff.stale.length} stale, ${projectDiff.missing.length} missing, ${projectsToFetch.length} fetched`);
 
@@ -394,6 +437,7 @@ async function reconcileAllHubs(): Promise<HubReconcileResult> {
           if (maxProjUpdated) await setWatermark(teamId, "projects", maxProjUpdated);
         }
         result.projectsUpserted += projects.length;
+        await reconcileProjectUpdates(apiToken, projects, rateLimiter);
         console.log(`Reconcile: team ${teamId} projects — ${projectWatermark ? "incremental" : "full"} — ${projects.length} fetched`);
 
         // Cycles

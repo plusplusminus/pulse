@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { withHubAuth, type HubAuthError } from "@/lib/hub-auth";
-import { getWorkspaceToken } from "@/lib/workspace";
-import { fetchHubProjects } from "@/lib/hub-read";
+import {
+  fetchHubProjects,
+  fetchProjectUpdatesForProjectIds,
+} from "@/lib/hub-read";
 
 export async function GET(
   _request: Request,
@@ -23,85 +25,25 @@ export async function GET(
       return NextResponse.json({ updates: [] });
     }
 
-    const token = await getWorkspaceToken();
-
-    // Batch query: fetch updates for all visible projects (up to 10 updates each)
-    const projectFragments = projects.map(
-      (p, i) =>
-        `p${i}: project(id: "${p.id}") { id name color projectUpdates(first: 10) { nodes { id body health createdAt } } }`
+    const projectMeta = new Map(
+      projects.map((p) => [p.id, { name: p.name, color: p.color ?? null }])
     );
 
-    const query = `query HubUpdates { ${projectFragments.join("\n")} }`;
-
-    const response = await fetch("https://api.linear.app/graphql", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: token.trim(),
-      },
-      body: JSON.stringify({ query }),
+    // Client-facing (pulse/heyclient) updates only, prefix stripped. The DB query
+    // orders by created_at desc, so the flattened feed is already newest-first.
+    const updates = (
+      await fetchProjectUpdatesForProjectIds(projects.map((p) => p.id))
+    ).map((u) => {
+      const meta = projectMeta.get(u.projectId);
+      return {
+        id: u.id,
+        body: u.body,
+        health: u.health ?? "",
+        createdAt: u.createdAt,
+        projectName: meta?.name ?? "",
+        projectColor: meta?.color ?? null,
+      };
     });
-
-    if (!response.ok) {
-      console.error("Linear API error:", await response.text());
-      return NextResponse.json(
-        { error: "Failed to fetch project updates" },
-        { status: 502 }
-      );
-    }
-
-    const result = (await response.json()) as {
-      data?: Record<
-        string,
-        {
-          id: string;
-          name: string;
-          color: string | null;
-          projectUpdates: {
-            nodes: Array<{
-              id: string;
-              body: string;
-              health: string;
-              createdAt: string;
-            }>;
-          };
-        } | null
-      >;
-      errors?: Array<{ message: string }>;
-    };
-
-    if (result.errors) {
-      console.error("GraphQL errors:", result.errors);
-    }
-
-    // Flatten all updates across projects
-    const updates: Array<{
-      id: string;
-      body: string;
-      health: string;
-      createdAt: string;
-      projectName: string;
-      projectColor: string | null;
-    }> = [];
-
-    if (result.data) {
-      for (const project of Object.values(result.data)) {
-        if (!project?.projectUpdates?.nodes) continue;
-        for (const update of project.projectUpdates.nodes) {
-          updates.push({
-            ...update,
-            projectName: project.name,
-            projectColor: project.color,
-          });
-        }
-      }
-    }
-
-    // Sort newest first
-    updates.sort(
-      (a, b) =>
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
 
     return NextResponse.json({ updates });
   } catch (error) {

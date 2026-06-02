@@ -53,6 +53,12 @@ function buildPayloadSummary(
       if (data.name) summary.name = data.name;
       break;
     }
+    case "ProjectUpdate": {
+      if (data.health) summary.health = data.health;
+      const project = data.project as { name?: string } | undefined;
+      if (project?.name) summary.project = project.name;
+      break;
+    }
   }
 
   // For updates, show what changed using Linear's updatedFrom field
@@ -87,6 +93,10 @@ function extractTeamId(payload: WebhookPayload): string | null {
       const teams = (data as { teams?: Array<{ id: string }> }).teams;
       return teams?.[0]?.id ?? null;
     }
+    case "ProjectUpdate":
+      // Project updates don't carry team in the payload; treat as org-level
+      // and let read-time hub project-visibility scope them.
+      return null;
     case "Initiative":
       return null;
     default:

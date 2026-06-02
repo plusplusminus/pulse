@@ -172,7 +172,7 @@ function UpdateCard({
         <span className="text-xs font-medium truncate">
           {update.projectName}
         </span>
-        <HealthBadge health={update.health} />
+        {update.health && <HealthBadge health={update.health} />}
         {!expanded && (
           <span className="text-xs text-muted-foreground truncate hidden sm:block">
             {preview}
