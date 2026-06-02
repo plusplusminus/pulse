@@ -1,6 +1,11 @@
 import { supabaseAdmin } from "./supabase";
 import { sendEmail } from "./email";
 import { DigestNotification, type DigestEvent } from "@/emails/digest-notification";
+import { shouldIncludeInDigest } from "./notification-eligibility";
+import type {
+  NotificationEventType,
+  NotificationPreference,
+} from "./notification-preferences";
 import { createElement } from "react";
 
 type DigestType = "daily" | "weekly";
@@ -203,6 +208,28 @@ async function fetchUserEmailsBatch(
   return map;
 }
 
+/**
+ * Reconstruct the recipient's preference for an event type from a digest
+ * candidate. The candidate was built from notification_preferences rows whose
+ * email_mode equals this digest's cadence, so any type present in
+ * candidate.event_types has email_mode === cadence; anything else has no
+ * matching preference (undefined) and is excluded by the resolver.
+ */
+function candidatePreferenceFor(
+  candidate: DigestCandidate,
+  eventType: string,
+  cadence: DigestType
+): NotificationPreference | undefined {
+  if (!candidate.event_types.includes(eventType)) return undefined;
+  return {
+    event_type: eventType as NotificationEventType,
+    email_mode: cadence,
+    in_app_enabled: true,
+    digest_time: candidate.digest_time,
+    timezone: candidate.timezone,
+  };
+}
+
 async function processOneDigest(
   candidate: DigestCandidate,
   type: DigestType,
@@ -234,9 +261,22 @@ async function processOneDigest(
 
   if (error || !events || events.length === 0) return;
 
+  // The shared resolver (notification-eligibility.ts) is the authority on what
+  // belongs in this digest. Today it mirrors the event_types prefetch above;
+  // PULSE-362/364 will layer mention-scope and per-task rules in here for free.
+  const eligibleEvents = events.filter((ev) =>
+    shouldIncludeInDigest(
+      { event_type: ev.event_type },
+      { preference: candidatePreferenceFor(candidate, ev.event_type, type) },
+      type
+    )
+  );
+
+  if (eligibleEvents.length === 0) return;
+
   // Group events by type for the template
   const grouped: Record<string, DigestEvent[]> = {};
-  for (const ev of events) {
+  for (const ev of eligibleEvents) {
     if (!grouped[ev.event_type]) grouped[ev.event_type] = [];
     const meta = ev.metadata as Record<string, string | undefined>;
     const teamKey = meta?.team_key;
@@ -281,7 +321,7 @@ async function processOneDigest(
   });
 
   // Record in email queue (reference first event for the FK)
-  const firstEventId = events[0].id;
+  const firstEventId = eligibleEvents[0].id;
   await supabaseAdmin.from("notification_email_queue").insert({
     notification_event_id: firstEventId,
     user_id: candidate.user_id,
