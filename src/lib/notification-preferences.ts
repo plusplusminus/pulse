@@ -35,7 +35,9 @@ const EMAIL_ON_BY_DEFAULT: ReadonlySet<NotificationEventType> = new Set([
 const BASE_DEFAULT = {
   in_app_enabled: true,
   digest_time: "09:00",
-  timezone: "UTC",
+  // Recipients are predominantly SA-based, so "09:00" means 9am SAST, not UTC
+  // (PULSE-307). Backfilled for existing rows in 20260602_digest_default_timezone.sql.
+  timezone: "Africa/Johannesburg",
 } as const;
 
 export function defaultPreferenceFor(
