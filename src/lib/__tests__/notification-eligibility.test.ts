@@ -147,3 +147,52 @@ describe("comment mention-scope", () => {
     ).toBe("immediate");
   });
 });
+
+// PULSE-364: per-task mute / subscribe overrides.
+describe("per-task overrides", () => {
+  it("a muted task suppresses notifications regardless of prefs", () => {
+    expect(
+      resolveEmailDelivery(event, {
+        preference: pref("immediate"),
+        taskState: "muted",
+      })
+    ).toBe("off");
+  });
+
+  it("mute wins even over a direct mention", () => {
+    expect(
+      resolveEmailDelivery(event, {
+        preference: pref("immediate"),
+        commentScope: "mentions_only",
+        isMentioned: true,
+        taskState: "muted",
+      })
+    ).toBe("off");
+  });
+
+  it("a subscribed task pierces 'mentions_only' for its comments", () => {
+    expect(
+      resolveEmailDelivery(event, {
+        preference: pref("immediate"),
+        commentScope: "mentions_only",
+        isMentioned: false,
+        taskState: "subscribed",
+      })
+    ).toBe("immediate");
+  });
+
+  it("subscribe never overrides an 'off' channel", () => {
+    expect(
+      resolveEmailDelivery(event, {
+        preference: pref("off"),
+        taskState: "subscribed",
+      })
+    ).toBe("off");
+  });
+
+  it("no per-task override leaves global behaviour unchanged", () => {
+    expect(resolveEmailDelivery(event, { preference: pref("daily") })).toBe(
+      "daily"
+    );
+  });
+});
