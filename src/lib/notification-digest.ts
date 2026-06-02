@@ -113,36 +113,21 @@ export async function processDigests(
 function isDueNow(candidate: DigestCandidate, type: DigestType): boolean {
   const now = new Date();
 
-  let userHour: number;
-  let userDay: number;
-  try {
-    const formatter = new Intl.DateTimeFormat("en-US", {
-      timeZone: candidate.timezone,
-      hour: "numeric",
-      hour12: false,
-      weekday: "short",
-    });
-    const parts = formatter.formatToParts(now);
-    userHour = parseInt(
-      parts.find((p) => p.type === "hour")?.value ?? "0",
-      10
-    );
-    const dayStr = parts.find((p) => p.type === "weekday")?.value ?? "";
-    userDay = dayStr === "Mon" ? 1 : dayStr === "Tue" ? 2 : dayStr === "Wed" ? 3 :
-      dayStr === "Thu" ? 4 : dayStr === "Fri" ? 5 : dayStr === "Sat" ? 6 : 0;
-  } catch {
-    // Invalid timezone — fall back to UTC
-    userHour = now.getUTCHours();
-    userDay = now.getUTCDay();
-  }
+  // Current hour/day in the recipient's timezone, falling back to the shared
+  // default zone (not UTC) when the stored timezone is missing or invalid.
+  const { hour: userHour, day: userDay } = hourAndDayInTimeZone(
+    now,
+    candidate.timezone
+  );
 
-  // Intl can report midnight as hour 24 in some environments; normalize to 0.
-  if (userHour === 24) userHour = 0;
-
-  // Parse preferred hour from digest_time (e.g., "09:00"); default to 9 if
-  // the value is missing or malformed rather than throwing (PULSE-307).
+  // Parse the preferred hour from digest_time (e.g. "09:00"). Treat anything
+  // missing, non-numeric, or outside 0–23 (e.g. "24:00", "99:00") as malformed
+  // and fall back to the default hour rather than scheduling incorrectly.
   const parsedHour = parseInt((candidate.digest_time ?? "").split(":")[0], 10);
-  const preferredHour = Number.isNaN(parsedHour) ? 9 : parsedHour;
+  const preferredHour =
+    Number.isInteger(parsedHour) && parsedHour >= 0 && parsedHour <= 23
+      ? parsedHour
+      : DEFAULT_DIGEST_HOUR;
   if (userHour !== preferredHour) return false;
 
   // Weekly digests only on Monday
@@ -162,16 +147,57 @@ function isDueNow(candidate: DigestCandidate, type: DigestType): boolean {
   return true;
 }
 
+// Shared default for digest scheduling when a recipient's stored values are
+// missing or invalid. Kept local to avoid coupling to the preferences module.
+const DEFAULT_TIMEZONE = "Africa/Johannesburg";
+const DEFAULT_DIGEST_HOUR = 9;
+
+/**
+ * Current hour (0–23) and weekday (0=Sun … 6=Sat) in `tz`. Falls back to the
+ * shared default timezone, then UTC, when `tz` is missing or not a valid zone.
+ */
+function hourAndDayInTimeZone(
+  now: Date,
+  tz: string | null | undefined
+): { hour: number; day: number } {
+  const DAY_INDEX: Record<string, number> = {
+    Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+  };
+  for (const zone of [tz, DEFAULT_TIMEZONE]) {
+    if (!zone || !zone.trim()) continue;
+    try {
+      const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: zone,
+        hour: "numeric",
+        hour12: false,
+        weekday: "short",
+      }).formatToParts(now);
+      let hour = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
+      if (hour === 24) hour = 0; // Intl can report midnight as 24
+      const day =
+        DAY_INDEX[parts.find((p) => p.type === "weekday")?.value ?? ""] ?? 0;
+      return { hour, day };
+    } catch {
+      // invalid zone — try the next candidate
+    }
+  }
+  return { hour: now.getUTCHours(), day: now.getUTCDay() };
+}
+
 async function fetchHubInfoBatch(
   hubIds: string[]
 ): Promise<Map<string, HubInfo>> {
   const map = new Map<string, HubInfo>();
   if (hubIds.length === 0) return map;
 
-  const { data } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from("client_hubs")
     .select("id, name, slug")
     .in("id", hubIds);
+
+  if (error) {
+    throw new Error(`fetchHubInfoBatch: client_hubs lookup failed: ${error.message}`);
+  }
 
   for (const row of data || []) {
     map.set(row.id, { name: row.name, slug: row.slug });
@@ -186,7 +212,10 @@ async function fetchUserEmailsBatch(
   if (userIds.length === 0) return map;
 
   // Fetch from both hub_members and ppm_admins in parallel
-  const [{ data: memberData }, { data: adminData }] = await Promise.all([
+  const [
+    { data: memberData, error: memberError },
+    { data: adminData, error: adminError },
+  ] = await Promise.all([
     supabaseAdmin
       .from("hub_members")
       .select("user_id, email")
@@ -198,6 +227,13 @@ async function fetchUserEmailsBatch(
       .in("user_id", userIds)
       .not("email", "is", null),
   ]);
+
+  if (memberError) {
+    throw new Error(`fetchUserEmailsBatch: hub_members lookup failed: ${memberError.message}`);
+  }
+  if (adminError) {
+    throw new Error(`fetchUserEmailsBatch: ppm_admins lookup failed: ${adminError.message}`);
+  }
 
   for (const row of memberData || []) {
     if (row.email && row.user_id) {
@@ -340,7 +376,14 @@ async function processOneDigest(
     sent_at: result.success ? new Date().toISOString() : null,
   });
 
-  // Update last digest timestamp
+  // Don't advance last_*_digest_at on a failed send: leave it unchanged so the
+  // events roll into the next digest instead of being skipped, and surface the
+  // failure so the caller counts it as an error rather than a send.
+  if (!result.success) {
+    throw new Error(result.error ?? "Failed to send digest email");
+  }
+
+  // Update last digest timestamp (only after a confirmed successful send)
   await supabaseAdmin
     .from("notification_preferences")
     .update({ [lastDigestColumn]: new Date().toISOString() })
