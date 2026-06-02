@@ -67,6 +67,44 @@ const DIGEST_HOURS = Array.from({ length: 24 }, (_, i) => {
   };
 });
 
+type PresetId = "everything" | "comments_only" | "custom";
+
+const PRESETS: {
+  id: Exclude<PresetId, "custom">;
+  label: string;
+  description: string;
+}[] = [
+  {
+    id: "everything",
+    label: "Everything",
+    description: "Email me about every type of update.",
+  },
+  {
+    id: "comments_only",
+    label: "Comments only",
+    description:
+      "Only email me about comments — mutes automated status, task and project updates.",
+  },
+];
+
+const CUSTOM_DESCRIPTION = "Custom — fine-tune each update type below.";
+
+/** Derive which preset (if any) the current preferences match. */
+function detectPreset(prefs: Preference[]): PresetId {
+  if (prefs.length === 0) return "custom";
+  // "Everything": no event type has email turned off.
+  if (prefs.every((p) => p.email_mode !== "off")) return "everything";
+  // "Comments only": the comment stream emails, every other type is off.
+  const commentsOn = prefs.some(
+    (p) => p.event_type === "comment" && p.email_mode !== "off"
+  );
+  const restOff = prefs
+    .filter((p) => p.event_type !== "comment")
+    .every((p) => p.email_mode === "off");
+  if (commentsOn && restOff) return "comments_only";
+  return "custom";
+}
+
 export function NotificationPreferencesForm() {
   const { hubId } = useHub();
   const [preferences, setPreferences] = useState<Preference[]>([]);
@@ -82,6 +120,25 @@ export function NotificationPreferencesForm() {
   const hasDigest = preferences.some(
     (p) => p.email_mode === "daily" || p.email_mode === "weekly"
   );
+
+  // Active quick-setup preset, derived from the current preferences.
+  const activePreset = detectPreset(preferences);
+
+  function applyPreset(id: Exclude<PresetId, "custom">) {
+    setPreferences((prev) =>
+      prev.map((p) => ({
+        ...p,
+        email_mode:
+          id === "everything"
+            ? "daily"
+            : p.event_type === "comment"
+            ? "immediate"
+            : "off",
+      }))
+    );
+    setDirty(true);
+    setFeedback(null);
+  }
 
   const fetchPreferences = useCallback(async () => {
     try {
@@ -176,6 +233,36 @@ export function NotificationPreferencesForm() {
 
   return (
     <div className="space-y-6">
+      {/* Quick-setup presets */}
+      <div className="space-y-2">
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          Quick setup
+        </p>
+        <div className="inline-flex rounded-lg border border-border bg-muted/30 p-0.5">
+          {PRESETS.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              onClick={() => applyPreset(preset.id)}
+              aria-pressed={activePreset === preset.id}
+              className={cn(
+                "px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
+                activePreset === preset.id
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {activePreset === "custom"
+            ? CUSTOM_DESCRIPTION
+            : PRESETS.find((p) => p.id === activePreset)?.description}
+        </p>
+      </div>
+
       {/* Preferences table */}
       <div className="border border-border rounded-lg overflow-hidden">
         {/* Header */}

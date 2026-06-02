@@ -367,7 +367,7 @@ function MappingCard({
             teamId={mapping.linear_team_id}
             value={hiddenLabelIds}
             onChange={setHiddenLabelIds}
-            label="Hidden labels"
+            label="Hidden tasks"
             description="Issues with any of these labels will be entirely excluded from the client hub."
           />
           <InitiativePicker
