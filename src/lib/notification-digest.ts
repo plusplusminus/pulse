@@ -268,7 +268,14 @@ async function processOneDigest(
     .order("created_at", { ascending: false })
     .limit(100);
 
-  if (error || !events || events.length === 0) return false;
+  if (error) {
+    // A real read failure is an error, not a no-op skip — let it propagate so
+    // processDigests counts it under stats.errors and logs it.
+    throw new Error(
+      `digest event query failed (hub=${candidate.hub_id}, user=${candidate.user_id}): ${error.message}`
+    );
+  }
+  if (!events || events.length === 0) return false;
 
   // PULSE-362: the recipient's comment-scope gates mention-only comment emails.
   const commentScope = await getCommentScope(candidate.hub_id, candidate.user_id);
@@ -338,7 +345,7 @@ async function processOneDigest(
     }),
   });
 
-  // Record in email queue (reference first event for the FK)
+  // Record the attempt in the email queue (sent or failed) for observability.
   const firstEventId = eligibleEvents[0].id;
   await supabaseAdmin.from("notification_email_queue").insert({
     notification_event_id: firstEventId,
@@ -352,7 +359,17 @@ async function processOneDigest(
     sent_at: result.success ? new Date().toISOString() : null,
   });
 
-  // Update last digest timestamp
+  if (!result.success) {
+    // Don't advance the digest cursor on a failed send: the events stay within
+    // the next window so the digest retries rather than being silently skipped,
+    // and stats.sent stays accurate.
+    console.error(
+      `processOneDigest: send failed (hub=${candidate.hub_id}, user=${candidate.user_id}): ${result.error ?? "unknown error"}`
+    );
+    return false;
+  }
+
+  // Advance the digest cursor only after a confirmed successful send.
   await supabaseAdmin
     .from("notification_preferences")
     .update({ [lastDigestColumn]: new Date().toISOString() })
