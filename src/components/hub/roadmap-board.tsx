@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import Link from "next/link";
 import { Calendar, CircleDot } from "lucide-react";
 
 type Project = {
@@ -43,9 +44,11 @@ const PRIORITY_COLUMNS = [
 export function RoadmapBoard({
   projects,
   groupBy,
+  getHref,
 }: {
   projects: Project[];
   groupBy: BoardGroupBy;
+  getHref?: (projectId: string) => string;
 }) {
   const columns = useMemo((): [string, Column][] => {
     if (groupBy === "priority") {
@@ -134,7 +137,11 @@ export function RoadmapBoard({
           {/* Cards */}
           <div className="space-y-2 px-1">
             {column.projects.map((project) => (
-              <ProjectCard key={project.id} project={project} />
+              <ProjectCard
+                key={project.id}
+                project={project}
+                href={getHref?.(project.id)}
+              />
             ))}
           </div>
         </div>
@@ -143,13 +150,15 @@ export function RoadmapBoard({
   );
 }
 
-function ProjectCard({ project }: { project: Project }) {
+function ProjectCard({ project, href }: { project: Project; href?: string }) {
   const progressPct = Math.round(project.progress * 100);
   const color = project.color || project.status.color || "var(--primary)";
 
-  return (
-    <div className="bg-card border border-border/40 rounded-md hover:border-border/60 hover:shadow-sm transition-all duration-200">
-      <div className="p-3">
+  const cardClass =
+    "block bg-card border border-border/40 rounded-md hover:border-border/60 hover:shadow-sm transition-all duration-200";
+
+  const inner = (
+    <div className="p-3">
         {/* Color dot + name */}
         <div className="flex items-center gap-2 mb-2">
           <span
@@ -192,7 +201,14 @@ function ProjectCard({ project }: { project: Project }) {
           )}
         </div>
       </div>
-    </div>
+  );
+
+  return href ? (
+    <Link href={href} className={cardClass}>
+      {inner}
+    </Link>
+  ) : (
+    <div className={cardClass}>{inner}</div>
   );
 }
 
