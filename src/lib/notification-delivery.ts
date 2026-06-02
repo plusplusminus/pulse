@@ -56,6 +56,11 @@ function buildDeepLinkUrl(
     return `${base}/${teamKey}/task/${issueId}`;
   }
 
+  // Project (incl. health updates) — link to the project page
+  if (entityType === "project" && teamKey) {
+    return `${base}/${teamKey}/projects/${entityId}`;
+  }
+
   return base;
 }
 

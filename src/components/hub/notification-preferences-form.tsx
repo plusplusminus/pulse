@@ -49,6 +49,10 @@ const EVENT_TYPE_META: Record<string, { label: string; description: string }> =
       label: "Initiative Updates",
       description: "When initiatives are updated",
     },
+    health_update: {
+      label: "Project Health Updates",
+      description: "When your PM posts a project update for you",
+    },
   };
 
 const EMAIL_MODE_LABELS: Record<string, string> = {

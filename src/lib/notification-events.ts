@@ -26,7 +26,8 @@ type NotificationEventType =
   | "project_update"
   | "new_issue"
   | "cycle_update"
-  | "initiative_update";
+  | "initiative_update"
+  | "health_update";
 
 type EntityType = "issue" | "comment" | "project" | "cycle" | "initiative";
 
@@ -377,14 +378,11 @@ function generateProjectSummary(
     };
   }
 
-  // Health change
-  if (updatedFrom.health !== undefined) {
-    return {
-      eventType: "project_update",
-      summary: `Project ${name} health changed to ${(data.health as string) ?? "unknown"}`,
-      metadata: { name, new_health: data.health, old_health: updatedFrom.health },
-    };
-  }
+  // Health change — intentionally NOT notified (PULSE-363). PULSE-359 hides raw
+  // internal project health from clients (the hub derives health only from
+  // client-facing updates), so emitting on the raw health field would leak
+  // internal state. Client-facing health flows via the ProjectUpdate
+  // (health_update) path instead.
 
   // Name change
   if (updatedFrom.name !== undefined) {
@@ -478,13 +476,8 @@ function generateInitiativeSummary(
     };
   }
 
-  if (updatedFrom.health !== undefined) {
-    return {
-      eventType: "initiative_update",
-      summary: `Initiative ${name} health changed to ${(data.health as string) ?? "unknown"}`,
-      metadata: { name, new_health: data.health, old_health: updatedFrom.health },
-    };
-  }
+  // Initiative health changes are intentionally not notified (PULSE-363),
+  // consistent with project health: raw internal health must not reach clients.
 
   if (updatedFrom.name !== undefined) {
     return {
@@ -497,6 +490,83 @@ function generateInitiativeSummary(
   return null;
 }
 
+// Linear project health values → readable labels.
+const HEALTH_LABELS: Record<string, string> = {
+  onTrack: "On Track",
+  atRisk: "At Risk",
+  offTrack: "Off Track",
+};
+
+/**
+ * Client-facing project health updates (PULSE-363, off PULSE-359's ProjectUpdate
+ * ingestion). Only updates whose body carries the heyclient/pulse trigger notify
+ * — mirroring comments and the PULSE-359 read-time filter, so internal health
+ * updates never reach clients. Broadcast (no per-person mention).
+ */
+async function generateHealthUpdateSummary(
+  action: string,
+  data: Record<string, unknown>,
+  updatedFrom?: Record<string, unknown>
+): Promise<{ eventType: NotificationEventType; summary: string; metadata: Record<string, unknown>; actorName?: string } | null> {
+  if (action === "remove") return null;
+
+  const body = (data.body as string) ?? "";
+  if (!isClientFacing(body)) return null;
+
+  // On edits, only notify when the update's content actually changed (body or
+  // health) — avoids re-notifying on trivial metadata edits. When updatedFrom is
+  // absent we can't tell what changed, so we notify; this also covers an internal
+  // update later edited to add the heyclient/pulse prefix (that's a body change).
+  if (
+    action === "update" &&
+    updatedFrom &&
+    Object.keys(updatedFrom).length > 0 &&
+    updatedFrom.body === undefined &&
+    updatedFrom.health === undefined
+  ) {
+    return null;
+  }
+
+  const projectId =
+    (data.project as { id?: string })?.id ?? (data.projectId as string) ?? "";
+
+  // The webhook payload carries only the project id, so resolve the name (for the
+  // summary) and a team key (for the deep link) from synced data, best-effort.
+  let projectName = "a project";
+  let teamKey: string | undefined;
+  if (projectId) {
+    const { data: rows } = await supabaseAdmin
+      .from("synced_projects")
+      .select("name, data")
+      .eq("linear_id", projectId)
+      .limit(1);
+    const row = rows?.[0] as
+      | { name?: string; data?: Record<string, unknown> }
+      | undefined;
+    if (row?.name) projectName = row.name;
+    const teams = (row?.data as { teams?: unknown } | undefined)?.teams;
+    const teamList = Array.isArray(teams)
+      ? (teams as Array<{ key?: string }>)
+      : ((teams as { nodes?: Array<{ key?: string }> } | undefined)?.nodes ?? []);
+    if (teamList[0]?.key) teamKey = teamList[0].key;
+  }
+
+  const healthLabel = HEALTH_LABELS[(data.health as string) ?? ""];
+  const excerpt = stripClientPrefix(body).trim();
+
+  return {
+    eventType: "health_update",
+    summary: `Project update — ${projectName}`,
+    actorName: (data.user as { name?: string })?.name,
+    metadata: {
+      project: projectName,
+      ...(healthLabel ? { health: healthLabel } : {}),
+      ...(excerpt ? { excerpt } : {}),
+      ...(teamKey ? { team_key: teamKey } : {}),
+    },
+  };
+}
+
 // -- Entity type mapping -----------------------------------------------------
 
 function webhookTypeToEntityType(type: string): EntityType | null {
@@ -506,6 +576,7 @@ function webhookTypeToEntityType(type: string): EntityType | null {
     case "Project": return "project";
     case "Cycle": return "cycle";
     case "Initiative": return "initiative";
+    case "ProjectUpdate": return "project";
     default: return null;
   }
 }
@@ -522,8 +593,10 @@ async function resolveTargetHubs(
     return getHubsForTeam(teamId);
   }
 
-  // Org-level: Initiatives go to all active hubs (filtered by visibility below)
-  if (type === "Initiative") {
+  // Org-level: Initiatives and project health updates go to all active hubs
+  // (filtered by visibility below). ProjectUpdate payloads don't carry a team,
+  // and projects can span teams, so we target by per-hub project visibility.
+  if (type === "Initiative" || type === "ProjectUpdate") {
     return getAllActiveHubs();
   }
 
@@ -609,6 +682,24 @@ async function filterHubsByVisibility(
     return results.filter((r) => r.visible).map((r) => r.hub);
   }
 
+  // Project health updates: only hubs that can see the project. Unlike issues/
+  // comments we deliberately do NOT exclude overview-only projects — a health
+  // update is project-overview content (PULSE-359 surfaces derived health in the
+  // overview that overview-only hubs DO see), so suppressing it there would hide
+  // health from exactly the hubs configured to show only the overview.
+  if (type === "ProjectUpdate") {
+    const projectId =
+      (data.project as { id?: string })?.id ?? (data.projectId as string);
+    if (!projectId) return [];
+    const results = await Promise.all(
+      hubs.map(async (hub) => ({
+        hub,
+        visible: await isProjectVisibleToHub(hub.id, projectId),
+      }))
+    );
+    return results.filter((r) => r.visible).map((r) => r.hub);
+  }
+
   // Projects, Cycles — visible to all hubs for that team
   return hubs;
 }
@@ -627,12 +718,6 @@ async function fetchMentionableMembers(hubId: string): Promise<MentionableMember
   return (data ?? []) as MentionableMember[];
 }
 
-/**
- * Post an internal confirmation comment on the Linear issue summarising which
- * mentions were delivered and which tokens couldn't be matched. Fire-and-forget;
- * the body deliberately starts with an emoji so isClientFacing() is false and it
- * never surfaces in the hub.
- */
 /**
  * Two independent, fire-and-forget mention signals on the Linear comment:
  *   - 👤 reaction when ≥1 @mention resolved — "Pulse recognised your @mention"
@@ -697,6 +782,9 @@ export async function emitNotificationEventsForWebhook(
       case "Initiative":
         result = generateInitiativeSummary(action, data, updatedFrom);
         break;
+      case "ProjectUpdate":
+        result = await generateHealthUpdateSummary(action, data, updatedFrom);
+        break;
     }
 
     // Skip if no meaningful event to emit
@@ -714,7 +802,15 @@ export async function emitNotificationEventsForWebhook(
         .maybeSingle();
       teamKey = team?.key ?? null;
     }
-    const entityId = (data.id as string) ?? "unknown";
+    // For health updates the meaningful entity is the project (so deep links
+    // target the project page), not the ProjectUpdate row itself.
+    const entityId =
+      type === "ProjectUpdate"
+        ? ((data.project as { id?: string })?.id ??
+          (data.projectId as string) ??
+          (data.id as string) ??
+          "unknown")
+        : ((data.id as string) ?? "unknown");
     const actorName = result.actorName ?? extractActorName(data);
 
     // Enrich metadata with team_key for deep linking in UI

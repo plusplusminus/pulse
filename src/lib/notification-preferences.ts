@@ -7,6 +7,7 @@ export const EVENT_TYPES = [
   "new_issue",
   "cycle_update",
   "initiative_update",
+  "health_update",
 ] as const;
 
 export type NotificationEventType = (typeof EVENT_TYPES)[number];
@@ -25,11 +26,16 @@ export type NotificationPreference = {
 // receive out of the box. Previously every event type defaulted to a daily
 // email digest, which firehosed clients with automated noise and buried the
 // messages PMs actually addressed to them. We now default email ON only for
-// the client-directed `comment` stream and OFF for automated event types.
-// The in-app activity feed still surfaces everything (in_app_enabled stays
-// true); only the push channel (email) is quieted.
+// the client-directed streams (`comment`, `health_update`) and OFF for automated
+// event types. The in-app activity feed still surfaces everything (in_app_enabled
+// stays true); only the push channel (email) is quieted.
+//
+// `health_update` (PULSE-363) is a deliberate PM-authored client update gated by
+// the heyclient/pulse trigger — like comments, it's directed at the client, so
+// it's email-on by default.
 const EMAIL_ON_BY_DEFAULT: ReadonlySet<NotificationEventType> = new Set([
   "comment",
+  "health_update",
 ]);
 
 const BASE_DEFAULT = {
