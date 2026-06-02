@@ -68,6 +68,7 @@ export function EpicsView({
           <button
             onClick={() => changeView("list")}
             aria-label="List view"
+            aria-pressed={viewMode === "list"}
             className={cn(
               "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
               viewMode === "list"
@@ -81,6 +82,7 @@ export function EpicsView({
           <button
             onClick={() => changeView("board")}
             aria-label="Board view"
+            aria-pressed={viewMode === "board"}
             className={cn(
               "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
               viewMode === "board"
