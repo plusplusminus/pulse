@@ -234,6 +234,7 @@ export function RoadmapView({ projects }: { projects: Project[] }) {
           <button
             onClick={() => changeView("list")}
             aria-label="List view"
+            aria-pressed={viewMode === "list"}
             className={cn(
               "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
               viewMode === "list"
@@ -247,6 +248,7 @@ export function RoadmapView({ projects }: { projects: Project[] }) {
           <button
             onClick={() => changeView("timeline")}
             aria-label="Timeline view"
+            aria-pressed={viewMode === "timeline"}
             className={cn(
               "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
               viewMode === "timeline"
@@ -260,6 +262,7 @@ export function RoadmapView({ projects }: { projects: Project[] }) {
           <button
             onClick={() => changeView("board")}
             aria-label="Board view"
+            aria-pressed={viewMode === "board"}
             className={cn(
               "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
               viewMode === "board"
@@ -273,6 +276,7 @@ export function RoadmapView({ projects }: { projects: Project[] }) {
           <button
             onClick={() => changeView("priority")}
             aria-label="Priority view"
+            aria-pressed={viewMode === "priority"}
             className={cn(
               "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
               viewMode === "priority"
@@ -290,6 +294,7 @@ export function RoadmapView({ projects }: { projects: Project[] }) {
           <div className="flex items-center border border-border rounded-md overflow-hidden">
             <button
               onClick={() => changeGroupBy("status")}
+              aria-pressed={boardGroupBy === "status"}
               className={cn(
                 "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
                 boardGroupBy === "status"
@@ -302,6 +307,7 @@ export function RoadmapView({ projects }: { projects: Project[] }) {
             </button>
             <button
               onClick={() => changeGroupBy("priority")}
+              aria-pressed={boardGroupBy === "priority"}
               className={cn(
                 "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
                 boardGroupBy === "priority"
@@ -315,6 +321,7 @@ export function RoadmapView({ projects }: { projects: Project[] }) {
             {labelOptions.length > 0 && (
               <button
                 onClick={() => changeGroupBy("label")}
+                aria-pressed={boardGroupBy === "label"}
                 className={cn(
                   "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
                   boardGroupBy === "label"
@@ -334,6 +341,7 @@ export function RoadmapView({ projects }: { projects: Project[] }) {
           <div className="flex items-center border border-border rounded-md overflow-hidden">
             <button
               onClick={() => changePriorityMode("rank")}
+              aria-pressed={priorityMode === "rank"}
               className={cn(
                 "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
                 priorityMode === "rank"
@@ -347,6 +355,7 @@ export function RoadmapView({ projects }: { projects: Project[] }) {
             </button>
             <button
               onClick={() => changePriorityMode("rice")}
+              aria-pressed={priorityMode === "rice"}
               className={cn(
                 "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
                 priorityMode === "rice"

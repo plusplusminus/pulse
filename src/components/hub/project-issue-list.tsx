@@ -397,6 +397,7 @@ export function ProjectIssueList({
           <div className="flex items-center border border-border rounded-md overflow-hidden">
             <button
               onClick={() => changeGroupBy("status")}
+              aria-pressed={groupBy === "status"}
               className={cn(
                 "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
                 groupBy === "status"
@@ -409,6 +410,7 @@ export function ProjectIssueList({
             </button>
             <button
               onClick={() => changeGroupBy("label")}
+              aria-pressed={groupBy === "label"}
               className={cn(
                 "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
                 groupBy === "label"
@@ -426,6 +428,7 @@ export function ProjectIssueList({
         <div className="flex items-center border border-border rounded-md overflow-hidden">
           <button
             onClick={() => changeView("list")}
+            aria-pressed={viewMode === "list"}
             className={cn(
               "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
               viewMode === "list"
@@ -438,6 +441,7 @@ export function ProjectIssueList({
           </button>
           <button
             onClick={() => changeView("kanban")}
+            aria-pressed={viewMode === "kanban"}
             className={cn(
               "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
               viewMode === "kanban"
