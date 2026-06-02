@@ -86,3 +86,64 @@ describe("shouldIncludeInDigest", () => {
     ).toBe(false);
   });
 });
+
+// PULSE-362: comment mention-scope.
+describe("comment mention-scope", () => {
+  it("'all' scope is unaffected by whether the recipient is mentioned", () => {
+    expect(
+      resolveEmailDelivery(event, {
+        preference: pref("immediate"),
+        commentScope: "all",
+        isMentioned: false,
+      })
+    ).toBe("immediate");
+  });
+
+  it("'mentions_only' suppresses a comment the recipient is not mentioned in", () => {
+    expect(
+      resolveEmailDelivery(event, {
+        preference: pref("immediate"),
+        commentScope: "mentions_only",
+        isMentioned: false,
+      })
+    ).toBe("off");
+    expect(
+      shouldIncludeInDigest(
+        event,
+        { preference: pref("daily"), commentScope: "mentions_only", isMentioned: false },
+        "daily"
+      )
+    ).toBe(false);
+  });
+
+  it("'mentions_only' delivers a comment that mentions the recipient (pierces the quiet setting)", () => {
+    expect(
+      shouldSendImmediateEmail(event, {
+        preference: pref("immediate"),
+        commentScope: "mentions_only",
+        isMentioned: true,
+      })
+    ).toBe(true);
+  });
+
+  it("'mentions_only' never overrides an 'off' channel, even when mentioned", () => {
+    expect(
+      resolveEmailDelivery(event, {
+        preference: pref("off"),
+        commentScope: "mentions_only",
+        isMentioned: true,
+      })
+    ).toBe("off");
+  });
+
+  it("mention-scope does not affect non-comment events", () => {
+    const statusEvent = { event_type: "status_change" };
+    expect(
+      resolveEmailDelivery(statusEvent, {
+        preference: pref("immediate"),
+        commentScope: "mentions_only",
+        isMentioned: false,
+      })
+    ).toBe("immediate");
+  });
+});

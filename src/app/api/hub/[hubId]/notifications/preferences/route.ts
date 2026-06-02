@@ -6,6 +6,12 @@ import {
   EVENT_TYPES,
   type NotificationEventType,
 } from "@/lib/notification-preferences";
+import {
+  getCommentScope,
+  upsertCommentScope,
+  COMMENT_SCOPES,
+  type CommentScope,
+} from "@/lib/notification-settings";
 
 export async function GET(
   _request: Request,
@@ -22,8 +28,14 @@ export async function GET(
       );
     }
 
-    const preferences = await getPreferencesForUser(hubId, auth.user.id);
-    return NextResponse.json({ preferences });
+    const [preferences, commentScope] = await Promise.all([
+      getPreferencesForUser(hubId, auth.user.id),
+      getCommentScope(hubId, auth.user.id),
+    ]);
+    return NextResponse.json({
+      preferences,
+      settings: { comment_scope: commentScope },
+    });
   } catch (error) {
     console.error("GET /api/hub/[hubId]/notifications/preferences error:", error);
     return NextResponse.json(
@@ -56,6 +68,7 @@ export async function PUT(
         digest_time?: string;
         timezone?: string;
       }>;
+      settings?: { comment_scope?: string };
     };
 
     if (!Array.isArray(body.preferences) || body.preferences.length === 0) {
@@ -83,6 +96,17 @@ export async function PUT(
       }
     }
 
+    const commentScopeInput = body.settings?.comment_scope;
+    if (
+      commentScopeInput !== undefined &&
+      !COMMENT_SCOPES.includes(commentScopeInput as CommentScope)
+    ) {
+      return NextResponse.json(
+        { error: `Invalid comment_scope: ${commentScopeInput}` },
+        { status: 400 }
+      );
+    }
+
     const preferences = await upsertPreferences(
       hubId,
       auth.user.id,
@@ -95,7 +119,19 @@ export async function PUT(
       }>
     );
 
-    return NextResponse.json({ preferences });
+    const commentScope =
+      commentScopeInput !== undefined
+        ? await upsertCommentScope(
+            hubId,
+            auth.user.id,
+            commentScopeInput as CommentScope
+          )
+        : await getCommentScope(hubId, auth.user.id);
+
+    return NextResponse.json({
+      preferences,
+      settings: { comment_scope: commentScope },
+    });
   } catch (error) {
     console.error("PUT /api/hub/[hubId]/notifications/preferences error:", error);
     return NextResponse.json(

@@ -10,6 +10,13 @@ import {
 } from "@/lib/hub-visibility";
 import { isClientFacing, stripClientPrefix } from "@/lib/hub-read";
 import { processImmediateEmails } from "@/lib/notification-delivery";
+import {
+  resolveMentions,
+  extractMentionTokens,
+  type MentionableMember,
+} from "@/lib/mentions";
+import { pushCommentToLinear } from "@/lib/linear-push";
+import { reactMentionOnComment } from "@/lib/pulse-reaction";
 
 // -- Types -------------------------------------------------------------------
 
@@ -32,6 +39,7 @@ type EmitParams = {
   actorName: string | null;
   summary: string;
   metadata?: Record<string, unknown>;
+  mentionedUserIds?: string[];
 };
 
 type WebhookPayload = {
@@ -55,6 +63,7 @@ async function emitNotificationEvent(params: EmitParams): Promise<string | null>
       actor_name: params.actorName,
       summary: params.summary,
       metadata: params.metadata ?? {},
+      mentioned_user_ids: params.mentionedUserIds ?? [],
     })
     .select("id")
     .single();
@@ -604,6 +613,53 @@ async function filterHubsByVisibility(
   return hubs;
 }
 
+// -- Mention resolution + echo -----------------------------------------------
+
+async function fetchMentionableMembers(hubId: string): Promise<MentionableMember[]> {
+  const { data, error } = await supabaseAdmin
+    .from("hub_members")
+    .select("user_id, email, mention_handle")
+    .eq("hub_id", hubId);
+  if (error) {
+    console.error("fetchMentionableMembers error:", error);
+    return [];
+  }
+  return (data ?? []) as MentionableMember[];
+}
+
+/**
+ * Post an internal confirmation comment on the Linear issue summarising which
+ * mentions were delivered and which tokens couldn't be matched. Fire-and-forget;
+ * the body deliberately starts with an emoji so isClientFacing() is false and it
+ * never surfaces in the hub.
+ */
+/**
+ * Two independent, fire-and-forget mention signals on the Linear comment:
+ *   - 👤 reaction when ≥1 @mention resolved — "Pulse recognised your @mention"
+ *     (a recognition signal, NOT a delivery guarantee).
+ *   - ⚠️ a top-level internal comment naming any unmatched tokens. It is posted
+ *     top-level (not threaded) on purpose: hub-read surfaces every reply under a
+ *     client-facing comment, so a threaded warning would leak to the client.
+ * Stale ⚠️ comments from an earlier draft are intentionally left as-is.
+ */
+async function postMentionEcho(
+  commentId: string | undefined,
+  issueId: string | undefined,
+  anyResolved: boolean,
+  unresolved: string[]
+): Promise<void> {
+  if (anyResolved && commentId) {
+    void reactMentionOnComment(commentId);
+  }
+  if (unresolved.length > 0 && issueId) {
+    const tokens = unresolved.map((t) => `@${t}`).join(", ");
+    void pushCommentToLinear(
+      issueId,
+      `⚠️ Pulse couldn't match ${tokens} to a hub member — notified everyone instead.`
+    ).catch((err) => console.error("postMentionEcho ⚠️ failed:", err));
+  }
+}
+
 // -- Main entry point --------------------------------------------------------
 
 /**
@@ -674,6 +730,46 @@ export async function emitNotificationEventsForWebhook(
     const visibleHubs = await filterHubsByVisibility(allHubs, type, data, teamId);
     if (visibleHubs.length === 0) return;
 
+    // For client-facing comments, resolve @mentions against each hub's members
+    // so the delivery layer can honour "only notify me when mentioned". Resolve
+    // once across the union of members, then stamp the per-hub subset below.
+    const mentionByHub = new Map<string, string[]>();
+    let echoAnyResolved = false;
+    let echoUnresolved: string[] = [];
+    let hasMentionTokens = false;
+    if (type === "Comment") {
+      const body = (data.body as string) ?? "";
+      if (extractMentionTokens(body).length > 0) {
+        hasMentionTokens = true;
+        // Resolve mentions PER hub — members (and therefore name collisions)
+        // differ between hubs, and fail-open must be decided against the hub the
+        // notification is scoped to, not a global union.
+        const perHub = await Promise.all(
+          visibleHubs.map(async (h) => ({
+            hub: h,
+            members: await fetchMentionableMembers(h.id),
+          }))
+        );
+        const unresolvedTokens = new Set<string>();
+        for (const { hub, members } of perHub) {
+          const res = resolveMentions(body, members);
+          if (res.mentionedUserIds.length > 0) echoAnyResolved = true;
+          if (res.unresolved.length > 0) {
+            // Fail-open: an unmatched token broadcasts to every member of this
+            // hub so a 'mentions_only' recipient is never silently skipped.
+            mentionByHub.set(
+              hub.id,
+              members.map((m) => m.user_id)
+            );
+            res.unresolved.forEach((t) => unresolvedTokens.add(t));
+          } else {
+            mentionByHub.set(hub.id, res.mentionedUserIds);
+          }
+        }
+        echoUnresolved = [...unresolvedTokens];
+      }
+    }
+
     // Emit one event per hub
     const eventIds = await Promise.all(
       visibleHubs.map((hub) =>
@@ -686,6 +782,7 @@ export async function emitNotificationEventsForWebhook(
           actorName,
           summary: result!.summary,
           metadata,
+          mentionedUserIds: mentionByHub.get(hub.id) ?? [],
         })
       )
     );
@@ -696,6 +793,14 @@ export async function emitNotificationEventsForWebhook(
       if (eventId) {
         void processImmediateEmails(visibleHubs[i].id, eventId, result!.eventType);
       }
+    }
+
+    // Post a one-off echo on the Linear issue confirming who the @mention
+    // reached (or warning when a token didn't match). Internal-only.
+    if (hasMentionTokens) {
+      const commentId = data.id as string | undefined;
+      const issueId = (data.issue as { id?: string })?.id;
+      void postMentionEcho(commentId, issueId, echoAnyResolved, echoUnresolved);
     }
   } catch (error) {
     console.error("emitNotificationEventsForWebhook: unexpected error:", error);
