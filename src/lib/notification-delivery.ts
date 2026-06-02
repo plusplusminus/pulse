@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getPreferencesForUser } from "@/lib/notification-preferences";
 import { shouldSendImmediateEmail } from "@/lib/notification-eligibility";
+import { getCommentScopesForHub, type CommentScope } from "@/lib/notification-settings";
 import { sendEmail } from "@/lib/email";
 import { ImmediateNotification } from "@/emails/immediate-notification";
 
@@ -23,6 +24,7 @@ type NotificationEvent = {
   actor_name: string | null;
   summary: string;
   metadata: Record<string, unknown>;
+  mentioned_user_ids: string[] | null;
   created_at: string;
 };
 
@@ -242,6 +244,13 @@ export async function processImmediateEmails(
 
     if (eligibleMembers.length === 0) return;
 
+    // Mention + comment-scope context for the shared resolver (PULSE-362).
+    const mentionedIds = new Set<string>(event.mentioned_user_ids ?? []);
+    const commentScopes =
+      eventType === "comment"
+        ? await getCommentScopesForHub(hubId)
+        : new Map<string, CommentScope>();
+
     // Check preferences and send in parallel
     await Promise.all(
       eligibleMembers.map(async (member) => {
@@ -250,7 +259,16 @@ export async function processImmediateEmails(
           const preference = prefs.find((p) => p.event_type === eventType);
 
           // Delivery decision lives in the shared resolver (notification-eligibility.ts).
-          if (!shouldSendImmediateEmail({ event_type: eventType }, { preference }))
+          if (
+            !shouldSendImmediateEmail(
+              { event_type: eventType },
+              {
+                preference,
+                commentScope: commentScopes.get(member.user_id) ?? "all",
+                isMentioned: mentionedIds.has(member.user_id),
+              }
+            )
+          )
             return;
 
           // Insert queue row

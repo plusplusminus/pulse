@@ -2,6 +2,7 @@ import { supabaseAdmin } from "./supabase";
 import { sendEmail } from "./email";
 import { DigestNotification, type DigestEvent } from "@/emails/digest-notification";
 import { shouldIncludeInDigest } from "./notification-eligibility";
+import { getCommentScope } from "./notification-settings";
 import type {
   NotificationEventType,
   NotificationPreference,
@@ -92,8 +93,16 @@ export async function processDigests(
   // Step 6: Process each candidate
   for (const candidate of dueCandidates) {
     try {
-      await processOneDigest(candidate, type, lastDigestColumn, lookbackHours, hubMap, emailMap);
-      stats.sent++;
+      const sent = await processOneDigest(
+        candidate,
+        type,
+        lastDigestColumn,
+        lookbackHours,
+        hubMap,
+        emailMap
+      );
+      if (sent) stats.sent++;
+      else stats.skipped++;
     } catch (err) {
       stats.errors++;
       console.error(
@@ -237,12 +246,12 @@ async function processOneDigest(
   lookbackHours: number,
   hubMap: Map<string, HubInfo>,
   emailMap: Map<string, string>
-) {
+): Promise<boolean> {
   const hub = hubMap.get(candidate.hub_id);
-  if (!hub) return;
+  if (!hub) return false;
 
   const userEmail = emailMap.get(candidate.user_id);
-  if (!userEmail) return;
+  if (!userEmail) return false;
 
   // Calculate lookback window
   const since = candidate.last_digest_at
@@ -252,27 +261,43 @@ async function processOneDigest(
   // Fetch events since last digest, filtered to user's preferred event types
   const { data: events, error } = await supabaseAdmin
     .from("notification_events")
-    .select("id, event_type, entity_type, entity_id, actor_name, summary, metadata, created_at")
+    .select("id, event_type, entity_type, entity_id, actor_name, summary, metadata, mentioned_user_ids, created_at")
     .eq("hub_id", candidate.hub_id)
     .in("event_type", candidate.event_types)
     .gt("created_at", since)
     .order("created_at", { ascending: false })
     .limit(100);
 
-  if (error || !events || events.length === 0) return;
+  if (error) {
+    // A real read failure is an error, not a no-op skip — let it propagate so
+    // processDigests counts it under stats.errors and logs it.
+    throw new Error(
+      `digest event query failed (hub=${candidate.hub_id}, user=${candidate.user_id}): ${error.message}`
+    );
+  }
+  if (!events || events.length === 0) return false;
+
+  // PULSE-362: the recipient's comment-scope gates mention-only comment emails.
+  const commentScope = await getCommentScope(candidate.hub_id, candidate.user_id);
 
   // The shared resolver (notification-eligibility.ts) is the authority on what
-  // belongs in this digest. Today it mirrors the event_types prefetch above;
-  // PULSE-362/364 will layer mention-scope and per-task rules in here for free.
+  // belongs in this digest. It mirrors the event_types prefetch above and adds
+  // the mention-scope rule (PULSE-362); PULSE-364 will layer per-task rules here.
   const eligibleEvents = events.filter((ev) =>
     shouldIncludeInDigest(
       { event_type: ev.event_type },
-      { preference: candidatePreferenceFor(candidate, ev.event_type, type) },
+      {
+        preference: candidatePreferenceFor(candidate, ev.event_type, type),
+        commentScope,
+        isMentioned: (
+          (ev.mentioned_user_ids as string[] | null | undefined) ?? []
+        ).includes(candidate.user_id),
+      },
       type
     )
   );
 
-  if (eligibleEvents.length === 0) return;
+  if (eligibleEvents.length === 0) return false;
 
   // Group events by type for the template
   const grouped: Record<string, DigestEvent[]> = {};
@@ -320,7 +345,7 @@ async function processOneDigest(
     }),
   });
 
-  // Record in email queue (reference first event for the FK)
+  // Record the attempt in the email queue (sent or failed) for observability.
   const firstEventId = eligibleEvents[0].id;
   await supabaseAdmin.from("notification_email_queue").insert({
     notification_event_id: firstEventId,
@@ -334,13 +359,25 @@ async function processOneDigest(
     sent_at: result.success ? new Date().toISOString() : null,
   });
 
-  // Update last digest timestamp
+  if (!result.success) {
+    // Don't advance the digest cursor on a failed send: the events stay within
+    // the next window so the digest retries rather than being silently skipped,
+    // and stats.sent stays accurate.
+    console.error(
+      `processOneDigest: send failed (hub=${candidate.hub_id}, user=${candidate.user_id}): ${result.error ?? "unknown error"}`
+    );
+    return false;
+  }
+
+  // Advance the digest cursor only after a confirmed successful send.
   await supabaseAdmin
     .from("notification_preferences")
     .update({ [lastDigestColumn]: new Date().toISOString() })
     .eq("hub_id", candidate.hub_id)
     .eq("user_id", candidate.user_id)
     .in("event_type", candidate.event_types);
+
+  return true;
 }
 
 function getBaseUrl(): string {
