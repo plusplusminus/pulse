@@ -1,80 +1,107 @@
 import { supabaseAdmin } from "./supabase";
 
 /**
- * Per-(hub, user) notification settings (PULSE-362).
+ * Per-(hub, user) notification settings (PULSE-362 / PULSE-365).
  *
  * comment_scope:
- *   'all'           — every client-facing comment (default / current behaviour)
+ *   'all'           — every client-facing comment (default)
  *   'mentions_only' — only comments that mention this user
+ * watch_mode:
+ *   'all'             — all activity, minus tasks the user muted (default)
+ *   'subscribed_only' — only tasks the user follows, plus direct @mentions
  *
- * (PULSE-365 adds watch_mode to the same row.)
+ * Both live on a single hub_notification_settings row.
  */
 export type CommentScope = "all" | "mentions_only";
+export type WatchMode = "all" | "subscribed_only";
 
 export const COMMENT_SCOPES: readonly CommentScope[] = ["all", "mentions_only"];
+export const WATCH_MODES: readonly WatchMode[] = ["all", "subscribed_only"];
 
-const DEFAULT_COMMENT_SCOPE: CommentScope = "all";
+export type NotificationSettings = {
+  commentScope: CommentScope;
+  watchMode: WatchMode;
+};
 
-/** Comment scope for one user in one hub; defaults to 'all' when unset. */
-export async function getCommentScope(
+export const DEFAULT_SETTINGS: NotificationSettings = {
+  commentScope: "all",
+  watchMode: "all",
+};
+
+type SettingsRow = { comment_scope?: string | null; watch_mode?: string | null };
+
+function rowToSettings(row: SettingsRow | null | undefined): NotificationSettings {
+  return {
+    commentScope:
+      (row?.comment_scope as CommentScope) ?? DEFAULT_SETTINGS.commentScope,
+    watchMode: (row?.watch_mode as WatchMode) ?? DEFAULT_SETTINGS.watchMode,
+  };
+}
+
+/** Settings for one user in one hub; defaults when unset. */
+export async function getSettings(
   hubId: string,
   userId: string
-): Promise<CommentScope> {
+): Promise<NotificationSettings> {
   const { data, error } = await supabaseAdmin
     .from("hub_notification_settings")
-    .select("comment_scope")
+    .select("comment_scope, watch_mode")
     .eq("hub_id", hubId)
     .eq("user_id", userId)
     .maybeSingle();
 
   if (error) {
-    console.error("getCommentScope error:", error);
-    return DEFAULT_COMMENT_SCOPE;
+    console.error("getSettings error:", error);
+    return DEFAULT_SETTINGS;
   }
-  return (data?.comment_scope as CommentScope) ?? DEFAULT_COMMENT_SCOPE;
+  return rowToSettings(data);
 }
 
-/** All explicitly-set comment scopes for a hub, keyed by user_id. */
-export async function getCommentScopesForHub(
+/** Settings for every user with a row in a hub, keyed by user_id. */
+export async function getSettingsForHub(
   hubId: string
-): Promise<Map<string, CommentScope>> {
-  const map = new Map<string, CommentScope>();
+): Promise<Map<string, NotificationSettings>> {
+  const map = new Map<string, NotificationSettings>();
   const { data, error } = await supabaseAdmin
     .from("hub_notification_settings")
-    .select("user_id, comment_scope")
+    .select("user_id, comment_scope, watch_mode")
     .eq("hub_id", hubId);
 
   if (error) {
-    console.error("getCommentScopesForHub error:", error);
+    console.error("getSettingsForHub error:", error);
     return map;
   }
   for (const row of data ?? []) {
-    map.set(row.user_id, row.comment_scope as CommentScope);
+    map.set(row.user_id, rowToSettings(row));
   }
   return map;
 }
 
-/** Upsert a user's comment scope for a hub. */
-export async function upsertCommentScope(
+/**
+ * Upsert only the supplied settings fields, preserving any not provided.
+ * On insert, omitted columns take their DB defaults; on conflict, only the
+ * supplied columns are updated.
+ */
+export async function upsertSettings(
   hubId: string,
   userId: string,
-  scope: CommentScope
-): Promise<CommentScope> {
+  patch: { commentScope?: CommentScope; watchMode?: WatchMode }
+): Promise<NotificationSettings> {
+  const row: Record<string, unknown> = {
+    hub_id: hubId,
+    user_id: userId,
+    updated_at: new Date().toISOString(),
+  };
+  if (patch.commentScope !== undefined) row.comment_scope = patch.commentScope;
+  if (patch.watchMode !== undefined) row.watch_mode = patch.watchMode;
+
   const { error } = await supabaseAdmin
     .from("hub_notification_settings")
-    .upsert(
-      {
-        hub_id: hubId,
-        user_id: userId,
-        comment_scope: scope,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "hub_id,user_id" }
-    );
+    .upsert(row, { onConflict: "hub_id,user_id" });
 
   if (error) {
-    console.error("upsertCommentScope error:", error);
+    console.error("upsertSettings error:", error);
     throw error;
   }
-  return scope;
+  return getSettings(hubId, userId);
 }

@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getPreferencesForUser } from "@/lib/notification-preferences";
 import { shouldSendImmediateEmail } from "@/lib/notification-eligibility";
-import { getCommentScopesForHub, type CommentScope } from "@/lib/notification-settings";
+import { getSettingsForHub, type NotificationSettings } from "@/lib/notification-settings";
 import { getTaskStatesForIssue, eventIssueLinearId } from "@/lib/task-subscriptions";
 import { sendEmail } from "@/lib/email";
 import { ImmediateNotification } from "@/emails/immediate-notification";
@@ -250,12 +250,11 @@ export async function processImmediateEmails(
 
     if (eligibleMembers.length === 0) return;
 
-    // Mention + comment-scope context for the shared resolver (PULSE-362).
+    // Per-user settings (comment scope + watch mode) for the shared resolver.
+    // Watch mode (PULSE-365) gates every event type, so fetch for all events.
     const mentionedIds = new Set<string>(event.mentioned_user_ids ?? []);
-    const commentScopes =
-      eventType === "comment"
-        ? await getCommentScopesForHub(hubId)
-        : new Map<string, CommentScope>();
+    const settingsByUser: Map<string, NotificationSettings> =
+      await getSettingsForHub(hubId);
 
     // Per-task subscription overrides for this event's task (PULSE-364).
     const taskIssueId = eventIssueLinearId(
@@ -280,9 +279,12 @@ export async function processImmediateEmails(
               { event_type: eventType },
               {
                 preference,
-                commentScope: commentScopes.get(member.user_id) ?? "all",
+                commentScope:
+                  settingsByUser.get(member.user_id)?.commentScope ?? "all",
                 isMentioned: mentionedIds.has(member.user_id),
                 taskState: taskStates.get(member.user_id),
+                watchMode:
+                  settingsByUser.get(member.user_id)?.watchMode ?? "all",
               }
             )
           )

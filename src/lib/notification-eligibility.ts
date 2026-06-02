@@ -1,5 +1,5 @@
 import type { NotificationPreference } from "./notification-preferences";
-import type { CommentScope } from "./notification-settings";
+import type { CommentScope, WatchMode } from "./notification-settings";
 import type { TaskSubscriptionState } from "./task-subscriptions";
 
 /**
@@ -53,6 +53,12 @@ export type RecipientContext = {
    * (and pierces the comment 'mentions_only' scope). Undefined = follow global.
    */
   taskState?: TaskSubscriptionState;
+  /**
+   * The recipient's watch mode (PULSE-365). 'subscribed_only' delivers only the
+   * tasks they follow plus events that directly mention them; everything else is
+   * suppressed. Defaults to 'all'.
+   */
+  watchMode?: WatchMode;
 };
 
 /**
@@ -80,6 +86,18 @@ export function resolveEmailDelivery(
     (ctx.commentScope ?? "all") === "mentions_only" &&
     !ctx.isMentioned &&
     ctx.taskState !== "subscribed"
+  ) {
+    return "off";
+  }
+
+  // Watch mode (PULSE-365): 'subscribed_only' delivers only tasks the recipient
+  // follows plus events that directly mention them; everything else — including
+  // non-task events like project/cycle updates — is suppressed. A mute already
+  // returned above; a mention or an explicit subscribe pierces this.
+  if (
+    (ctx.watchMode ?? "all") === "subscribed_only" &&
+    ctx.taskState !== "subscribed" &&
+    !ctx.isMentioned
   ) {
     return "off";
   }
