@@ -9,7 +9,6 @@ import {
   Target,
   Flag,
   Calendar,
-  CircleDot,
   IterationCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -19,6 +18,7 @@ import { ActivityFeed } from "./activity-feed";
 import { IssueDetailPanel } from "./issue-detail-panel";
 import { useCanInteract } from "@/hooks/use-can-interact";
 import { RoadmapView } from "./roadmap-view";
+import { EpicsView } from "./epics-view";
 
 type Tab = "issues" | "projects" | "roadmap" | "cycles" | "initiatives" | "milestones" | "activity";
 
@@ -160,6 +160,8 @@ export function TeamTabs({
       params.delete("rs");
       params.delete("rp");
       params.delete("rl");
+      // Clear epics-specific params when leaving epics tab
+      params.delete("epicsView");
     }
     const qs = params.toString();
     router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
@@ -248,21 +250,7 @@ export function TeamTabs({
       )}
 
       {activeTab === "projects" && (
-        <div className="p-6 max-w-4xl overflow-y-auto">
-          {projects.length === 0 ? (
-            <EmptySection message="No epics visible for this project" />
-          ) : (
-            <div className="space-y-2">
-              {projects.map((project) => (
-                <ProjectCard
-                  key={project.id}
-                  project={project}
-                  href={`/hub/${hubSlug}/${teamKey}/projects/${project.id}`}
-                />
-              ))}
-            </div>
-          )}
-        </div>
+        <EpicsView projects={projects} hubSlug={hubSlug} teamKey={teamKey} />
       )}
 
       {activeTab === "roadmap" && (
@@ -363,87 +351,6 @@ function EmptySection({ message }: { message: string }) {
     <div className="border border-border rounded-lg p-6 bg-card text-center">
       <p className="text-xs text-muted-foreground">{message}</p>
     </div>
-  );
-}
-
-function ProjectCard({
-  project,
-  href,
-}: {
-  project: {
-    id: string;
-    name: string;
-    color?: string;
-    progress: number;
-    status: { name: string; color: string; type: string };
-    targetDate?: string;
-  };
-  href: string;
-}) {
-  const progressPct = Math.round(project.progress * 100);
-
-  return (
-    <Link
-      href={href}
-      className="flex items-center gap-3 border border-border rounded-lg px-4 py-3 bg-card hover:bg-accent/50 transition-colors group"
-    >
-      <div
-        className="w-2.5 h-2.5 rounded-full shrink-0"
-        style={{
-          backgroundColor:
-            project.color ||
-            project.status.color ||
-            "var(--muted-foreground)",
-        }}
-      />
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium group-hover:text-primary transition-colors truncate">
-          {project.name}
-        </p>
-        <StatusBadge status={project.status} />
-      </div>
-      <div className="flex items-center gap-2 shrink-0">
-        <div className="w-20 h-1.5 rounded-full bg-muted overflow-hidden">
-          <div
-            className="h-full rounded-full transition-all"
-            style={{
-              width: `${progressPct}%`,
-              backgroundColor:
-                project.color ||
-                project.status.color ||
-                "var(--primary)",
-            }}
-          />
-        </div>
-        <span className="text-[10px] tabular-nums text-muted-foreground w-7 text-right">
-          {progressPct}%
-        </span>
-      </div>
-      {project.targetDate && (
-        <div className="flex items-center gap-1 text-muted-foreground shrink-0">
-          <Calendar className="w-3 h-3" />
-          <span className="text-[10px] tabular-nums">
-            {formatDate(project.targetDate)}
-          </span>
-        </div>
-      )}
-    </Link>
-  );
-}
-
-function StatusBadge({
-  status,
-}: {
-  status: { name: string; color: string; type: string };
-}) {
-  return (
-    <span className="inline-flex items-center gap-1 mt-0.5">
-      <CircleDot
-        className="w-3 h-3"
-        style={{ color: status.color || "var(--muted-foreground)" }}
-      />
-      <span className="text-[10px] text-muted-foreground">{status.name}</span>
-    </span>
   );
 }
 
