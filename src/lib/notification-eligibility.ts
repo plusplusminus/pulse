@@ -38,6 +38,13 @@ export type DeliveryEvent = {
 export type RecipientContext = {
   /** The recipient's preference for THIS event's type, or undefined if none. */
   preference: NotificationPreference | undefined;
+  /**
+   * The recipient's comment-scope setting (PULSE-362). 'mentions_only' means
+   * they only want comment emails that mention them. Defaults to 'all'.
+   */
+  commentScope?: "all" | "mentions_only";
+  /** Whether this event explicitly mentions the recipient (PULSE-362). */
+  isMentioned?: boolean;
 };
 
 /**
@@ -46,10 +53,25 @@ export type RecipientContext = {
  * (including when they have no preference for its type).
  */
 export function resolveEmailDelivery(
-  _event: DeliveryEvent,
+  event: DeliveryEvent,
   ctx: RecipientContext
 ): EmailDeliveryMode {
-  return ctx.preference?.email_mode ?? "off";
+  const mode = ctx.preference?.email_mode ?? "off";
+  if (mode === "off") return "off";
+
+  // Comment mention-scope (PULSE-362): a recipient set to 'mentions_only' is
+  // emailed about a comment only when the event mentions them. Other event types
+  // and the default 'all' scope are unaffected. (A mention thus pierces the
+  // quiet 'mentions_only' setting — but never overrides an 'off' channel.)
+  if (
+    event.event_type === "comment" &&
+    (ctx.commentScope ?? "all") === "mentions_only" &&
+    !ctx.isMentioned
+  ) {
+    return "off";
+  }
+
+  return mode;
 }
 
 /** True when the event should trigger an immediate email to the recipient. */

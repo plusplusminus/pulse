@@ -2,6 +2,7 @@ import { supabaseAdmin } from "./supabase";
 import { sendEmail } from "./email";
 import { DigestNotification, type DigestEvent } from "@/emails/digest-notification";
 import { shouldIncludeInDigest } from "./notification-eligibility";
+import { getCommentScope } from "./notification-settings";
 import type {
   NotificationEventType,
   NotificationPreference,
@@ -252,7 +253,7 @@ async function processOneDigest(
   // Fetch events since last digest, filtered to user's preferred event types
   const { data: events, error } = await supabaseAdmin
     .from("notification_events")
-    .select("id, event_type, entity_type, entity_id, actor_name, summary, metadata, created_at")
+    .select("id, event_type, entity_type, entity_id, actor_name, summary, metadata, mentioned_user_ids, created_at")
     .eq("hub_id", candidate.hub_id)
     .in("event_type", candidate.event_types)
     .gt("created_at", since)
@@ -261,13 +262,22 @@ async function processOneDigest(
 
   if (error || !events || events.length === 0) return;
 
+  // PULSE-362: the recipient's comment-scope gates mention-only comment emails.
+  const commentScope = await getCommentScope(candidate.hub_id, candidate.user_id);
+
   // The shared resolver (notification-eligibility.ts) is the authority on what
-  // belongs in this digest. Today it mirrors the event_types prefetch above;
-  // PULSE-362/364 will layer mention-scope and per-task rules in here for free.
+  // belongs in this digest. It mirrors the event_types prefetch above and adds
+  // the mention-scope rule (PULSE-362); PULSE-364 will layer per-task rules here.
   const eligibleEvents = events.filter((ev) =>
     shouldIncludeInDigest(
       { event_type: ev.event_type },
-      { preference: candidatePreferenceFor(candidate, ev.event_type, type) },
+      {
+        preference: candidatePreferenceFor(candidate, ev.event_type, type),
+        commentScope,
+        isMentioned: (
+          (ev.mentioned_user_ids as string[] | null | undefined) ?? []
+        ).includes(candidate.user_id),
+      },
       type
     )
   );

@@ -89,6 +89,11 @@ const PRESETS: {
 
 const CUSTOM_DESCRIPTION = "Custom — fine-tune each update type below.";
 
+const COMMENT_SCOPE_OPTIONS: { id: "all" | "mentions_only"; label: string }[] = [
+  { id: "all", label: "All comments" },
+  { id: "mentions_only", label: "Only when mentioned" },
+];
+
 /** Derive which preset (if any) the current preferences match. */
 function detectPreset(prefs: Preference[]): PresetId {
   if (prefs.length === 0) return "custom";
@@ -115,6 +120,9 @@ export function NotificationPreferencesForm() {
     message: string;
   } | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [commentScope, setCommentScope] = useState<"all" | "mentions_only">(
+    "all"
+  );
 
   // Shared digest settings (derived from first pref that has daily/weekly)
   const hasDigest = preferences.some(
@@ -146,8 +154,14 @@ export function NotificationPreferencesForm() {
         `/api/hub/${hubId}/notifications/preferences`
       );
       if (!res.ok) throw new Error("Failed to load preferences");
-      const data = (await res.json()) as { preferences: Preference[] };
+      const data = (await res.json()) as {
+        preferences: Preference[];
+        settings?: { comment_scope?: "all" | "mentions_only" };
+      };
       setPreferences(data.preferences);
+      if (data.settings?.comment_scope) {
+        setCommentScope(data.settings.comment_scope);
+      }
     } catch {
       setFeedback({
         type: "error",
@@ -193,15 +207,24 @@ export function NotificationPreferencesForm() {
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ preferences }),
+          body: JSON.stringify({
+            preferences,
+            settings: { comment_scope: commentScope },
+          }),
         }
       );
       if (!res.ok) {
         const err = (await res.json()) as { error?: string };
         throw new Error(err.error ?? "Failed to save");
       }
-      const data = (await res.json()) as { preferences: Preference[] };
+      const data = (await res.json()) as {
+        preferences: Preference[];
+        settings?: { comment_scope?: "all" | "mentions_only" };
+      };
       setPreferences(data.preferences);
+      if (data.settings?.comment_scope) {
+        setCommentScope(data.settings.comment_scope);
+      }
       setDirty(false);
       captureEvent(POSTHOG_EVENTS.notification_preferences_updated, { hubId });
       setFeedback({ type: "success", message: "Preferences saved" });
@@ -283,72 +306,108 @@ export function NotificationPreferencesForm() {
           const meta = EVENT_TYPE_META[pref.event_type];
           if (!meta) return null;
 
+          const showScope =
+            pref.event_type === "comment" && pref.email_mode !== "off";
+
           return (
             <div
               key={pref.event_type}
-              className="grid grid-cols-[1fr_80px_140px] sm:grid-cols-[1fr_80px_160px] gap-4 px-4 py-3 border-b border-border last:border-b-0 items-center"
+              className="border-b border-border last:border-b-0"
             >
-              {/* Event info */}
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-foreground">
-                  {meta.label}
-                </p>
-                <p className="text-xs text-muted-foreground mt-0.5 hidden sm:block">
-                  {meta.description}
-                </p>
-              </div>
+              <div className="grid grid-cols-[1fr_80px_140px] sm:grid-cols-[1fr_80px_160px] gap-4 px-4 py-3 items-center">
+                {/* Event info */}
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground">
+                    {meta.label}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5 hidden sm:block">
+                    {meta.description}
+                  </p>
+                </div>
 
-              {/* In-app toggle */}
-              <div className="flex justify-center">
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={pref.in_app_enabled}
-                  onClick={() =>
-                    updatePref(
-                      pref.event_type,
-                      "in_app_enabled",
-                      !pref.in_app_enabled
-                    )
-                  }
-                  className={cn(
-                    "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors",
-                    pref.in_app_enabled
-                      ? "bg-primary"
-                      : "bg-muted-foreground/30"
-                  )}
-                >
-                  <span
+                {/* In-app toggle */}
+                <div className="flex justify-center">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={pref.in_app_enabled}
+                    onClick={() =>
+                      updatePref(
+                        pref.event_type,
+                        "in_app_enabled",
+                        !pref.in_app_enabled
+                      )
+                    }
                     className={cn(
-                      "pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
+                      "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors",
                       pref.in_app_enabled
-                        ? "translate-x-4"
-                        : "translate-x-0"
+                        ? "bg-primary"
+                        : "bg-muted-foreground/30"
                     )}
-                  />
-                </button>
+                  >
+                    <span
+                      className={cn(
+                        "pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
+                        pref.in_app_enabled
+                          ? "translate-x-4"
+                          : "translate-x-0"
+                      )}
+                    />
+                  </button>
+                </div>
+
+                {/* Email mode select */}
+                <div>
+                  <Select
+                    value={pref.email_mode}
+                    onValueChange={(val) =>
+                      updatePref(pref.event_type, "email_mode", val)
+                    }
+                  >
+                    <SelectTrigger size="sm" className="w-full text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(EMAIL_MODE_LABELS).map(([value, label]) => (
+                        <SelectItem key={value} value={value}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
-              {/* Email mode select */}
-              <div>
-                <Select
-                  value={pref.email_mode}
-                  onValueChange={(val) =>
-                    updatePref(pref.event_type, "email_mode", val)
-                  }
-                >
-                  <SelectTrigger size="sm" className="w-full text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(EMAIL_MODE_LABELS).map(([value, label]) => (
-                      <SelectItem key={value} value={value}>
-                        {label}
-                      </SelectItem>
+              {/* Comment mention-scope (PULSE-362) */}
+              {showScope && (
+                <div className="flex flex-wrap items-center gap-2 px-4 pb-3 -mt-0.5">
+                  <span className="text-xs text-muted-foreground">
+                    Email me about:
+                  </span>
+                  <div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5">
+                    {COMMENT_SCOPE_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        aria-pressed={commentScope === opt.id}
+                        onClick={() => {
+                          setCommentScope(opt.id);
+                          setDirty(true);
+                          setFeedback(null);
+                        }}
+                        className={cn(
+                          "px-2.5 py-1 text-xs font-medium rounded-[5px] transition-colors",
+                          commentScope === opt.id
+                            ? "bg-background text-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        {opt.label}
+                      </button>
                     ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}

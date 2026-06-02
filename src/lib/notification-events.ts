@@ -10,6 +10,13 @@ import {
 } from "@/lib/hub-visibility";
 import { isClientFacing } from "@/lib/hub-read";
 import { processImmediateEmails } from "@/lib/notification-delivery";
+import {
+  resolveMentions,
+  extractMentionTokens,
+  type MentionableMember,
+  type MentionResolution,
+} from "@/lib/mentions";
+import { pushCommentToLinear } from "@/lib/linear-push";
 
 // -- Types -------------------------------------------------------------------
 
@@ -32,6 +39,7 @@ type EmitParams = {
   actorName: string | null;
   summary: string;
   metadata?: Record<string, unknown>;
+  mentionedUserIds?: string[];
 };
 
 type WebhookPayload = {
@@ -55,6 +63,7 @@ async function emitNotificationEvent(params: EmitParams): Promise<string | null>
       actor_name: params.actorName,
       summary: params.summary,
       metadata: params.metadata ?? {},
+      mentioned_user_ids: params.mentionedUserIds ?? [],
     })
     .select("id")
     .single();
@@ -586,6 +595,50 @@ async function filterHubsByVisibility(
   return hubs;
 }
 
+// -- Mention resolution + echo -----------------------------------------------
+
+async function fetchMentionableMembers(hubId: string): Promise<MentionableMember[]> {
+  const { data, error } = await supabaseAdmin
+    .from("hub_members")
+    .select("user_id, email, mention_handle")
+    .eq("hub_id", hubId);
+  if (error) {
+    console.error("fetchMentionableMembers error:", error);
+    return [];
+  }
+  return (data ?? []) as MentionableMember[];
+}
+
+/**
+ * Post an internal confirmation comment on the Linear issue summarising which
+ * mentions were delivered and which tokens couldn't be matched. Fire-and-forget;
+ * the body deliberately starts with an emoji so isClientFacing() is false and it
+ * never surfaces in the hub.
+ */
+async function postMentionEcho(
+  issueId: string,
+  resolution: MentionResolution,
+  labels: Map<string, string>
+): Promise<void> {
+  try {
+    const parts: string[] = [];
+    if (resolution.mentionedUserIds.length > 0) {
+      const names = resolution.mentionedUserIds.map((id) => labels.get(id) ?? id);
+      parts.push(`📣 Pulse notified ${names.join(", ")}.`);
+    }
+    if (resolution.unresolved.length > 0) {
+      const tokens = resolution.unresolved.map((t) => `@${t}`).join(", ");
+      parts.push(
+        `⚠️ Couldn't match ${tokens} to a hub member — notified everyone instead.`
+      );
+    }
+    if (parts.length === 0) return;
+    await pushCommentToLinear(issueId, parts.join(" "));
+  } catch (err) {
+    console.error("postMentionEcho failed:", err);
+  }
+}
+
 // -- Main entry point --------------------------------------------------------
 
 /**
@@ -656,6 +709,43 @@ export async function emitNotificationEventsForWebhook(
     const visibleHubs = await filterHubsByVisibility(allHubs, type, data, teamId);
     if (visibleHubs.length === 0) return;
 
+    // For client-facing comments, resolve @mentions against each hub's members
+    // so the delivery layer can honour "only notify me when mentioned". Resolve
+    // once across the union of members, then stamp the per-hub subset below.
+    const mentionByHub = new Map<string, string[]>();
+    let mentionResolution: MentionResolution | null = null;
+    let mentionLabels: Map<string, string> | null = null;
+    if (type === "Comment") {
+      const body = (data.body as string) ?? "";
+      if (extractMentionTokens(body).length > 0) {
+        const perHub = await Promise.all(
+          visibleHubs.map(async (h) => ({
+            hubId: h.id,
+            members: await fetchMentionableMembers(h.id),
+          }))
+        );
+        const uniqueMembers = [
+          ...new Map(
+            perHub.flatMap((p) => p.members).map((m) => [m.user_id, m])
+          ).values(),
+        ];
+        mentionResolution = resolveMentions(body, uniqueMembers);
+        mentionLabels = new Map(
+          uniqueMembers.map((m) => [
+            m.user_id,
+            m.mention_handle ?? m.email ?? m.user_id,
+          ])
+        );
+        const mentioned = new Set(mentionResolution.mentionedUserIds);
+        for (const p of perHub) {
+          mentionByHub.set(
+            p.hubId,
+            p.members.map((m) => m.user_id).filter((id) => mentioned.has(id))
+          );
+        }
+      }
+    }
+
     // Emit one event per hub
     const eventIds = await Promise.all(
       visibleHubs.map((hub) =>
@@ -668,6 +758,7 @@ export async function emitNotificationEventsForWebhook(
           actorName,
           summary: result!.summary,
           metadata,
+          mentionedUserIds: mentionByHub.get(hub.id) ?? [],
         })
       )
     );
@@ -677,6 +768,15 @@ export async function emitNotificationEventsForWebhook(
       const eventId = eventIds[i];
       if (eventId) {
         void processImmediateEmails(visibleHubs[i].id, eventId, result!.eventType);
+      }
+    }
+
+    // Post a one-off echo on the Linear issue confirming who the @mention
+    // reached (or warning when a token didn't match). Internal-only.
+    if (mentionResolution && mentionLabels) {
+      const issueId = (data.issue as { id?: string })?.id;
+      if (issueId) {
+        void postMentionEcho(issueId, mentionResolution, mentionLabels);
       }
     }
   } catch (error) {
