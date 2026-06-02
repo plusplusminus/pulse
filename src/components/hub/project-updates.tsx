@@ -130,7 +130,7 @@ export function ProjectUpdates({
           </span>
         )}
         {/* Show latest health badge inline when collapsed */}
-        {!expanded && !loading && updates.length > 0 && (
+        {!expanded && !loading && updates.length > 0 && updates[0].health && (
           <HealthBadge health={updates[0].health} />
         )}
       </button>
@@ -154,7 +154,7 @@ export function ProjectUpdates({
                   className="rounded-lg border border-border bg-muted/30 p-4"
                 >
                   <div className="flex items-center gap-2 mb-3">
-                    <HealthBadge health={update.health} />
+                    {update.health && <HealthBadge health={update.health} />}
                     <span className="text-[10px] text-muted-foreground">
                       {formatUpdateDate(update.createdAt)}
                     </span>

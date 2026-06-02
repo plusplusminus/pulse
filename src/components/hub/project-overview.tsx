@@ -19,6 +19,7 @@ type ProjectOverviewProps = {
     priority: number;
     priorityLabel: string;
     health?: string;
+    healthUpdatedAt?: string;
     lead?: { id: string; name: string };
     milestones: Array<{ id: string; name: string; targetDate?: string }>;
     status: { id: string; name: string; color: string; type: string };
@@ -133,6 +134,11 @@ export function ProjectOverview({ project, links, documents }: ProjectOverviewPr
                 />
                 {getHealthLabel(project.health)}
               </span>
+              {project.healthUpdatedAt && (
+                <span className="text-[10px] text-muted-foreground">
+                  as of {formatDate(project.healthUpdatedAt)}
+                </span>
+              )}
             </MetadataItem>
           )}
           {project.lead && (

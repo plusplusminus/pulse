@@ -143,6 +143,31 @@ function buildProjectsQuery(since?: Date) {
 `;
 }
 
+function buildProjectUpdatesQuery() {
+  // first: 50 is an intentional cap, not unpaginated truncation: health updates
+  // are infrequent (~weekly), so the newest 50 cover a long history. New updates
+  // arrive via the ProjectUpdate webhook; older ones can be re-surfaced by
+  // editing them in Linear (which fires a webhook), so backfill depth is not
+  // load-bearing for client visibility.
+  return `
+  query ProjectUpdates($projectId: String!) {
+    project(id: $projectId) {
+      projectUpdates(first: 50) {
+        nodes {
+          id
+          body
+          health
+          createdAt
+          updatedAt
+          editedAt
+          user { id name }
+        }
+      }
+    }
+  }
+`;
+}
+
 function buildInitiativesQuery(since?: Date) {
   const filter = since
     ? `\n      filter: { updatedAt: { gt: "${since.toISOString()}" } }`
@@ -289,6 +314,16 @@ type LinearGqlProject = {
   documents: { nodes: Array<{ id: string; title: string; content?: string; slugId: string; icon?: string; color?: string; updatedAt: string }> };
   createdAt: string;
   updatedAt: string;
+};
+
+type LinearGqlProjectUpdate = {
+  id: string;
+  body?: string;
+  health?: string;
+  createdAt: string;
+  updatedAt?: string;
+  editedAt?: string;
+  user?: { id: string; name: string };
 };
 
 type LinearGqlInitiative = {
@@ -536,6 +571,22 @@ export async function fetchAllProjects(
   }
 
   return all;
+}
+
+/**
+ * Fetch a project's health updates (ProjectUpdate). Newest 50 — updates are
+ * infrequent, so no pagination. Every update is fetched; client-facing
+ * filtering happens at read time (hub-read.ts).
+ */
+export async function fetchProjectUpdatesForProject(
+  apiToken: string,
+  projectId: string,
+  rateLimiter?: LinearRateLimiter
+): Promise<LinearGqlProjectUpdate[]> {
+  const data = await linearRequest<{
+    project: { projectUpdates: { nodes: LinearGqlProjectUpdate[] } } | null;
+  }>(apiToken, buildProjectUpdatesQuery(), { projectId }, rateLimiter);
+  return data.project?.projectUpdates?.nodes ?? [];
 }
 
 export async function fetchAllInitiatives(
@@ -1119,6 +1170,25 @@ export function mapProjectToRow(project: LinearGqlProject, userId: string) {
   };
 }
 
+export function mapProjectUpdateToRow(
+  update: LinearGqlProjectUpdate,
+  projectId: string,
+  userId: string
+) {
+  return {
+    linear_id: update.id,
+    user_id: userId,
+    project_id: projectId,
+    health: update.health ?? null,
+    created_at: update.createdAt,
+    updated_at: update.updatedAt ?? update.createdAt,
+    synced_at: new Date().toISOString(),
+    // Mirror the webhook row shape: full update + nested project { id } so the
+    // read layer can rely on data.body / data.health uniformly across sources.
+    data: { ...update, project: { id: projectId } },
+  };
+}
+
 export function mapInitiativeToRow(initiative: LinearGqlInitiative, userId: string) {
   const data = {
     ...initiative,
@@ -1294,6 +1364,29 @@ export async function runHubSync(
           );
         }
         teamResult.projectCount = projects.length;
+
+        // Project health updates for each project (synced unfiltered; the
+        // pulse/heyclient body prefix is applied at read time)
+        for (const project of projects) {
+          if (rateLimiter && !rateLimiter.canProceed()) {
+            console.warn(`[rate-limit] Skipping remaining project-update fetches — rate limit approaching`, rateLimiter.getStatus());
+            break;
+          }
+          const updates = await fetchProjectUpdatesForProject(
+            apiToken,
+            project.id,
+            rateLimiter
+          );
+          if (updates.length > 0) {
+            await batchUpsert(
+              "synced_project_updates",
+              updates.map((u) =>
+                mapProjectUpdateToRow(u, project.id, WORKSPACE_USER_ID)
+              ),
+              "user_id,linear_id"
+            );
+          }
+        }
 
         // Cycles for this team
         const cycles = await fetchAllCycles(apiToken, mapping.linear_team_id, rateLimiter);

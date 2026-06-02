@@ -78,6 +78,18 @@ type LinearProjectData = {
   updatedAt?: string;
 };
 
+type LinearProjectUpdateData = {
+  id: string;
+  body?: string;
+  health?: string;
+  project?: { id?: string };
+  projectId?: string;
+  user?: { name?: string };
+  createdAt?: string;
+  updatedAt?: string;
+  editedAt?: string;
+};
+
 type LinearInitiativeData = {
   id: string;
   name?: string;
@@ -462,6 +474,69 @@ export async function handleProjectEvent(
   }
 }
 
+// -- Project update mapping + event handler ----------------------------------
+//
+// Linear "project health updates" (ProjectUpdate). Every update is synced;
+// client visibility is decided at READ time via the pulse/heyclient body
+// prefix (see hub-read.ts). Do NOT filter here.
+
+export function mapProjectUpdateWebhookToRow(
+  action: string,
+  data: Record<string, unknown>,
+  userId: string
+): Record<string, unknown> {
+  const update = data as unknown as LinearProjectUpdateData;
+
+  const row: Record<string, unknown> = {
+    linear_id: update.id,
+    user_id: userId,
+    synced_at: new Date().toISOString(),
+    data, // Store full webhook payload as-is
+  };
+
+  // Linear webhooks send projectId as a top-level string OR nested object
+  const projectId = update.project?.id ?? update.projectId;
+  if (projectId) row.project_id = projectId;
+  if (update.health !== undefined) row.health = update.health;
+
+  if (action === "create") {
+    row.created_at = update.createdAt || new Date().toISOString();
+    row.updated_at = update.updatedAt || new Date().toISOString();
+  } else {
+    row.updated_at = update.updatedAt || new Date().toISOString();
+  }
+
+  return row;
+}
+
+export async function handleProjectUpdateEvent(
+  action: string,
+  data: Record<string, unknown>,
+  userId: string
+): Promise<void> {
+  const update = data as unknown as LinearProjectUpdateData;
+
+  if (action === "remove") {
+    await supabaseAdmin
+      .from("synced_project_updates")
+      .delete()
+      .eq("user_id", userId)
+      .eq("linear_id", update.id);
+    return;
+  }
+
+  const row = mapProjectUpdateWebhookToRow(action, data, userId);
+
+  const { error } = await supabaseAdmin
+    .from("synced_project_updates")
+    .upsert(row, { onConflict: "user_id,linear_id" });
+
+  if (error) {
+    console.error("Failed to upsert synced_project_update:", error);
+    throw error;
+  }
+}
+
 // -- Cycle event handler -----------------------------------------------------
 
 /** Fields in the data JSON blob that come from GraphQL nested relations
@@ -566,6 +641,9 @@ export async function routeWebhookEvent(
       break;
     case "Project":
       await handleProjectEvent(action, data, userId);
+      break;
+    case "ProjectUpdate":
+      await handleProjectUpdateEvent(action, data, userId);
       break;
     case "Initiative":
       await handleInitiativeEvent(action, data, userId);
