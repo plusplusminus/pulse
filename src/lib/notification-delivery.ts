@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getPreferencesForUser } from "@/lib/notification-preferences";
+import { shouldSendImmediateEmail } from "@/lib/notification-eligibility";
 import { sendEmail } from "@/lib/email";
 import { ImmediateNotification } from "@/emails/immediate-notification";
 
@@ -246,10 +247,11 @@ export async function processImmediateEmails(
       eligibleMembers.map(async (member) => {
         try {
           const prefs = await getPreferencesForUser(hubId, member.user_id);
-          const pref = prefs.find((p) => p.event_type === eventType);
+          const preference = prefs.find((p) => p.event_type === eventType);
 
-          // Only send if email_mode is 'immediate'
-          if (!pref || pref.email_mode !== "immediate") return;
+          // Delivery decision lives in the shared resolver (notification-eligibility.ts).
+          if (!shouldSendImmediateEmail({ event_type: eventType }, { preference }))
+            return;
 
           // Insert queue row
           const queueId = await insertQueueRow({
