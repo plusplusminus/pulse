@@ -4,7 +4,7 @@
  * PMs author client-facing comments in Linear, where we can't add a mention
  * picker — so a mention is a typed convention: any `@token` in a client-facing
  * (heyclient/pulse) comment body. Each token resolves to at most one hub member,
- * trying in order: explicit `mention_handle` → email local-part → full email.
+ * trying in order: explicit `mention_handle` → email local-part.
  *
  * Resolution is fail-OPEN: a token that matches zero or multiple members is
  * "unresolved" and never silently drops anyone. The caller broadcasts to
@@ -24,11 +24,10 @@ export type MentionResolution = {
   unresolved: string[];
 };
 
-// @token where token is a handle/local-part (letters, digits, . _ + -) and may
-// optionally be a full email (…@domain.tld). Matches @jane, @jane.doe,
-// @jane@acme.com.
-const MENTION_TOKEN =
-  /@([A-Za-z0-9._+-]+(?:@[A-Za-z0-9.-]+\.[A-Za-z]{2,})?)/g;
+// @token at a token boundary. The negative lookbehind keeps the @ from being
+// part of an email or word, so "jane@acme.com" in prose is NOT a mention; we
+// capture only the username portion. Matches @jane, @jane.doe.
+const MENTION_TOKEN = /(?<![\w.@-])@([a-z0-9._+-]+)/gi;
 
 // The client-facing trigger words are not mentions when written as @heyclient.
 const TRIGGER_TOKENS = new Set(["heyclient", "pulse"]);
@@ -37,8 +36,9 @@ const TRIGGER_TOKENS = new Set(["heyclient", "pulse"]);
 export function extractMentionTokens(body: string): string[] {
   const out = new Set<string>();
   for (const match of body.matchAll(MENTION_TOKEN)) {
-    const token = match[1].toLowerCase();
-    if (TRIGGER_TOKENS.has(token)) continue;
+    // Strip trailing dots so "@jane." resolves as "jane".
+    const token = match[1].toLowerCase().replace(/[.]+$/, "");
+    if (!token || TRIGGER_TOKENS.has(token)) continue;
     out.add(token);
   }
   return [...out];
@@ -81,17 +81,7 @@ export function resolveMentions(
     const tier =
       byHandle.length > 0
         ? byHandle
-        : (() => {
-            const byLocal = matchTier(
-              members,
-              (m) => emailLocalPart(m.email) === token
-            );
-            if (byLocal.length > 0) return byLocal;
-            return matchTier(
-              members,
-              (m) => !!m.email && m.email.toLowerCase() === token
-            );
-          })();
+        : matchTier(members, (m) => emailLocalPart(m.email) === token);
 
     if (tier.length === 1) {
       mentionedUserIds.add(tier[0]);

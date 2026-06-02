@@ -1,4 +1,5 @@
 import type { NotificationPreference } from "./notification-preferences";
+import type { CommentScope } from "./notification-settings";
 
 /**
  * Unified notification delivery resolver (PULSE-361).
@@ -42,7 +43,7 @@ export type RecipientContext = {
    * The recipient's comment-scope setting (PULSE-362). 'mentions_only' means
    * they only want comment emails that mention them. Defaults to 'all'.
    */
-  commentScope?: "all" | "mentions_only";
+  commentScope?: CommentScope;
   /** Whether this event explicitly mentions the recipient (PULSE-362). */
   isMentioned?: boolean;
 };

@@ -11,8 +11,9 @@ import {
 const members: MentionableMember[] = [
   { user_id: "u_jane", email: "jane@acme.com", mention_handle: null },
   { user_id: "u_sam", email: "sam@acme.com", mention_handle: "sammy" },
-  // local-part collision with u_jane ("jane") to exercise ambiguity
-  { user_id: "u_jane2", email: "jane@other.com", mention_handle: null },
+  // shares the "jane" local-part with u_jane (ambiguity); an explicit handle
+  // disambiguates.
+  { user_id: "u_jane2", email: "jane@other.com", mention_handle: "janeb" },
 ];
 
 describe("extractMentionTokens", () => {
@@ -26,10 +27,14 @@ describe("extractMentionTokens", () => {
     expect(extractMentionTokens("@heyclient @pulse @jane")).toEqual(["jane"]);
   });
 
-  it("supports a full-email token", () => {
-    expect(extractMentionTokens("pulse ping @jane@acme.com")).toEqual([
-      "jane@acme.com",
-    ]);
+  it("captures only the username when an email-like token is typed", () => {
+    expect(extractMentionTokens("pulse ping @jane@acme.com")).toEqual(["jane"]);
+  });
+
+  it("does not treat a prose email as a mention", () => {
+    expect(
+      extractMentionTokens("heyclient email jane@acme.com for access")
+    ).toEqual([]);
   });
 
   it("returns [] for a bare client-facing comment", () => {
@@ -50,9 +55,9 @@ describe("resolveMentions", () => {
     expect(r.unresolved).toEqual([]);
   });
 
-  it("resolves a full email even when the local-part is ambiguous", () => {
-    const r = resolveMentions("heyclient @jane@acme.com hi", members);
-    expect(r.mentionedUserIds).toEqual(["u_jane"]);
+  it("disambiguates a shared local-part via an explicit handle", () => {
+    const r = resolveMentions("heyclient @janeb hi", members);
+    expect(r.mentionedUserIds).toEqual(["u_jane2"]);
     expect(r.unresolved).toEqual([]);
   });
 
@@ -75,7 +80,7 @@ describe("resolveMentions", () => {
   });
 
   it("resolves multiple distinct mentions in one comment", () => {
-    const r = resolveMentions("heyclient @sammy @jane@other.com ship it", members);
+    const r = resolveMentions("heyclient @sammy @janeb ship it", members);
     expect(r.mentionedUserIds.sort()).toEqual(["u_jane2", "u_sam"]);
     expect(r.unresolved).toEqual([]);
   });

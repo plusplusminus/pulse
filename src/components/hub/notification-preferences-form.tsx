@@ -95,10 +95,14 @@ const COMMENT_SCOPE_OPTIONS: { id: "all" | "mentions_only"; label: string }[] = 
 ];
 
 /** Derive which preset (if any) the current preferences match. */
-function detectPreset(prefs: Preference[]): PresetId {
+function detectPreset(
+  prefs: Preference[],
+  commentScope: "all" | "mentions_only"
+): PresetId {
   if (prefs.length === 0) return "custom";
-  // "Everything": no event type has email turned off.
-  if (prefs.every((p) => p.email_mode !== "off")) return "everything";
+  // "Everything": every type emails AND comments aren't mention-filtered.
+  if (commentScope === "all" && prefs.every((p) => p.email_mode !== "off"))
+    return "everything";
   // "Comments only": the comment stream emails, every other type is off.
   const commentsOn = prefs.some(
     (p) => p.event_type === "comment" && p.email_mode !== "off"
@@ -130,7 +134,7 @@ export function NotificationPreferencesForm() {
   );
 
   // Active quick-setup preset, derived from the current preferences.
-  const activePreset = detectPreset(preferences);
+  const activePreset = detectPreset(preferences, commentScope);
 
   function applyPreset(id: Exclude<PresetId, "custom">) {
     setPreferences((prev) =>
@@ -144,6 +148,9 @@ export function NotificationPreferencesForm() {
             : "off",
       }))
     );
+    // "Everything" means no comment filtering; "Comments only" leaves the
+    // all/mentions choice to the scope control below.
+    if (id === "everything") setCommentScope("all");
     setDirty(true);
     setFeedback(null);
   }

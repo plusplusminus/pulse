@@ -93,8 +93,16 @@ export async function processDigests(
   // Step 6: Process each candidate
   for (const candidate of dueCandidates) {
     try {
-      await processOneDigest(candidate, type, lastDigestColumn, lookbackHours, hubMap, emailMap);
-      stats.sent++;
+      const sent = await processOneDigest(
+        candidate,
+        type,
+        lastDigestColumn,
+        lookbackHours,
+        hubMap,
+        emailMap
+      );
+      if (sent) stats.sent++;
+      else stats.skipped++;
     } catch (err) {
       stats.errors++;
       console.error(
@@ -238,12 +246,12 @@ async function processOneDigest(
   lookbackHours: number,
   hubMap: Map<string, HubInfo>,
   emailMap: Map<string, string>
-) {
+): Promise<boolean> {
   const hub = hubMap.get(candidate.hub_id);
-  if (!hub) return;
+  if (!hub) return false;
 
   const userEmail = emailMap.get(candidate.user_id);
-  if (!userEmail) return;
+  if (!userEmail) return false;
 
   // Calculate lookback window
   const since = candidate.last_digest_at
@@ -260,7 +268,7 @@ async function processOneDigest(
     .order("created_at", { ascending: false })
     .limit(100);
 
-  if (error || !events || events.length === 0) return;
+  if (error || !events || events.length === 0) return false;
 
   // PULSE-362: the recipient's comment-scope gates mention-only comment emails.
   const commentScope = await getCommentScope(candidate.hub_id, candidate.user_id);
@@ -282,7 +290,7 @@ async function processOneDigest(
     )
   );
 
-  if (eligibleEvents.length === 0) return;
+  if (eligibleEvents.length === 0) return false;
 
   // Group events by type for the template
   const grouped: Record<string, DigestEvent[]> = {};
@@ -351,6 +359,8 @@ async function processOneDigest(
     .eq("hub_id", candidate.hub_id)
     .eq("user_id", candidate.user_id)
     .in("event_type", candidate.event_types);
+
+  return true;
 }
 
 function getBaseUrl(): string {
