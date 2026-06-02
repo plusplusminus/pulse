@@ -98,6 +98,11 @@ const COMMENT_SCOPE_OPTIONS: { id: "all" | "mentions_only"; label: string }[] = 
   { id: "mentions_only", label: "Only when mentioned" },
 ];
 
+const WATCH_MODE_OPTIONS: { id: "all" | "subscribed_only"; label: string }[] = [
+  { id: "all", label: "All activity" },
+  { id: "subscribed_only", label: "Only tasks I follow" },
+];
+
 /** Derive which preset (if any) the current preferences match. */
 function detectPreset(
   prefs: Preference[],
@@ -131,6 +136,7 @@ export function NotificationPreferencesForm() {
   const [commentScope, setCommentScope] = useState<"all" | "mentions_only">(
     "all"
   );
+  const [watchMode, setWatchMode] = useState<"all" | "subscribed_only">("all");
 
   // Shared digest settings (derived from first pref that has daily/weekly)
   const hasDigest = preferences.some(
@@ -167,11 +173,17 @@ export function NotificationPreferencesForm() {
       if (!res.ok) throw new Error("Failed to load preferences");
       const data = (await res.json()) as {
         preferences: Preference[];
-        settings?: { comment_scope?: "all" | "mentions_only" };
+        settings?: {
+          comment_scope?: "all" | "mentions_only";
+          watch_mode?: "all" | "subscribed_only";
+        };
       };
       setPreferences(data.preferences);
       if (data.settings?.comment_scope) {
         setCommentScope(data.settings.comment_scope);
+      }
+      if (data.settings?.watch_mode) {
+        setWatchMode(data.settings.watch_mode);
       }
     } catch {
       setFeedback({
@@ -220,7 +232,7 @@ export function NotificationPreferencesForm() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             preferences,
-            settings: { comment_scope: commentScope },
+            settings: { comment_scope: commentScope, watch_mode: watchMode },
           }),
         }
       );
@@ -230,11 +242,17 @@ export function NotificationPreferencesForm() {
       }
       const data = (await res.json()) as {
         preferences: Preference[];
-        settings?: { comment_scope?: "all" | "mentions_only" };
+        settings?: {
+          comment_scope?: "all" | "mentions_only";
+          watch_mode?: "all" | "subscribed_only";
+        };
       };
       setPreferences(data.preferences);
       if (data.settings?.comment_scope) {
         setCommentScope(data.settings.comment_scope);
+      }
+      if (data.settings?.watch_mode) {
+        setWatchMode(data.settings.watch_mode);
       }
       setDirty(false);
       captureEvent(POSTHOG_EVENTS.notification_preferences_updated, { hubId });
@@ -294,6 +312,40 @@ export function NotificationPreferencesForm() {
           {activePreset === "custom"
             ? CUSTOM_DESCRIPTION
             : PRESETS.find((p) => p.id === activePreset)?.description}
+        </p>
+      </div>
+
+      {/* Watch scope (PULSE-365) */}
+      <div className="space-y-2">
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          Which tasks
+        </p>
+        <div className="inline-flex rounded-lg border border-border bg-muted/30 p-0.5">
+          {WATCH_MODE_OPTIONS.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => {
+                setWatchMode(opt.id);
+                setDirty(true);
+                setFeedback(null);
+              }}
+              aria-pressed={watchMode === opt.id}
+              className={cn(
+                "px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
+                watchMode === opt.id
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {watchMode === "subscribed_only"
+            ? "Only notify me about tasks I follow, plus comments that @mention me. Following or commenting on a task adds it automatically."
+            : "Notify me about all activity, except tasks I've muted."}
         </p>
       </div>
 

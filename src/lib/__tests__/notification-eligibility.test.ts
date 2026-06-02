@@ -196,3 +196,66 @@ describe("per-task overrides", () => {
     );
   });
 });
+
+// PULSE-365: 'subscribed_only' watch mode.
+describe("watch mode", () => {
+  const statusEvent = { event_type: "status_change" };
+
+  it("'subscribed_only' suppresses activity on tasks the recipient doesn't follow", () => {
+    expect(
+      resolveEmailDelivery(statusEvent, {
+        preference: pref("immediate"),
+        watchMode: "subscribed_only",
+      })
+    ).toBe("off");
+  });
+
+  it("'subscribed_only' delivers activity on a followed task", () => {
+    expect(
+      resolveEmailDelivery(statusEvent, {
+        preference: pref("immediate"),
+        watchMode: "subscribed_only",
+        taskState: "subscribed",
+      })
+    ).toBe("immediate");
+  });
+
+  it("'subscribed_only' lets a direct mention through on an unfollowed task", () => {
+    expect(
+      resolveEmailDelivery(event, {
+        preference: pref("immediate"),
+        watchMode: "subscribed_only",
+        isMentioned: true,
+      })
+    ).toBe("immediate");
+  });
+
+  it("'subscribed_only' suppresses non-task events (e.g. health updates)", () => {
+    const healthEvent = { event_type: "health_update" };
+    expect(
+      resolveEmailDelivery(healthEvent, {
+        preference: pref("immediate"),
+        watchMode: "subscribed_only",
+      })
+    ).toBe("off");
+  });
+
+  it("a muted task stays suppressed even under subscribed-only", () => {
+    expect(
+      resolveEmailDelivery(statusEvent, {
+        preference: pref("immediate"),
+        watchMode: "subscribed_only",
+        taskState: "muted",
+      })
+    ).toBe("off");
+  });
+
+  it("'all' watch mode leaves global behaviour unchanged", () => {
+    expect(
+      resolveEmailDelivery(statusEvent, {
+        preference: pref("daily"),
+        watchMode: "all",
+      })
+    ).toBe("daily");
+  });
+});

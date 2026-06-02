@@ -2,7 +2,7 @@ import { supabaseAdmin } from "./supabase";
 import { sendEmail } from "./email";
 import { DigestNotification, type DigestEvent } from "@/emails/digest-notification";
 import { shouldIncludeInDigest } from "./notification-eligibility";
-import { getCommentScope } from "./notification-settings";
+import { getSettings } from "./notification-settings";
 import { getTaskStatesForUser, eventIssueLinearId } from "./task-subscriptions";
 import type {
   NotificationEventType,
@@ -319,8 +319,8 @@ async function processOneDigest(
   }
   if (!events || events.length === 0) return false;
 
-  // PULSE-362: the recipient's comment-scope gates mention-only comment emails.
-  const commentScope = await getCommentScope(candidate.hub_id, candidate.user_id);
+  // PULSE-362/365: the recipient's settings (comment scope + watch mode).
+  const settings = await getSettings(candidate.hub_id, candidate.user_id);
 
   // PULSE-364: the recipient's per-task overrides for the tasks these events touch.
   const issueIds = [
@@ -355,11 +355,12 @@ async function processOneDigest(
       { event_type: ev.event_type },
       {
         preference: candidatePreferenceFor(candidate, ev.event_type, type),
-        commentScope,
+        commentScope: settings.commentScope,
         isMentioned: (
           (ev.mentioned_user_ids as string[] | null | undefined) ?? []
         ).includes(candidate.user_id),
         taskState: issueId ? taskStates.get(issueId) : undefined,
+        watchMode: settings.watchMode,
       },
       type
     );
