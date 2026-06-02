@@ -26,6 +26,8 @@ export interface DigestNotificationProps {
   events: Record<string, DigestEvent[]>
   period: 'daily' | 'weekly'
   dateRange: string
+  /** IANA timezone of the recipient, used to render event times in their local time. */
+  timeZone?: string
 }
 
 // Display order for event types in digest emails (must match the event_type
@@ -45,6 +47,7 @@ export function DigestNotification({
   events,
   period,
   dateRange,
+  timeZone,
 }: DigestNotificationProps) {
   const totalCount = Object.values(events).reduce((sum, items) => sum + items.length, 0)
   const summaryParts = Object.entries(events).map(
@@ -91,6 +94,7 @@ export function DigestNotification({
                     deepLinkUrl={event.deepLinkUrl}
                     actorName={event.actorName}
                     metadata={event.metadata}
+                    timeZone={timeZone}
                   />
                 ))}
               </Section>

@@ -423,6 +423,7 @@ async function processOneDigest(
       events: grouped,
       period: type,
       dateRange,
+      timeZone: candidate.timezone,
     }),
   });
 

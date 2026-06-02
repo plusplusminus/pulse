@@ -1,15 +1,21 @@
 import { Section, Text, Link } from '@react-email/components'
 import { formatMetadataEntries } from './format-metadata'
 
+// Fallback when no recipient timezone is supplied. Kept local to the email
+// layer so this component doesn't depend on the server-only preferences module.
+const FALLBACK_TIMEZONE = 'Africa/Johannesburg'
+
 interface EventRowProps {
   summary: string
   timestamp: string
   deepLinkUrl: string
   actorName?: string
   metadata?: Record<string, unknown>
+  /** IANA timezone of the recipient, used to render event times in their local time. */
+  timeZone?: string
 }
 
-export function EventRow({ summary, timestamp, deepLinkUrl, actorName, metadata }: EventRowProps) {
+export function EventRow({ summary, timestamp, deepLinkUrl, actorName, metadata, timeZone }: EventRowProps) {
   const entries = formatMetadataEntries(metadata)
   const projectEntry = entries.find((e) => e.key.toLowerCase() === 'project')
   const detailEntries = entries.filter((e) => e.key.toLowerCase() !== 'project')
@@ -19,7 +25,7 @@ export function EventRow({ summary, timestamp, deepLinkUrl, actorName, metadata 
   if (projectEntry) parts.push(projectEntry.value)
   for (const entry of detailEntries) parts.push(`${entry.label}: ${entry.value}`)
   if (actorName) parts.push(actorName)
-  parts.push(formatTimestamp(timestamp))
+  parts.push(formatTimestamp(timestamp, timeZone))
 
   return (
     <Section style={{ padding: '10px 0', borderBottom: '1px solid #ebebeb' }}>
@@ -36,13 +42,20 @@ export function EventRow({ summary, timestamp, deepLinkUrl, actorName, metadata 
   )
 }
 
-function formatTimestamp(timestamp: string): string {
+function formatTimestamp(timestamp: string, timeZone?: string): string {
   const date = new Date(timestamp)
   if (isNaN(date.getTime())) return timestamp
-  return date.toLocaleString('en-US', {
+  const options: Intl.DateTimeFormatOptions = {
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  })
+  }
+  try {
+    // Render in the recipient's timezone so digest times match their local time.
+    return date.toLocaleString('en-US', { ...options, timeZone: timeZone || FALLBACK_TIMEZONE })
+  } catch {
+    // Invalid timezone string — format without it rather than throwing.
+    return date.toLocaleString('en-US', options)
+  }
 }
