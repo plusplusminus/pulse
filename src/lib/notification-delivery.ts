@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { getPreferencesForUser } from "@/lib/notification-preferences";
 import { shouldSendImmediateEmail } from "@/lib/notification-eligibility";
 import { getCommentScopesForHub, type CommentScope } from "@/lib/notification-settings";
+import { getTaskStatesForIssue, eventIssueLinearId } from "@/lib/task-subscriptions";
 import { sendEmail } from "@/lib/email";
 import { ImmediateNotification } from "@/emails/immediate-notification";
 
@@ -256,6 +257,16 @@ export async function processImmediateEmails(
         ? await getCommentScopesForHub(hubId)
         : new Map<string, CommentScope>();
 
+    // Per-task subscription overrides for this event's task (PULSE-364).
+    const taskIssueId = eventIssueLinearId(
+      event.entity_type,
+      event.entity_id,
+      event.metadata
+    );
+    const taskStates = taskIssueId
+      ? await getTaskStatesForIssue(hubId, taskIssueId)
+      : new Map<string, "subscribed" | "muted">();
+
     // Check preferences and send in parallel
     await Promise.all(
       eligibleMembers.map(async (member) => {
@@ -271,6 +282,7 @@ export async function processImmediateEmails(
                 preference,
                 commentScope: commentScopes.get(member.user_id) ?? "all",
                 isMentioned: mentionedIds.has(member.user_id),
+                taskState: taskStates.get(member.user_id),
               }
             )
           )

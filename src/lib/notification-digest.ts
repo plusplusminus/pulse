@@ -3,6 +3,7 @@ import { sendEmail } from "./email";
 import { DigestNotification, type DigestEvent } from "@/emails/digest-notification";
 import { shouldIncludeInDigest } from "./notification-eligibility";
 import { getCommentScope } from "./notification-settings";
+import { getTaskStatesForUser, eventIssueLinearId } from "./task-subscriptions";
 import type {
   NotificationEventType,
   NotificationPreference,
@@ -321,11 +322,36 @@ async function processOneDigest(
   // PULSE-362: the recipient's comment-scope gates mention-only comment emails.
   const commentScope = await getCommentScope(candidate.hub_id, candidate.user_id);
 
+  // PULSE-364: the recipient's per-task overrides for the tasks these events touch.
+  const issueIds = [
+    ...new Set(
+      events
+        .map((ev) =>
+          eventIssueLinearId(
+            ev.entity_type,
+            ev.entity_id,
+            ev.metadata as Record<string, unknown>
+          )
+        )
+        .filter((id): id is string => id !== null)
+    ),
+  ];
+  const taskStates = await getTaskStatesForUser(
+    candidate.hub_id,
+    candidate.user_id,
+    issueIds
+  );
+
   // The shared resolver (notification-eligibility.ts) is the authority on what
   // belongs in this digest. It mirrors the event_types prefetch above and adds
-  // the mention-scope rule (PULSE-362); PULSE-364 will layer per-task rules here.
-  const eligibleEvents = events.filter((ev) =>
-    shouldIncludeInDigest(
+  // the mention-scope (PULSE-362) and per-task (PULSE-364) rules.
+  const eligibleEvents = events.filter((ev) => {
+    const issueId = eventIssueLinearId(
+      ev.entity_type,
+      ev.entity_id,
+      ev.metadata as Record<string, unknown>
+    );
+    return shouldIncludeInDigest(
       { event_type: ev.event_type },
       {
         preference: candidatePreferenceFor(candidate, ev.event_type, type),
@@ -333,10 +359,11 @@ async function processOneDigest(
         isMentioned: (
           (ev.mentioned_user_ids as string[] | null | undefined) ?? []
         ).includes(candidate.user_id),
+        taskState: issueId ? taskStates.get(issueId) : undefined,
       },
       type
-    )
-  );
+    );
+  });
 
   if (eligibleEvents.length === 0) return false;
 

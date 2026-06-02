@@ -1,5 +1,6 @@
 import type { NotificationPreference } from "./notification-preferences";
 import type { CommentScope } from "./notification-settings";
+import type { TaskSubscriptionState } from "./task-subscriptions";
 
 /**
  * Unified notification delivery resolver (PULSE-361).
@@ -46,6 +47,12 @@ export type RecipientContext = {
   commentScope?: CommentScope;
   /** Whether this event explicitly mentions the recipient (PULSE-362). */
   isMentioned?: boolean;
+  /**
+   * The recipient's per-task override for this event's task (PULSE-364):
+   * 'muted' suppresses all notifications for the task; 'subscribed' follows it
+   * (and pierces the comment 'mentions_only' scope). Undefined = follow global.
+   */
+  taskState?: TaskSubscriptionState;
 };
 
 /**
@@ -57,17 +64,22 @@ export function resolveEmailDelivery(
   event: DeliveryEvent,
   ctx: RecipientContext
 ): EmailDeliveryMode {
+  // Per-task mute (PULSE-364) wins over everything — including a direct mention.
+  if (ctx.taskState === "muted") return "off";
+
   const mode = ctx.preference?.email_mode ?? "off";
   if (mode === "off") return "off";
 
   // Comment mention-scope (PULSE-362): a recipient set to 'mentions_only' is
   // emailed about a comment only when the event mentions them. Other event types
-  // and the default 'all' scope are unaffected. (A mention thus pierces the
-  // quiet 'mentions_only' setting — but never overrides an 'off' channel.)
+  // and the default 'all' scope are unaffected. A mention pierces the quiet
+  // 'mentions_only' setting — as does an explicit per-task subscribe (PULSE-364)
+  // — but neither overrides an 'off' channel or a task mute.
   if (
     event.event_type === "comment" &&
     (ctx.commentScope ?? "all") === "mentions_only" &&
-    !ctx.isMentioned
+    !ctx.isMentioned &&
+    ctx.taskState !== "subscribed"
   ) {
     return "off";
   }

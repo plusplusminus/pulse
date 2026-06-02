@@ -5,6 +5,7 @@ import { pushCommentToLinear } from "@/lib/linear-push";
 import { isPPMAdmin } from "@/lib/ppm-admin";
 import { isAdminLinearConnected } from "@/lib/admin-linear-oauth";
 import { logSyncEvent } from "@/lib/sync-logger";
+import { autoSubscribe } from "@/lib/task-subscriptions";
 
 export async function POST(
   request: Request,
@@ -80,6 +81,10 @@ export async function POST(
         { status: 500 }
       );
     }
+
+    // Auto-subscribe the commenter to this task so they follow future updates —
+    // unless they've already set an explicit override (PULSE-364). Fire-and-forget.
+    void autoSubscribe(hubId, user.id, issueLinearId, "auto_comment");
 
     // Push to Linear with author attribution (createAsUser if OAuth app configured)
     try {
