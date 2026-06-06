@@ -301,8 +301,14 @@ export function TeamTabs({
 
       {activeTab === "activity" && (
         <>
-          <div className="p-6 max-w-4xl overflow-y-auto">
-            <ActivityFeed hubId={hubId} hubSlug={hubSlug} teamId={teamId} />
+          {/* Top padding lives on the inner wrapper, not the scroll container —
+              sticky day headings stick at the scrollport's content-box top, so
+              container padding would leave a see-through gap below the tab bar
+              (PULSE-310). */}
+          <div className="px-6 pb-6 max-w-4xl overflow-y-auto">
+            <div className="pt-6">
+              <ActivityFeed hubId={hubId} hubSlug={hubSlug} teamId={teamId} />
+            </div>
           </div>
           <ActivityIssueDetail hubId={hubId} />
         </>
