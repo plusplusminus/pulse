@@ -7,6 +7,9 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
 
   return {
+    // tsconfig uses "jsx": "preserve" (Next.js transforms JSX itself), so
+    // tell esbuild to use the automatic runtime for .tsx test files.
+    esbuild: { jsx: "automatic" },
     test: {
       globals: true,
       environment: "node",
