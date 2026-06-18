@@ -1,5 +1,6 @@
 import { supabaseAdmin, type HubTeamMapping, type HubMemberRole } from "./supabase";
 import { getWorkspaceToken } from "./workspace";
+import { isIssueProjectVisible } from "./hub-visibility-rules";
 import type { LinearIssue, RoadmapIssue } from "./linear";
 
 const WORKSPACE_USER_ID = "workspace";
@@ -622,10 +623,17 @@ export async function fetchHubIssueDetail(
 
   if (!row || !teamIds.includes(row.team_id)) return null;
 
+  const d = row.data as Record<string, unknown>;
+
+  // Enforce project scoping so a direct ?issue= link can't open an issue whose
+  // project isn't visible to the hub (or an unscoped issue when the hub doesn't
+  // include unassigned issues) — matching the Tasks tab (PULSE-370).
+  const projectId = (d.project as { id?: string } | undefined)?.id ?? null;
+  if (!isIssueProjectVisible(mappings, projectId)) return null;
+
   const issue = mapRowToLinearIssue(
     row as { linear_id: string; data: Record<string, unknown>; created_at: string; updated_at: string }
   );
-  const d = row.data as Record<string, unknown>;
 
   const detailed = stripAssignee({
     ...issue,
@@ -644,6 +652,67 @@ export async function fetchHubIssueDetail(
     ...filterLabelsByTeam(detailed, mappings, row.team_id),
     teamId: row.team_id as string,
   };
+}
+
+type IssueScopedEvent = {
+  entity_type: string;
+  entity_id: string;
+  metadata: Record<string, unknown> | null;
+};
+
+/**
+ * Drop activity/notification events whose underlying issue isn't currently
+ * visible to the hub. Emit-time scoping (notification-events.ts) prevents new
+ * leaks, but this re-checks live visibility at read time so events emitted
+ * before that guard — or for an issue later moved into a hidden project —
+ * stop showing (PULSE-370). Non-issue events (projects, cycles, initiatives)
+ * pass through untouched.
+ */
+export async function filterEventsByIssueVisibility<T extends IssueScopedEvent>(
+  hubId: string,
+  events: T[]
+): Promise<T[]> {
+  const mappings = await getHubMappings(hubId);
+  if (mappings.length === 0) return [];
+  const teamIds = new Set(mappings.map((m) => m.linear_team_id));
+
+  // Map each issue/comment event to the Linear id of its underlying issue.
+  // Issue events store it in entity_id; comment events store the comment id in
+  // entity_id and the parent issue id in metadata._issue_id.
+  const issueIdByEvent = new Map<T, string | null>();
+  for (const e of events) {
+    if (e.entity_type === "issue") {
+      issueIdByEvent.set(e, e.entity_id);
+    } else if (e.entity_type === "comment") {
+      const issueId = (e.metadata?._issue_id as string | undefined) ?? null;
+      issueIdByEvent.set(e, issueId);
+    }
+  }
+
+  const issueIds = [...new Set([...issueIdByEvent.values()].filter((v): v is string => !!v))];
+  const visibility = new Map<string, boolean>();
+  if (issueIds.length > 0) {
+    const { data: rows } = await supabaseAdmin
+      .from("synced_issues")
+      .select("linear_id, team_id, project_id")
+      .eq("user_id", WORKSPACE_USER_ID)
+      .in("linear_id", issueIds);
+    for (const r of rows ?? []) {
+      const visible =
+        teamIds.has(r.team_id as string) &&
+        isIssueProjectVisible(mappings, (r.project_id as string | null) ?? null);
+      visibility.set(r.linear_id as string, visible);
+    }
+  }
+
+  return events.filter((e) => {
+    if (e.entity_type !== "issue" && e.entity_type !== "comment") return true;
+    const issueId = issueIdByEvent.get(e);
+    // Unresolvable issue (missing id or not in synced_issues) → can't confirm
+    // visibility, so drop it rather than risk leaking.
+    if (!issueId) return false;
+    return visibility.get(issueId) === true;
+  });
 }
 
 /**
