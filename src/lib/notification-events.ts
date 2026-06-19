@@ -6,6 +6,7 @@ import {
   isProjectOverviewOnlyInHub,
   isInitiativeVisibleToHub,
   hasHiddenLabelInHub,
+  hubIncludesUnassignedIssues,
   type HubInfo,
 } from "@/lib/hub-visibility";
 import { isClientFacing, stripClientPrefix } from "@/lib/hub-read";
@@ -633,6 +634,44 @@ async function resolveIssueLabelIds(
   return [];
 }
 
+/**
+ * Resolve the Linear project id of the issue underlying an event. For Issue
+ * events the webhook payload carries the project; for Comment events Linear's
+ * payload often omits the parent issue's project, so we fall back to the synced
+ * issue row. Returns null when the issue genuinely has no project — the caller
+ * treats that as "unassigned" rather than guessing.
+ */
+async function resolveIssueProjectId(
+  type: string,
+  data: Record<string, unknown>
+): Promise<string | null> {
+  if (type === "Issue") {
+    const fromPayload =
+      (data.project as { id?: string } | undefined)?.id ??
+      (data.projectId as string | undefined);
+    if (fromPayload) return fromPayload;
+    return lookupSyncedIssueProjectId(data.id as string | undefined);
+  }
+  if (type === "Comment") {
+    const issue = data.issue as { id?: string; project?: { id?: string } } | undefined;
+    if (issue?.project?.id) return issue.project.id;
+    return lookupSyncedIssueProjectId(issue?.id);
+  }
+  return null;
+}
+
+async function lookupSyncedIssueProjectId(
+  issueLinearId: string | undefined
+): Promise<string | null> {
+  if (!issueLinearId) return null;
+  const { data: row } = await supabaseAdmin
+    .from("synced_issues")
+    .select("project_id")
+    .eq("linear_id", issueLinearId)
+    .maybeSingle();
+  return (row?.project_id as string | null) ?? null;
+}
+
 async function filterHubsByVisibility(
   hubs: HubInfo[],
   type: string,
@@ -642,9 +681,7 @@ async function filterHubsByVisibility(
   // For issues and comments, skip notifications when the project is overview-only
   // or when the issue carries a hidden label for the hub's team mapping.
   if (type === "Issue" || type === "Comment") {
-    const projectId = type === "Issue"
-      ? (data.project as { id?: string })?.id ?? (data.projectId as string)
-      : (data.issue as { project?: { id?: string } })?.project?.id;
+    const projectId = await resolveIssueProjectId(type, data);
 
     // Resolve the label IDs on the underlying issue. For Issue events the
     // labelIds are on the webhook payload; for Comment events we must look up
@@ -659,6 +696,13 @@ async function filterHubsByVisibility(
           if (!visible) return { hub, include: false };
           const overviewOnly = await isProjectOverviewOnlyInHub(hub.id, projectId);
           if (overviewOnly) return { hub, include: false };
+        } else {
+          // Issue isn't linked to any project. The Tasks tab only surfaces
+          // project-less issues when the hub opts in via include_unassigned_issues,
+          // so activity/notifications must do the same — otherwise an unscoped
+          // issue leaks to every hub on the team (PULSE-370).
+          const includeUnassigned = await hubIncludesUnassignedIssues(hub.id);
+          if (!includeUnassigned) return { hub, include: false };
         }
         if (teamId && labelIds.length > 0) {
           const hidden = await hasHiddenLabelInHub(hub.id, teamId, labelIds);

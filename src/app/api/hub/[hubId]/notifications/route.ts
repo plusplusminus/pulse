@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { withHubAuth, type HubAuthError } from "@/lib/hub-auth"
 import { supabaseAdmin } from "@/lib/supabase"
-import { isClientFacing } from "@/lib/hub-read"
+import { isClientFacing, filterEventsByIssueVisibility } from "@/lib/hub-read"
 
 export async function GET(
   request: Request,
@@ -59,7 +59,12 @@ export async function GET(
     // is not client-facing (missing the heyclient/pulse prefix). Emit-time
     // filtering already excludes these going forward; this guards against
     // stale rows written before that filter existed.
-    const filtered = await filterClientFacingCommentEvents(events || [])
+    const clientFacing = await filterClientFacingCommentEvents(events || [])
+
+    // Defensive filter: drop issue/comment events whose underlying issue is no
+    // longer visible to this hub (unscoped project, project moved out of scope,
+    // or events emitted before project scoping was enforced) — PULSE-370.
+    const filtered = await filterEventsByIssueVisibility(hubId, clientFacing)
 
     const hasMore = filtered.length > limit
     const page = filtered.slice(0, limit)
