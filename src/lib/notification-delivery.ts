@@ -21,10 +21,6 @@ function isPpmDomainEmail(email: string): boolean {
   return email.toLowerCase().endsWith(`@${PPM_EMAIL_DOMAIN}`);
 }
 
-// Event types whose emails carry the Linear link for internal recipients:
-// new tasks and comments (PULSE-372).
-const LINEAR_LINK_EVENT_TYPES = new Set(["new_issue", "comment"]);
-
 /** Fetch the canonical Linear issue URL from the synced issue's payload. */
 async function fetchLinearIssueUrl(issueLinearId: string): Promise<string | null> {
   const { data } = await supabaseAdmin
@@ -293,12 +289,11 @@ export async function processImmediateEmails(
       ? await getTaskStatesForIssue(hubId, taskIssueId)
       : new Map<string, "subscribed" | "muted">();
 
-    // Resolve the Linear issue URL once for new-task/comment events; it's only
-    // rendered for internal (PPM-domain) recipients (PULSE-372).
-    const linearUrl =
-      LINEAR_LINK_EVENT_TYPES.has(event.event_type) && taskIssueId
-        ? await fetchLinearIssueUrl(taskIssueId)
-        : null;
+    // Resolve the Linear issue URL once for any task-related event (new task,
+    // comment, status change, …). It's only rendered for internal (PPM-domain)
+    // recipients (PULSE-372). Non-issue events (projects, cycles, initiatives)
+    // have no taskIssueId and so carry no link.
+    const linearUrl = taskIssueId ? await fetchLinearIssueUrl(taskIssueId) : null;
 
     // Check preferences and send in parallel
     await Promise.all(
