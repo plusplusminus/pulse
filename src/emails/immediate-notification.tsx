@@ -90,7 +90,7 @@ export function ImmediateNotification({
             <Section style={linkRow}>
               <Img src={`${getBaseUrl()}/pulse-logo.png`} width="16" height="16" alt="" style={linkIcon} />
               <Link href={deepLinkUrl} style={viewLink}>
-                View issue on Pulse &rarr;
+                View in Pulse &rarr;
               </Link>
             </Section>
 
