@@ -25,6 +25,11 @@ export interface ImmediateNotificationProps {
     metadata?: Record<string, string>
   }
   deepLinkUrl: string
+  /**
+   * Canonical Linear issue URL. Only set for internal (PPM-domain) recipients
+   * on new-task and comment events — clients never receive it (PULSE-372).
+   */
+  linearUrl?: string
 }
 
 export function ImmediateNotification({
@@ -32,6 +37,7 @@ export function ImmediateNotification({
   hubSlug,
   event,
   deepLinkUrl,
+  linearUrl,
 }: ImmediateNotificationProps) {
   const previewText = `${event.summary} — ${hubName}`
   const excerpt = event.metadata?.excerpt
@@ -77,6 +83,12 @@ export function ImmediateNotification({
             <Link href={deepLinkUrl} style={viewLink}>
               View issue on Pulse &rarr;
             </Link>
+
+            {linearUrl && (
+              <Link href={linearUrl} style={linearLink}>
+                View in Linear &rarr;
+              </Link>
+            )}
           </Section>
 
           <EmailFooter hubSlug={hubSlug} />
@@ -188,6 +200,14 @@ const viewLink = {
   textDecoration: 'none',
   marginTop: '8px',
   display: 'inline-block' as const,
+} as const
+
+// Secondary, internal-only link (PPM-domain recipients) — visually quieter
+// than the primary Pulse link and on its own line.
+const linearLink = {
+  ...viewLink,
+  color: '#888888',
+  marginLeft: '16px',
 } as const
 
 export default ImmediateNotification

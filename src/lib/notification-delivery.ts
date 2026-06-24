@@ -13,6 +13,29 @@ function getAppUrl(): string {
   return "http://localhost:3000";
 }
 
+// Internal PPM recipients get an extra "View in Linear" link in their emails
+// (PULSE-372). Clients on any other domain never see it.
+const PPM_EMAIL_DOMAIN = "plusplusminus.co.za";
+
+function isPpmDomainEmail(email: string): boolean {
+  return email.toLowerCase().endsWith(`@${PPM_EMAIL_DOMAIN}`);
+}
+
+// Event types whose emails carry the Linear link for internal recipients:
+// new tasks and comments (PULSE-372).
+const LINEAR_LINK_EVENT_TYPES = new Set(["new_issue", "comment"]);
+
+/** Fetch the canonical Linear issue URL from the synced issue's payload. */
+async function fetchLinearIssueUrl(issueLinearId: string): Promise<string | null> {
+  const { data } = await supabaseAdmin
+    .from("synced_issues")
+    .select("data")
+    .eq("linear_id", issueLinearId)
+    .maybeSingle();
+  const url = (data?.data as { url?: string } | null)?.url;
+  return url ?? null;
+}
+
 // -- Types -------------------------------------------------------------------
 
 type NotificationEvent = {
@@ -182,8 +205,10 @@ async function sendNotificationEmail(params: {
   email: string;
   event: NotificationEvent;
   hub: HubInfo;
+  /** Canonical Linear issue URL for this event, or null if not applicable. */
+  linearUrl?: string | null;
 }): Promise<{ success: boolean; messageId?: string; error?: string }> {
-  const { email, event, hub } = params;
+  const { email, event, hub, linearUrl } = params;
   const deepLinkUrl = buildDeepLinkUrl(hub.slug, event.entity_type, event.entity_id, event.metadata);
 
   const element = createElement(ImmediateNotification, {
@@ -198,6 +223,8 @@ async function sendNotificationEmail(params: {
       metadata: event.metadata as Record<string, string>,
     },
     deepLinkUrl,
+    // Internal recipients only — the "View in Linear" link never reaches clients.
+    linearUrl: linearUrl && isPpmDomainEmail(email) ? linearUrl : undefined,
   });
 
   return sendEmail({
@@ -266,6 +293,13 @@ export async function processImmediateEmails(
       ? await getTaskStatesForIssue(hubId, taskIssueId)
       : new Map<string, "subscribed" | "muted">();
 
+    // Resolve the Linear issue URL once for new-task/comment events; it's only
+    // rendered for internal (PPM-domain) recipients (PULSE-372).
+    const linearUrl =
+      LINEAR_LINK_EVENT_TYPES.has(event.event_type) && taskIssueId
+        ? await fetchLinearIssueUrl(taskIssueId)
+        : null;
+
     // Check preferences and send in parallel
     await Promise.all(
       eligibleMembers.map(async (member) => {
@@ -305,6 +339,7 @@ export async function processImmediateEmails(
             email: member.email,
             event,
             hub,
+            linearUrl,
           });
 
           if (result.success && result.messageId) {
