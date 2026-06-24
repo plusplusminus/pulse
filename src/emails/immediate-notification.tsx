@@ -6,12 +6,19 @@ import {
   Section,
   Text,
   Link,
+  Img,
   Markdown,
   Preview,
 } from '@react-email/components'
 import { EmailHeader } from './components/email-header'
 import { EmailFooter } from './components/email-footer'
 import { formatMetadataEntries } from './components/format-metadata'
+
+function getBaseUrl(): string {
+  if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`
+  return 'http://localhost:3000'
+}
 
 export interface ImmediateNotificationProps {
   hubName: string
@@ -80,14 +87,20 @@ export function ImmediateNotification({
               </Section>
             )}
 
-            <Link href={deepLinkUrl} style={viewLink}>
-              View issue on Pulse &rarr;
-            </Link>
+            <Section style={linkRow}>
+              <Img src={`${getBaseUrl()}/pulse-logo.png`} width="16" height="16" alt="" style={linkIcon} />
+              <Link href={deepLinkUrl} style={viewLink}>
+                View issue on Pulse &rarr;
+              </Link>
+            </Section>
 
             {linearUrl && (
-              <Link href={linearUrl} style={linearLink}>
-                View in Linear &rarr;
-              </Link>
+              <Section style={linkRow}>
+                <Img src={`${getBaseUrl()}/linear-logo.png`} width="16" height="16" alt="" style={linkIcon} />
+                <Link href={linearUrl} style={linearLink}>
+                  View in Linear &rarr;
+                </Link>
+              </Section>
             )}
           </Section>
 
@@ -193,21 +206,32 @@ const metadataLine = {
   margin: '2px 0',
 } as const
 
+// Each link sits on its own row with its icon to the left. The row owns the
+// vertical spacing; the link itself is inline so it aligns with the icon.
+const linkRow = {
+  marginTop: '10px',
+} as const
+
+const linkIcon = {
+  display: 'inline-block' as const,
+  verticalAlign: 'middle' as const,
+  marginRight: '8px',
+} as const
+
 const viewLink = {
   color: '#5E6AD2',
   fontSize: '13px',
   fontWeight: 500 as const,
   textDecoration: 'none',
-  marginTop: '8px',
   display: 'inline-block' as const,
+  verticalAlign: 'middle' as const,
 } as const
 
 // Secondary, internal-only link (PPM-domain recipients) — visually quieter
-// than the primary Pulse link and on its own line.
+// than the primary Pulse link.
 const linearLink = {
   ...viewLink,
   color: '#888888',
-  marginLeft: '16px',
 } as const
 
 export default ImmediateNotification
