@@ -2,14 +2,22 @@ import { withAuth } from "@workos-inc/authkit-nextjs";
 import { redirect } from "next/navigation";
 import { resolveHubBySlug } from "@/lib/hub-auth";
 import { isPPMAdmin } from "@/lib/ppm-admin";
+import { resolveReturnPath } from "@/lib/login-return-path";
 import Link from "next/link";
 
 export default async function HubLoginPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ next?: string }>;
 }) {
   const { slug } = await params;
+  const { next } = await searchParams;
+
+  // Where to land after login — the deep link the user originally requested
+  // (e.g. a "View in Pulse" task link), or the hub root (PULSE-306).
+  const returnTo = resolveReturnPath(next, slug);
 
   // Look up the hub
   const hub = await resolveHubBySlug(slug);
@@ -30,14 +38,14 @@ export default async function HubLoginPage({
   const { user, organizationId } = await withAuth();
 
   if (user) {
-    // Already authenticated for this org — go to hub
+    // Already authenticated for this org — go to the requested page
     if (hub.workos_org_id && organizationId === hub.workos_org_id) {
-      redirect(`/hub/${slug}`);
+      redirect(returnTo);
     }
 
     // PPM admin — can access any hub without org auth
     if (await isPPMAdmin(user.id, user.email)) {
-      redirect(`/hub/${slug}`);
+      redirect(returnTo);
     }
   }
 
@@ -56,8 +64,10 @@ export default async function HubLoginPage({
     );
   }
 
-  // Build sign-in URL via route handler (avoids cookie-in-RSC error)
-  const returnState = btoa(JSON.stringify({ returnPathname: `/hub/${slug}` }))
+  // Build sign-in URL via route handler (avoids cookie-in-RSC error).
+  // returnPathname may include a query string (e.g. ?issue=) — the AuthKit
+  // callback splits it back into pathname + search after the OAuth round-trip.
+  const returnState = btoa(JSON.stringify({ returnPathname: returnTo }))
     .replace(/\+/g, "-")
     .replace(/\//g, "_");
 
