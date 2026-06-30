@@ -15,6 +15,8 @@ import { AdminLinearConnectBanner } from "./admin-linear-connect-banner";
 import { LabelEditor } from "./label-editor";
 import { ImageLightbox } from "./image-lightbox";
 import { useAdminLinearGate } from "@/hooks/use-admin-linear-gate";
+import { useHub } from "@/contexts/hub-context";
+import { LinearGlyph } from "./linear-glyph";
 import {
   X,
   Circle,
@@ -60,6 +62,8 @@ export type IssueDetail = {
   dueDate?: string;
   createdAt: string;
   updatedAt: string;
+  /** Canonical Linear issue URL (admins only — surfaced as "View in Linear"). */
+  url?: string;
 };
 
 export type Comment = {
@@ -210,6 +214,8 @@ export function IssueDetailPanel({
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const { blocked: adminLinearBlocked } = useAdminLinearGate();
+  const { role } = useHub();
+  const isAdmin = role === "admin";
   const [issue, setIssue] = useState<IssueDetail | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [replyingTo, setReplyingTo] = useState<{ parentId: string; authorName: string } | null>(null);
@@ -454,6 +460,18 @@ export function IssueDetailPanel({
                 )}
               </div>
               <div className="flex items-center gap-0.5 shrink-0 ml-2">
+                {isAdmin && issue.url && (
+                  <a
+                    href={issue.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="View in Linear"
+                    aria-label="View in Linear"
+                    className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                  >
+                    <LinearGlyph className="w-3.5 h-3.5" />
+                  </a>
+                )}
                 <button
                   type="button"
                   onClick={handleOpenNewWindow}

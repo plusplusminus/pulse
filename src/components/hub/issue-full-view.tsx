@@ -30,6 +30,7 @@ import {
   useMarkdownComponents,
 } from "./issue-detail-panel";
 import { useHub } from "@/contexts/hub-context";
+import { LinearGlyph } from "./linear-glyph";
 
 export function IssueFullView({
   issueId,
@@ -38,7 +39,8 @@ export function IssueFullView({
   issueId: string;
   hubId: string;
 }) {
-  const { isViewOnly } = useHub();
+  const { isViewOnly, role } = useHub();
+  const isAdmin = role === "admin";
   const { blocked: adminLinearBlocked } = useAdminLinearGate();
   const [issue, setIssue] = useState<IssueDetail | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
@@ -169,19 +171,33 @@ export function IssueFullView({
               </span>
               <StatusBadge state={issue.state} />
               <PriorityIcon priority={issue.priority} />
-              <button
-                type="button"
-                onClick={handleCopyLink}
-                title="Copy task link"
-                aria-label="Copy task link"
-                className="ml-auto p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-              >
-                {linkCopied ? (
-                  <Check className="w-3.5 h-3.5 text-green-500" />
-                ) : (
-                  <Link className="w-3.5 h-3.5" />
+              <div className="ml-auto flex items-center gap-0.5">
+                {isAdmin && issue.url && (
+                  <a
+                    href={issue.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="View in Linear"
+                    aria-label="View in Linear"
+                    className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                  >
+                    <LinearGlyph className="w-3.5 h-3.5" />
+                  </a>
                 )}
-              </button>
+                <button
+                  type="button"
+                  onClick={handleCopyLink}
+                  title="Copy task link"
+                  aria-label="Copy task link"
+                  className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                >
+                  {linkCopied ? (
+                    <Check className="w-3.5 h-3.5 text-green-500" />
+                  ) : (
+                    <Link className="w-3.5 h-3.5" />
+                  )}
+                </button>
+              </div>
             </div>
             <h1 className="text-xl font-semibold leading-snug">{issue.title}</h1>
             <div className="flex items-center gap-3 mt-2">

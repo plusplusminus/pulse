@@ -95,6 +95,25 @@ export async function isProjectOverviewOnlyInHub(
 }
 
 /**
+ * Whether the hub opts in to showing issues that aren't linked to any project.
+ * Mirrors `shouldIncludeUnassigned` on the read side (hub-read.ts) so the
+ * notification fan-out and the Tasks tab agree on project-less issues.
+ */
+export async function hubIncludesUnassignedIssues(
+  hubId: string
+): Promise<boolean> {
+  const { data, error } = await supabaseAdmin
+    .from("hub_team_mappings")
+    .select("include_unassigned_issues")
+    .eq("hub_id", hubId)
+    .eq("is_active", true);
+
+  if (error || !data || data.length === 0) return false;
+
+  return data.some((mapping) => mapping.include_unassigned_issues === true);
+}
+
+/**
  * Check if an initiative is visible to a specific hub.
  */
 export async function isInitiativeVisibleToHub(
