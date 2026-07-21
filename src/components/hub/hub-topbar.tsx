@@ -61,13 +61,21 @@ export function HubTopBar() {
     return () => clearInterval(id);
   }, [fetchLastSync]);
 
-  const handleRefresh = useCallback(() => {
+  const handleRefresh = useCallback(async () => {
+    if (!hubId || refreshing) return;
     setRefreshing(true);
+    try {
+      // Trigger a real Linear->Pulse sync for this hub, then re-render the
+      // server components against the fresh data and update the timestamp.
+      await fetch(`/api/hub/${hubId}/sync`, { method: "POST" });
+    } catch {
+      // Sync failed (network/server) - still refresh the view so the button
+      // isn't a dead end, and the label keeps its last known value.
+    }
     router.refresh();
-    void fetchLastSync();
-    // router.refresh() doesn't return a promise, so use a timeout
-    setTimeout(() => setRefreshing(false), 1000);
-  }, [router, fetchLastSync]);
+    await fetchLastSync();
+    setRefreshing(false);
+  }, [hubId, refreshing, router, fetchLastSync]);
 
   const displayName = firstName ?? email;
 
