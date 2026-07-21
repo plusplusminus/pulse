@@ -42,7 +42,9 @@ export function HubTopBar() {
   const fetchLastSync = useCallback(async () => {
     if (!hubId) return;
     try {
-      const res = await fetch(`/api/hub/${hubId}/last-sync`);
+      const res = await fetch(`/api/hub/${hubId}/last-sync`, {
+        cache: "no-store",
+      });
       if (!res.ok) return;
       const { lastSyncedAt: ts } = (await res.json()) as {
         lastSyncedAt: string | null;

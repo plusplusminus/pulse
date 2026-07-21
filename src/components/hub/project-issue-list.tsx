@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
   ChevronDown,
@@ -122,15 +122,18 @@ export function ProjectIssueList({
   const isViewOnly = !canInteract;
 
   const [issues, setIssues] = useState(initialIssues);
-  // Reconcile with fresh server data. `useState` only seeds on mount, and
-  // `router.refresh()` (the topbar refresh button + internal navigation)
-  // preserves client state, so without this the list would keep showing the
-  // snapshot from when the tab was first opened even after a sync. The server
-  // is the source of truth, so a new `initialIssues` reference overwrites any
-  // optimistic edits (they get re-applied on the next server round-trip).
-  useEffect(() => {
+  const [prevInitialIssues, setPrevInitialIssues] = useState(initialIssues);
+  // Reconcile with fresh server data during render (React's recommended
+  // prop->state sync, no double-render flicker). `useState` only seeds on
+  // mount, and `router.refresh()` (the topbar refresh button + internal
+  // navigation) preserves client state, so without this the list would keep
+  // showing the snapshot from when the tab was first opened even after a sync.
+  // The server is the source of truth, so a new `initialIssues` reference
+  // overwrites any optimistic edits (re-applied on the next server round-trip).
+  if (initialIssues !== prevInitialIssues) {
+    setPrevInitialIssues(initialIssues);
     setIssues(initialIssues);
-  }, [initialIssues]);
+  }
 
   // Parse filters from URL
   const [filters, setFilters] = useState<FilterState>(() => ({

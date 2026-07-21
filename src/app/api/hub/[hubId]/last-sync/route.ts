@@ -22,11 +22,17 @@ export async function GET(
       );
     }
 
+    // Scope to sync runs that actually refreshed this hub: workspace-wide
+    // reconciles (hub_id null - the every-30-min cron syncs all hubs in one
+    // run) plus this hub's own targeted syncs. A different hub's targeted sync
+    // must not bump this hub's timestamp. Note: filtering on hub_id alone would
+    // exclude every reconcile and leave the indicator stuck on "Syncing…".
     const { data, error } = await supabaseAdmin
       .from("sync_runs")
       .select("completed_at")
       .eq("status", "completed")
       .not("completed_at", "is", null)
+      .or(`hub_id.is.null,hub_id.eq.${hubId}`)
       .order("completed_at", { ascending: false })
       .limit(1)
       .maybeSingle();
