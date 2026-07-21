@@ -61,13 +61,24 @@ export function HubTopBar() {
     return () => clearInterval(id);
   }, [fetchLastSync]);
 
-  const handleRefresh = useCallback(() => {
+  // Only PPM admins can trigger a sync; everyone else sees a read-only label.
+  const isAdmin = role === "admin";
+
+  const handleRefresh = useCallback(async () => {
+    if (!hubId || refreshing) return;
     setRefreshing(true);
+    try {
+      // Trigger a real Linear->Pulse sync for this hub, then re-render the
+      // server components against the fresh data and update the timestamp.
+      await fetch(`/api/admin/hubs/${hubId}/sync`, { method: "POST" });
+    } catch {
+      // Sync failed (network/server) - still refresh the view so the button
+      // isn't a dead end, and the label keeps its last known value.
+    }
     router.refresh();
-    void fetchLastSync();
-    // router.refresh() doesn't return a promise, so use a timeout
-    setTimeout(() => setRefreshing(false), 1000);
-  }, [router, fetchLastSync]);
+    await fetchLastSync();
+    setRefreshing(false);
+  }, [hubId, refreshing, router, fetchLastSync]);
 
   const displayName = firstName ?? email;
 
@@ -76,16 +87,22 @@ export function HubTopBar() {
       className="flex items-center justify-between h-12 px-4 border-b border-border bg-background shrink-0"
     >
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <button
-          onClick={handleRefresh}
-          disabled={refreshing}
-          className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors disabled:opacity-50"
-        >
-          <RefreshCw
-            className={cn("w-3 h-3", refreshing && "animate-spin")}
-          />
-          <span>{relativeTime}</span>
-        </button>
+        {isAdmin ? (
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            title="Sync now"
+            className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={cn("w-3 h-3", refreshing && "animate-spin")} />
+            <span>{relativeTime}</span>
+          </button>
+        ) : (
+          <span className="inline-flex items-center gap-1.5">
+            <RefreshCw className="w-3 h-3" />
+            <span>{relativeTime}</span>
+          </span>
+        )}
       </div>
 
       <div className="flex items-center gap-3">
