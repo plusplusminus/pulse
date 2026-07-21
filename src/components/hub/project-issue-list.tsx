@@ -663,7 +663,7 @@ function IssueRow({
       )}
     >
       <StatusIcon type={issue.state.type} color={issue.state.color} />
-      <span className="text-[11px] font-mono text-muted-foreground shrink-0 w-16">
+      <span className="text-[11px] font-mono text-muted-foreground shrink-0 w-24 whitespace-nowrap">
         {issue.identifier}
       </span>
       <span className="text-sm truncate flex-1 min-w-0">{issue.title}</span>
