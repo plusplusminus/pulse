@@ -184,6 +184,41 @@ export function stripClientPrefix(body: string): string {
   return leadingWhitespace + stripped;
 }
 
+// -- Project update trigger (looser than comments) ---------------------------
+//
+// Project health updates are structured — PMs usually lead with a bold title
+// line and put the trigger on the next line — so the pulse/heyclient trigger is
+// matched at the start of ANY line, not just the very first character. Comments
+// keep the stricter first-character rule above. The lookahead requires a whole
+// word so "pulseaudio" and the like don't match.
+const CLIENT_FACING_UPDATE_LINE = /^@?(?:heyclient|pulse)(?=\s|$)/i;
+
+/** Whether a project update is client-facing: any line starts with the trigger. */
+export function isClientFacingUpdate(body: string): boolean {
+  return body
+    .split("\n")
+    .some((line) => CLIENT_FACING_UPDATE_LINE.test(line.trimStart()));
+}
+
+/**
+ * Strip the pulse/heyclient trigger from the first line that carries it,
+ * preserving the rest of the update (e.g. a leading title line). Returns "" if
+ * nothing but the trigger remains.
+ */
+export function stripUpdateClientPrefix(body: string): string {
+  const lines = body.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trimStart();
+    if (CLIENT_FACING_UPDATE_LINE.test(trimmed)) {
+      const leading = lines[i].slice(0, lines[i].length - trimmed.length);
+      // Remove the trigger word plus one optional following space/tab.
+      lines[i] = leading + trimmed.replace(/^@?(?:heyclient|pulse)[ \t]?/i, "");
+      break;
+    }
+  }
+  return lines.join("\n").trim();
+}
+
 export function mapRowToComment(row: {
   linear_id: string;
   data: CommentData;
@@ -1252,7 +1287,7 @@ export async function deriveClientFacingHealth(
     const pid = row.project_id as string | null;
     if (!pid || result.has(pid)) continue;
     const body = ((row.data as { body?: string } | null)?.body ?? "").toString();
-    if (!isClientFacing(body)) continue;
+    if (!isClientFacingUpdate(body)) continue;
     result.set(pid, {
       health: (row.health as string | null) ?? null,
       at: row.created_at as string,
@@ -1288,8 +1323,8 @@ export async function fetchProjectUpdatesForProjectIds(
   const updates: HubProjectUpdate[] = [];
   for (const row of data || []) {
     const body = ((row.data as { body?: string } | null)?.body ?? "").toString();
-    if (!isClientFacing(body)) continue;
-    const stripped = stripClientPrefix(body);
+    if (!isClientFacingUpdate(body)) continue;
+    const stripped = stripUpdateClientPrefix(body);
     if (!stripped) continue; // bare "pulse"/"heyclient" with no content → hide
     updates.push({
       id: row.linear_id as string,

@@ -1,7 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { mapProjectUpdateWebhookToRow } from "../webhook-handlers";
 import { mapProjectUpdateToRow } from "../initial-sync";
-import { isClientFacing, stripClientPrefix } from "../hub-read";
+import {
+  isClientFacing,
+  stripClientPrefix,
+  isClientFacingUpdate,
+  stripUpdateClientPrefix,
+} from "../hub-read";
 
 // PULSE-359: project health updates reuse the comment pulse/heyclient prefix.
 // These cover the prefix behaviour on update-style (markdown) bodies plus the
@@ -102,5 +107,43 @@ describe("mapProjectUpdateToRow (backfill / reconcile)", () => {
     const row = mapProjectUpdateToRow(update, "proj_9", "workspace");
     expect(row.updated_at).toBe("2026-05-01T00:00:00.000Z");
     expect(row.health).toBeNull();
+  });
+});
+
+describe("updates with a leading title line (PULSE-359 field bug)", () => {
+  // Real-world shape: PMs lead with a bold title, then the trigger on a later line.
+  const withTitle =
+    "🧪 **FILTERED EMAIL LISTS - READY FOR CLIENT UAT**\n\npulse The filtered email lists feature are ready for Client UAT\n\n* Feature preview: x";
+
+  it("detects the trigger when it follows a title line", () => {
+    expect(isClientFacingUpdate(withTitle)).toBe(true);
+  });
+
+  it("still detects a trigger at the very start", () => {
+    expect(isClientFacingUpdate("pulse all good")).toBe(true);
+    expect(isClientFacingUpdate("heyclient\n## Status")).toBe(true);
+  });
+
+  it("does not treat an unprefixed update as client-facing", () => {
+    expect(
+      isClientFacingUpdate("## Heading\ninternal only, do not surface")
+    ).toBe(false);
+    expect(isClientFacingUpdate("Development is complete.\nNo blockers.")).toBe(
+      false
+    );
+  });
+
+  it("does not match a trigger word that is part of a longer word", () => {
+    expect(isClientFacingUpdate("pulseaudio integration is blocked")).toBe(false);
+  });
+
+  it("strips the trigger from its line, preserving the title and the rest", () => {
+    expect(stripUpdateClientPrefix(withTitle)).toBe(
+      "🧪 **FILTERED EMAIL LISTS - READY FOR CLIENT UAT**\n\nThe filtered email lists feature are ready for Client UAT\n\n* Feature preview: x"
+    );
+  });
+
+  it("keeps comments strict: the title-then-trigger shape is NOT a client-facing comment", () => {
+    expect(isClientFacing(withTitle)).toBe(false);
   });
 });
