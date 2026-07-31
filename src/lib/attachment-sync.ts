@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabase";
+import { linearAuthHeader } from "@/lib/linear-auth";
 import { getWorkspaceToken } from "@/lib/workspace";
 import {
   getHubsForTeam,
@@ -8,10 +9,6 @@ import {
 } from "@/lib/hub-visibility";
 
 const LINEAR_API = "https://api.linear.app/graphql";
-
-function linearAuthHeader(token: string): string {
-  return token.startsWith("lin_api_") ? token : `Bearer ${token}`;
-}
 
 function getAppUrl(): string {
   if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL;

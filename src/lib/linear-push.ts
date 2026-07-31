@@ -1,18 +1,10 @@
 import { getWorkspaceToken } from "./workspace";
+import { linearAuthHeader } from "./linear-auth";
 import { getWriteToken } from "./linear-oauth";
 import { getAdminLinearToken } from "./admin-linear-oauth";
 import { LinearRateLimiter } from "./linear-rate-limiter";
 
 const LINEAR_API = "https://api.linear.app/graphql";
-
-/**
- * Build the correct Authorization header for a Linear token.
- * API keys (lin_api_...) must NOT use the Bearer prefix.
- * OAuth tokens require the Bearer prefix.
- */
-function linearAuthHeader(token: string): string {
-  return token.startsWith("lin_api_") ? token : `Bearer ${token}`;
-}
 
 /**
  * Thrown when a push operation is skipped because the rate limiter
