@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { withHubAuth, type HubAuthError } from "@/lib/hub-auth";
+import { linearAuthHeader } from "@/lib/linear-auth";
 import { getWorkspaceToken } from "@/lib/workspace";
 
 export async function GET(
@@ -23,7 +24,7 @@ export async function GET(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: token.trim(),
+        Authorization: linearAuthHeader(token.trim()),
       },
       body: JSON.stringify({
         query: `query GetDocument($slugId: String!) {

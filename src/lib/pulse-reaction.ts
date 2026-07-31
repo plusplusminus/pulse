@@ -1,3 +1,4 @@
+import { linearAuthHeader } from "@/lib/linear-auth";
 import { getWorkspaceToken } from "@/lib/workspace";
 
 const LINEAR_API = "https://api.linear.app/graphql";
@@ -13,10 +14,6 @@ const REACTION_CREATE_MUTATION = `
     }
   }
 `;
-
-function linearAuthHeader(token: string): string {
-  return token.startsWith("lin_api_") ? token : `Bearer ${token}`;
-}
 
 /**
  * Add a reaction (by emoji shortcode) to a Linear comment.
