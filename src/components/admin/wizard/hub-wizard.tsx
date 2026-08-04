@@ -111,14 +111,20 @@ export function HubWizard() {
 
         const hub = (await hubRes.json()) as { id: string };
 
-        // 3. Add team mappings (scoping defaults to "show all", configurable in hub settings)
+        // 3. Add team mappings. The wizard has no scoping step, so it must send
+        // auto_include_projects explicitly — the API defaults it to false, which
+        // would leave the client looking at an empty hub until an admin opens
+        // hub settings. Narrow the scope there.
         const teamErrors: string[] = [];
 
         for (const teamId of state.selectedTeamIds) {
           const teamRes = await fetch(`/api/admin/hubs/${hub.id}/teams`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ linear_team_id: teamId }),
+            body: JSON.stringify({
+              linear_team_id: teamId,
+              auto_include_projects: true,
+            }),
           });
 
           if (!teamRes.ok) {
