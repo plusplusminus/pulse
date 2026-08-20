@@ -1,4 +1,4 @@
-import type { WidgetState, SubmitResult } from '../types'
+import type { WidgetState, SubmitResult, WidgetPick } from '../types'
 
 export interface PanelFormData {
   title: string
@@ -14,6 +14,7 @@ export class FeedbackPanel {
   private formData: PanelFormData = { title: '', type: 'bug', email: '' }
   private screenshotBlob: Blob | null = null
   private screenshotUrl: string | null = null
+  private picks: WidgetPick[] = []
   private user: { email?: string; name?: string }
 
   private bodyEl!: HTMLElement
@@ -26,12 +27,15 @@ export class FeedbackPanel {
       user?: { email?: string; name?: string }
       /** Per-site capture.screenshot from bootstrap; hides the screenshot controls when false. */
       allowScreenshot?: boolean
+      /** Per-site capture.elementPick from bootstrap; hides the pick controls when false. */
+      allowElementPick?: boolean
       onSubmit: (data: PanelFormData) => Promise<SubmitResult>
       onClose: () => void
       onAnnotate: () => void
       onRetakeScreenshot: () => void
       onCaptureScreenshot: () => void
       onCaptureFullScreen: () => void
+      onPickElement: () => void
     }
   ) {
     this.user = { ...config.user }
@@ -132,6 +136,10 @@ export class FeedbackPanel {
 
     this.bodyEl.appendChild(this.createField('Title', 'title', 'input', true, 'Brief summary of your feedback'))
     this.bodyEl.appendChild(this.createField('Description', 'description', 'textarea', false, 'Additional details...'))
+
+    if (this.config.allowElementPick) {
+      this.bodyEl.appendChild(this.renderPicksSection())
+    }
 
     if (this.screenshotBlob) {
       this.bodyEl.appendChild(this.renderScreenshotPreview())
@@ -270,6 +278,66 @@ export class FeedbackPanel {
 
     container.appendChild(actions)
     return container
+  }
+
+  private renderPicksSection(): HTMLElement {
+    const section = document.createElement('div')
+    section.className = 'pulse-picks'
+
+    if (this.picks.length > 0) {
+      const list = document.createElement('ol')
+      list.className = 'pulse-picks__list'
+      this.picks.forEach((pick) => list.appendChild(this.renderPickRow(pick)))
+      section.appendChild(list)
+    }
+
+    const btn = document.createElement('button')
+    btn.className = 'pulse-add-screenshot pulse-pick-btn'
+    btn.type = 'button'
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+    svg.setAttribute('viewBox', '0 0 16 16')
+    svg.setAttribute('fill', 'none')
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+    path.setAttribute('d', 'M3 3l10 4.5-4.5 1.5L7 13.5 3 3Z')
+    path.setAttribute('stroke', 'currentColor')
+    path.setAttribute('stroke-width', '1.25')
+    path.setAttribute('stroke-linejoin', 'round')
+    svg.appendChild(path)
+    btn.appendChild(svg)
+    const label = document.createElement('span')
+    label.textContent = this.picks.length > 0 ? 'Pick another element' : 'Pick element'
+    btn.appendChild(label)
+    btn.addEventListener('click', () => this.config.onPickElement())
+    section.appendChild(btn)
+
+    return section
+  }
+
+  private renderPickRow(pick: WidgetPick): HTMLElement {
+    const row = document.createElement('li')
+    row.className = 'pulse-picks__row'
+
+    const main = document.createElement('div')
+    main.className = 'pulse-picks__main'
+    const name = document.createElement('span')
+    name.className = 'pulse-picks__name'
+    name.textContent = pick.name
+    name.title = pick.elementPath
+    main.appendChild(name)
+    const intent = document.createElement('span')
+    intent.className = `pulse-picks__intent pulse-picks__intent--${pick.intent}`
+    intent.textContent = pick.intent
+    main.appendChild(intent)
+    row.appendChild(main)
+
+    if (pick.comment) {
+      const comment = document.createElement('div')
+      comment.className = 'pulse-picks__comment'
+      comment.textContent = pick.comment.length > 80 ? `${pick.comment.slice(0, 80)}…` : pick.comment
+      row.appendChild(comment)
+    }
+
+    return row
   }
 
   private renderAddScreenshotButtons(): HTMLElement {
@@ -455,6 +523,7 @@ export class FeedbackPanel {
 
   private resetForm(): void {
     this.formData = { title: '', type: 'bug', email: this.user.email ?? '' }
+    this.picks = []
     this.screenshotBlob = null
     if (this.screenshotUrl) {
       URL.revokeObjectURL(this.screenshotUrl)
@@ -552,6 +621,11 @@ export class FeedbackPanel {
       default:
         break
     }
+  }
+
+  setPicks(picks: WidgetPick[]): void {
+    this.picks = [...picks]
+    if (this.state === 'open') this.renderForm()
   }
 
   setScreenshot(blob: Blob | null): void {

@@ -1,4 +1,4 @@
-import type { PulseConfig, RuntimeConfig, SubmitResult } from './types'
+import type { PulseConfig, RuntimeConfig, SubmitResult, WidgetPick } from './types'
 import { ConsoleInterceptor } from './console'
 import { detectSentry } from './sentry'
 import { collectContext } from './context'
@@ -19,6 +19,8 @@ export type {
   ConsoleEntry,
   SentryContext,
   WidgetContext,
+  WidgetPick,
+  PickIntent,
 } from './types'
 
 export interface PulseInstance {
@@ -110,6 +112,7 @@ export class Pulse implements PulseInstance {
     email: string
     name?: string
     screenshot?: Blob | null
+    picks?: WidgetPick[]
   }): Promise<SubmitResult> {
     const sentryContext = this.runtime.capture.sentry ? detectSentry() : null
 
@@ -140,6 +143,7 @@ export class Pulse implements PulseInstance {
         name: formData.name,
       },
       screenshotStoragePath,
+      picks: this.runtime.capture.elementPick && formData.picks?.length ? formData.picks : undefined,
     })
 
     this.runtime.onSubmit?.(result)

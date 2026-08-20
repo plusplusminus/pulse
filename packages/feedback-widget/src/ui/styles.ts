@@ -649,5 +649,226 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
     .pulse-annotation__canvas-wrap canvas {
       display: block;
     }
+
+    /* Element pick: hover overlay + label (pointer-events none so the page stays hittable) */
+    .pulse-pick-overlay {
+      position: fixed;
+      z-index: 2147483646;
+      pointer-events: none;
+      box-sizing: border-box;
+      border: 2px solid ${c.primary};
+      background: ${c.primary}14;
+      border-radius: 3px;
+      display: none;
+      transition: left 0.04s linear, top 0.04s linear, width 0.04s linear, height 0.04s linear;
+    }
+
+    .pulse-pick-label {
+      position: absolute;
+      left: -2px;
+      bottom: 100%;
+      margin-bottom: 4px;
+      max-width: 260px;
+      padding: 2px 7px;
+      background: ${c.primary};
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 500;
+      line-height: 1.5;
+      border-radius: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .pulse-pick-label--below {
+      bottom: auto;
+      top: 100%;
+      margin-bottom: 0;
+      margin-top: 4px;
+    }
+
+    /* Numbered markers for committed picks */
+    .pulse-markers {
+      position: fixed;
+      inset: 0;
+      z-index: 2147483646;
+      pointer-events: none;
+    }
+
+    .pulse-marker {
+      position: absolute;
+      width: 22px;
+      height: 22px;
+      margin: -11px 0 0 -11px;
+      border-radius: 50%;
+      background: ${c.primary};
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 0 2px ${c.bg}, 0 2px 6px rgba(0,0,0,0.25);
+    }
+
+    .pulse-marker--pending {
+      background: ${c.primaryHover};
+      opacity: 0.85;
+    }
+
+    /* Comment + intent popup */
+    .pulse-pick-popup {
+      position: fixed;
+      z-index: 2147483647;
+      width: 280px;
+      transform: translateX(-50%);
+      padding: 12px;
+      background: ${c.bg};
+      color: ${c.text};
+      border: 1px solid ${c.border};
+      border-radius: 10px;
+      box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 10px 30px -5px rgba(0,0,0,0.2);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .pulse-pick-popup__title {
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .pulse-pick-popup__intents {
+      display: flex;
+      gap: 4px;
+    }
+
+    .pulse-pick-popup__intent {
+      flex: 1;
+      padding: 4px 0;
+      border: 1px solid ${c.border};
+      border-radius: 6px;
+      background: transparent;
+      color: ${c.muted};
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.12s ease;
+    }
+
+    .pulse-pick-popup__intent:hover {
+      border-color: ${c.primary};
+      color: ${c.text};
+    }
+
+    .pulse-pick-popup__intent--active {
+      background: ${c.primary}14;
+      border-color: ${c.primary};
+      color: ${c.primary};
+    }
+
+    .pulse-pick-popup__comment {
+      min-height: 56px;
+    }
+
+    .pulse-pick-popup__actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 6px;
+    }
+
+    .pulse-pick-popup__btn {
+      padding: 5px 10px;
+      border: 1px solid ${c.border};
+      border-radius: 6px;
+      background: transparent;
+      color: ${c.text};
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+
+    .pulse-pick-popup__btn:hover {
+      background: ${c.inputBg};
+    }
+
+    .pulse-pick-popup__btn--primary {
+      background: ${c.primary};
+      border-color: ${c.primary};
+      color: #ffffff;
+    }
+
+    .pulse-pick-popup__btn--primary:hover {
+      background: ${c.primaryHover};
+    }
+
+    /* Picks list in the panel */
+    .pulse-picks {
+      margin-bottom: 12px;
+    }
+
+    .pulse-picks__list {
+      list-style: none;
+      margin: 0 0 8px;
+      border: 1px solid ${c.border};
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .pulse-picks__row {
+      padding: 7px 10px;
+      font-size: 12px;
+    }
+
+    .pulse-picks__row + .pulse-picks__row {
+      border-top: 1px solid ${c.border};
+    }
+
+    .pulse-picks__main {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .pulse-picks__name {
+      flex: 1;
+      min-width: 0;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .pulse-picks__intent {
+      flex-shrink: 0;
+      padding: 1px 6px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: capitalize;
+      background: ${c.primary}14;
+      color: ${c.primary};
+    }
+
+    .pulse-picks__intent--question { background: #f59e0b1f; color: #b45309; }
+    .pulse-picks__intent--approve { background: ${c.success}1f; color: ${c.success}; }
+    .pulse-picks__intent--change { background: #0ea5e91f; color: #0369a1; }
+
+    .pulse-picks__comment {
+      margin-top: 2px;
+      color: ${c.muted};
+      font-size: 11px;
+    }
+
+    .pulse-pick-btn {
+      width: 100%;
+    }
   `
 }

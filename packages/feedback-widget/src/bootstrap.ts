@@ -2,12 +2,12 @@ import type { BootstrapPayload, PulseConfig, RuntimeConfig } from './types'
 
 export const BOOTSTRAP_TIMEOUT_MS = 2000
 
-/** Safe defaults when bootstrap is unreachable: screenshot only, everything else off. */
+/** Safe defaults when bootstrap is unreachable: screenshot + element pick (user-initiated, no passive capture), everything else off. */
 export const SAFE_DEFAULTS: Pick<BootstrapPayload, 'capture' | 'privacy' | 'ui'> = {
   capture: {
     screenshot: true,
     captureTab: false,
-    elementPick: false,
+    elementPick: true,
     video: false,
     console: false,
     sentry: false,
@@ -58,7 +58,7 @@ export async function fetchBootstrap(
   } catch (err) {
     if (!warnedOnce) {
       warnedOnce = true
-      warn('[Pulse] Could not load site config; using safe defaults (screenshot only).', err)
+      warn('[Pulse] Could not load site config; using safe defaults (screenshot + element pick only).', err)
     }
     return null
   } finally {
