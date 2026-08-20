@@ -4,8 +4,8 @@
 	"private": true,
 	"scripts": {
 		"dev": "next dev --turbopack",
-		"build": "next build",
-		"build:worker": "opennextjs-cloudflare build",
+		"build": "pnpm widget:publish && next build",
+		"build:worker": "pnpm widget:publish && opennextjs-cloudflare build",
 		"start": "next start",
 		"lint": "next lint",
 		"preview": "npm run build:worker && wrangler dev",
@@ -13,6 +13,7 @@
 		"cf-typegen": "wrangler types --env-interface CloudflareEnv ./env.d.ts",
 		"generate-og": "node scripts/generate-og.js",
 		"widget:build": "pnpm --filter @pulse/feedback-widget build",
+		"widget:publish": "pnpm widget:build && node scripts/publish-widget.mjs",
 		"widget:dev": "pnpm --filter @pulse/feedback-widget dev",
 		"widget:typecheck": "pnpm --filter @pulse/feedback-widget typecheck",
 		"widget:test": "pnpm --filter @pulse/feedback-widget test"

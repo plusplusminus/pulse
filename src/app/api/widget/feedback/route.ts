@@ -30,7 +30,7 @@ function corsHeaders(origin: string | null): Record<string, string> {
   return {
     "Access-Control-Allow-Origin": origin || "*",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, X-Widget-Key",
+    "Access-Control-Allow-Headers": "Content-Type, X-Site-Key, X-Widget-Key",
     "Access-Control-Max-Age": "86400",
   };
 }

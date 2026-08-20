@@ -2,14 +2,14 @@ import type { FeedbackPayload, SubmitResult } from './types'
 
 export async function submitFeedback(
   apiUrl: string,
-  widgetKey: string,
+  siteKey: string,
   payload: FeedbackPayload
 ): Promise<SubmitResult> {
   const response = await fetch(`${apiUrl}/api/widget/feedback`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Widget-Key': widgetKey,
+      'X-Site-Key': siteKey,
     },
     body: JSON.stringify(payload),
   })

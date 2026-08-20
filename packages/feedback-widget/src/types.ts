@@ -1,5 +1,7 @@
 export interface PulseConfig {
-  widgetKey: string
+  /** Public site identifier issued by the Pulse admin (sk_...). Not a secret. */
+  siteKey: string
+  /** Pulse API origin. Defaults to the origin baked in at build time; never the host page. */
   apiUrl?: string
   theme?: 'auto' | 'light' | 'dark'
   position?: 'bottom-right' | 'bottom-left'
@@ -62,3 +64,11 @@ export interface FeedbackPayload {
 }
 
 export type WidgetState = 'closed' | 'open' | 'capturing' | 'annotating' | 'submitting' | 'success' | 'error'
+
+/** Shape of `window.PulseConfig` for the script-tag / loader install path. */
+export type PulseGlobalConfig = Partial<PulseConfig> & {
+  /** Base URL the cookie loader fetches pulse.js from. */
+  loaderBase?: string
+  /** Called by the cookie loader once pulse.js has loaded. */
+  onReady?: () => void
+}

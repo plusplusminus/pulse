@@ -36,5 +36,6 @@ export default defineConfig([
     target: 'es2015',
     minify: true,
     treeshake: true,
+    define: { __PULSE_API_URL__: JSON.stringify(PULSE_API_URL) },
   },
 ])

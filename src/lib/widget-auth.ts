@@ -1,13 +1,29 @@
 import { supabaseAdmin } from "@/lib/supabase";
 import type { WidgetConfig } from "@/lib/widget-types";
 
+/** Header the widget sends its site key in. `X-Widget-Key` is accepted for pre-rename embeds. */
+export const SITE_KEY_HEADER = "X-Site-Key";
+const LEGACY_SITE_KEY_HEADER = "X-Widget-Key";
+
+/** Public site identifier (sk_ + 32 hex). Hashed at rest; only the prefix is stored in clear. */
 export function generateWidgetApiKey(): string {
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
   const hex = Array.from(bytes)
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
-  return `wk_${hex}`;
+  return `sk_${hex}`;
+}
+
+export function widgetApiKeyPrefix(apiKey: string): string {
+  return apiKey.slice(0, 10);
+}
+
+export function readSiteKey(request: Request): string | null {
+  return (
+    request.headers.get(SITE_KEY_HEADER) ??
+    request.headers.get(LEGACY_SITE_KEY_HEADER)
+  );
 }
 
 export async function hashWidgetApiKey(apiKey: string): Promise<string> {
@@ -37,9 +53,9 @@ export async function validateWidgetKey(
 export async function validateWidgetRequest(
   request: Request
 ): Promise<{ config: WidgetConfig } | { error: string; status: number }> {
-  const apiKey = request.headers.get("x-widget-key");
+  const apiKey = readSiteKey(request);
   if (!apiKey) {
-    return { error: "Missing X-Widget-Key header", status: 401 };
+    return { error: `Missing ${SITE_KEY_HEADER} header`, status: 401 };
   }
 
   const config = await validateWidgetKey(apiKey);

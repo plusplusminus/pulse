@@ -101,6 +101,12 @@ export type WidgetConfigCreateResponse = {
   name: string
 }
 
+export type WidgetConfigRotateResponse = {
+  id: string
+  apiKey: string
+  apiKeyPrefix: string
+}
+
 export type WidgetConfigUpdateRequest = {
   name?: string
   is_active?: boolean

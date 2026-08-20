@@ -4,6 +4,7 @@ import { withHubAuth, withHubAuthWrite, type HubAuthError } from "@/lib/hub-auth
 import {
   generateWidgetApiKey,
   hashWidgetApiKey,
+  widgetApiKeyPrefix,
 } from "@/lib/widget-auth";
 import type { WidgetConfigCreateResponse } from "@/lib/widget-types";
 
@@ -79,7 +80,7 @@ export async function POST(request: Request) {
 
     const apiKey = generateWidgetApiKey();
     const apiKeyHash = await hashWidgetApiKey(apiKey);
-    const apiKeyPrefix = apiKey.slice(0, 10);
+    const apiKeyPrefix = widgetApiKeyPrefix(apiKey);
 
     const { data, error } = await supabaseAdmin
       .from("widget_configs")

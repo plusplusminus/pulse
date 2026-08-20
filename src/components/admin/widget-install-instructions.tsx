@@ -1,55 +1,85 @@
 "use client";
 
 import { useState } from "react";
-import { Copy, Check } from "lucide-react";
+import { Copy, Check, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface WidgetInstallInstructionsProps {
-  apiKey?: string;
-  apiKeyPrefix?: string;
+  /** Full site key. Only available in memory right after creation or rotation. */
+  siteKey?: string;
+  /** Stored prefix (sk_xxxxxxx). Shown as a placeholder when the full key is not in memory. */
+  siteKeyPrefix: string;
+  onRotate?: () => void;
+  rotating?: boolean;
+}
+
+function pulseOrigin(): string {
+  if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL;
+  return typeof window !== "undefined" ? window.location.origin : "";
 }
 
 export function WidgetInstallInstructions({
-  apiKey,
-  apiKeyPrefix,
+  siteKey,
+  siteKeyPrefix,
+  onRotate,
+  rotating,
 }: WidgetInstallInstructionsProps) {
-  const displayKey = apiKey || apiKeyPrefix || "wk_YOUR_KEY";
+  const hasFullKey = Boolean(siteKey);
+  // Never fall back to the prefix: it is not a valid credential.
+  const displayKey = siteKey ?? `${siteKeyPrefix}…`;
+  const origin = pulseOrigin();
+  const scriptUrl = `${origin}/widget/v1/pulse.js`;
+  const loaderUrl = `${origin}/widget/v1/pulse-loader.js`;
 
-  const scriptSnippet = `<script>
-  (function(w,d,s,k){
-    w.PulseConfig={widgetKey:k};
-    var f=d.getElementsByTagName(s)[0],
-        j=d.createElement(s);
-    j.async=1;
-    j.src='https://r2.lineargratis.com/widget/v1/pulse.js';
-    f.parentNode.insertBefore(j,f);
-  })(window,document,'script','${displayKey}');
-</script>`;
+  const scriptSnippet = `<script async src="${scriptUrl}" data-site="${displayKey}"></script>`;
 
   const cookieSnippet = `<!-- Cookie Mode: widget only loads when pulse_enabled=1 cookie is set -->
 <script>
-  window.PulseConfig = { widgetKey: '${displayKey}' };
+  window.PulseConfig = { siteKey: '${displayKey}' };
 </script>
-<script async src="https://r2.lineargratis.com/widget/v1/pulse-loader.js"></script>
+<script async src="${loaderUrl}"></script>
 
 <!-- Enable via console: document.cookie = "pulse_enabled=1; path=/; max-age=31536000" -->`;
 
   const npmSnippet = `import { Pulse } from '@pulse/feedback-widget'
 
 Pulse.init({
-  widgetKey: '${displayKey}',
+  siteKey: '${displayKey}',
 })`;
 
   return (
     <div className="space-y-4">
-      <h3 className="text-sm font-semibold">Install Instructions</h3>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold">Install Instructions</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Site key{" "}
+            <code className="text-[11px] bg-muted px-1 rounded">
+              {displayKey}
+            </code>
+            {hasFullKey
+              ? " — copy the snippets now; the full key is not shown again after you leave this page."
+              : " — the full key is only shown once at creation. Rotate to get a new key if you no longer have it."}
+          </p>
+        </div>
+        {onRotate && (
+          <button
+            onClick={onRotate}
+            disabled={rotating}
+            className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-border bg-background text-foreground hover:bg-accent/50 disabled:opacity-50 transition-colors"
+          >
+            <RefreshCw className={cn("w-3.5 h-3.5", rotating && "animate-spin")} />
+            Rotate key
+          </button>
+        )}
+      </div>
 
       <div className="space-y-3">
         <div>
           <p className="text-xs font-medium text-muted-foreground mb-1.5">
             Script Tag
           </p>
-          <CodeBlock code={scriptSnippet} />
+          <CodeBlock code={scriptSnippet} copyable={hasFullKey} />
         </div>
 
         <div>
@@ -59,7 +89,7 @@ Pulse.init({
           <p className="text-[11px] text-muted-foreground mb-1.5">
             Only loads the widget when <code className="text-[11px] bg-muted px-1 rounded">pulse_enabled=1</code> cookie is set. Drag the bookmarklet below to your bookmarks bar to toggle.
           </p>
-          <CodeBlock code={cookieSnippet} />
+          <CodeBlock code={cookieSnippet} copyable={hasFullKey} />
           <Bookmarklet />
         </div>
 
@@ -67,9 +97,9 @@ Pulse.init({
           <p className="text-xs font-medium text-muted-foreground mb-1.5">
             NPM Package
           </p>
-          <CodeBlock code="npm install @pulse/feedback-widget" />
+          <CodeBlock code="npm install @pulse/feedback-widget" copyable />
           <div className="mt-1.5">
-            <CodeBlock code={npmSnippet} />
+            <CodeBlock code={npmSnippet} copyable={hasFullKey} />
           </div>
         </div>
       </div>
@@ -102,7 +132,7 @@ function Bookmarklet() {
   );
 }
 
-function CodeBlock({ code }: { code: string }) {
+function CodeBlock({ code, copyable }: { code: string; copyable: boolean }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -118,12 +148,13 @@ function CodeBlock({ code }: { code: string }) {
       </pre>
       <button
         onClick={handleCopy}
+        disabled={!copyable}
         className={cn(
           "absolute top-2 right-2 p-1.5 rounded-md border border-border bg-background text-muted-foreground",
           "opacity-0 group-hover:opacity-100 transition-opacity",
-          "hover:text-foreground"
+          "hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted-foreground"
         )}
-        title="Copy to clipboard"
+        title={copyable ? "Copy to clipboard" : "Full key not available — rotate the key to get a new one"}
       >
         {copied ? (
           <Check className="w-3.5 h-3.5 text-green-500" />

@@ -18,6 +18,7 @@ import {
 import type {
   WidgetConfig,
   WidgetConfigCreateResponse,
+  WidgetConfigRotateResponse,
   WidgetUIConfig,
 } from "@/lib/widget-types";
 
@@ -36,10 +37,12 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
     refetch,
   } = useFetch<WidgetConfig[]>(`/api/widget/config?hubId=${hubId}`);
 
-  // Key modal state
+  // Key modal state. Full keys live only in memory (configId -> key) for this page session.
   const [showKeyModal, setShowKeyModal] = useState(false);
   const [newApiKey, setNewApiKey] = useState("");
   const [keyCopied, setKeyCopied] = useState(false);
+  const [fullKeys, setFullKeys] = useState<Record<string, string>>({});
+  const [confirmRotateId, setConfirmRotateId] = useState<string | null>(null);
 
   // Delete confirmation
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -91,6 +94,7 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
           throw new Error(err.error ?? "Failed to generate key");
         }
         const data: WidgetConfigCreateResponse = await res.json();
+        setFullKeys((prev) => ({ ...prev, [data.id]: data.apiKey }));
         setNewApiKey(data.apiKey);
         setKeyCopied(false);
         setShowKeyModal(true);
@@ -100,6 +104,33 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
       }
     });
   }, [hubId, refetch]);
+
+  const rotateKey = useCallback(
+    (configId: string) => {
+      startTransition(async () => {
+        try {
+          const res = await fetch(`/api/widget/config/${configId}/rotate`, {
+            method: "POST",
+          });
+          if (!res.ok) {
+            const err = (await res.json()) as { error?: string };
+            throw new Error(err.error ?? "Failed to rotate key");
+          }
+          const data: WidgetConfigRotateResponse = await res.json();
+          setFullKeys((prev) => ({ ...prev, [data.id]: data.apiKey }));
+          setNewApiKey(data.apiKey);
+          setKeyCopied(false);
+          setConfirmRotateId(null);
+          setShowKeyModal(true);
+          toast.success("Site key rotated — the old key no longer works");
+          refetch();
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : "Failed to rotate key");
+        }
+      });
+    },
+    [refetch]
+  );
 
   const toggleActive = useCallback(
     (configId: string, currentActive: boolean) => {
@@ -206,20 +237,20 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
       {/* A: API Keys */}
       <div className="border border-border rounded-lg p-4 bg-card">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold">API Keys</h3>
+          <h3 className="text-sm font-semibold">Site Keys</h3>
           <button
             onClick={generateKey}
             disabled={isPending}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />
-            Generate New Key
+            Generate New Site Key
           </button>
         </div>
 
         {!configs || configs.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-4">
-            No API keys yet. Generate one to get started.
+            No site keys yet. Generate one to get started.
           </p>
         ) : (
           <div className="border border-border rounded-md overflow-hidden">
@@ -443,10 +474,34 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
 
       {/* D: Install Instructions */}
       {activeConfig && (
-        <div className="border border-border rounded-lg p-4 bg-card">
+        <div className="border border-border rounded-lg p-4 bg-card space-y-3">
           <WidgetInstallInstructions
-            apiKeyPrefix={activeConfig.api_key_prefix}
+            siteKey={fullKeys[activeConfig.id]}
+            siteKeyPrefix={activeConfig.api_key_prefix}
+            onRotate={() => setConfirmRotateId(activeConfig.id)}
+            rotating={isPending}
           />
+          {confirmRotateId === activeConfig.id && (
+            <div className="flex items-center gap-3 rounded-md border border-yellow-500/30 bg-yellow-500/5 px-3 py-2 text-xs">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-yellow-600 dark:text-yellow-500" />
+              <span className="flex-1">
+                Rotating issues a new site key and invalidates the current one immediately. Sites using the old key stop working until updated.
+              </span>
+              <button
+                onClick={() => rotateKey(activeConfig.id)}
+                disabled={isPending}
+                className="font-medium text-red-500 hover:text-red-600 transition-colors disabled:opacity-50"
+              >
+                Rotate
+              </button>
+              <button
+                onClick={() => setConfirmRotateId(null)}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -459,7 +514,7 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
           />
           <div className="relative w-full max-w-md bg-background border border-border rounded-lg shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-              <h3 className="text-sm font-semibold">Your API Key</h3>
+              <h3 className="text-sm font-semibold">Your Site Key</h3>
               <button
                 onClick={() => setShowKeyModal(false)}
                 className="p-1 text-muted-foreground hover:text-foreground transition-colors"
@@ -470,7 +525,7 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
             <div className="p-4 space-y-3">
               <div className="flex items-start gap-2 text-xs text-yellow-600 dark:text-yellow-500">
                 <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                <p>Copy this key now. It won&apos;t be shown again.</p>
+                <p>Copy this key now. It is shown once; the install snippets below are pre-filled while you stay on this page.</p>
               </div>
               <div className="flex items-center gap-2">
                 <code className="flex-1 text-xs font-mono bg-muted/50 border border-border rounded-md px-3 py-2 break-all">

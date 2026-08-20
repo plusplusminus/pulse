@@ -5,8 +5,10 @@ import { collectContext } from './context'
 import { captureScreenshot, cropBlob, blobToBase64 } from './screenshot'
 import { submitFeedback } from './api'
 import { Widget } from './widget'
+import { normaliseApiUrl } from './config'
+import { claimInstance, releaseInstance } from './singleton'
 
-export type { PulseConfig, SubmitResult, ConsoleEntry, SentryContext, WidgetContext } from './types'
+export type { PulseConfig, PulseGlobalConfig, SubmitResult, ConsoleEntry, SentryContext, WidgetContext } from './types'
 
 export interface PulseInstance {
   open(): void
@@ -17,7 +19,7 @@ export interface PulseInstance {
 }
 
 export class Pulse {
-  private config: Required<Pick<PulseConfig, 'widgetKey'>> & PulseConfig
+  private config: Required<Pick<PulseConfig, 'siteKey' | 'apiUrl'>> & PulseConfig
   private consoleInterceptor: ConsoleInterceptor
   private user: { email?: string; name?: string }
   private custom: Record<string, string>
@@ -26,9 +28,10 @@ export class Pulse {
   private widgetUI: { open: () => void; close: () => void; destroy: () => void; setUser: (user: { email?: string; name?: string }) => void } | null = null
 
   private constructor(config: PulseConfig) {
+    if (!config.siteKey) throw new Error('[Pulse] siteKey is required')
     this.config = {
       ...config,
-      apiUrl: config.apiUrl ?? window.location.origin,
+      apiUrl: normaliseApiUrl(config.apiUrl),
       theme: config.theme ?? 'auto',
       position: config.position ?? 'bottom-right',
       triggerText: config.triggerText ?? 'Feedback',
@@ -46,12 +49,15 @@ export class Pulse {
     }
   }
 
+  /** Mounts the widget. Only one instance per page: a second call warns and returns the first. */
   static init(config: PulseConfig): PulseInstance {
-    const instance = new Pulse(config)
-    const widget = new Widget(instance, config)
-    instance.widgetUI = widget
-    widget.mount()
-    return instance
+    return claimInstance(() => {
+      const instance = new Pulse(config)
+      const widget = new Widget(instance, config)
+      instance.widgetUI = widget
+      widget.mount()
+      return instance
+    })
   }
 
   open(): void {
@@ -67,6 +73,7 @@ export class Pulse {
   destroy(): void {
     if (this.destroyed) return
     this.destroyed = true
+    releaseInstance(this)
     this.consoleInterceptor.stop()
     this.widgetUI?.destroy()
     if (this.widgetHost) {
@@ -107,7 +114,7 @@ export class Pulse {
       screenshotBase64 = await blobToBase64(formData.screenshot)
     }
 
-    const result = await submitFeedback(this.config.apiUrl!, this.config.widgetKey, {
+    const result = await submitFeedback(this.config.apiUrl, this.config.siteKey, {
       title: formData.title,
       description: formData.description,
       type: formData.type,
