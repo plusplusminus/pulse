@@ -4,11 +4,8 @@
  * shape is pinned without a browser or a live Supabase (PULSE-323).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  UploadError,
-  uploadBlob,
-} from "../../packages/feedback-widget/src/transport/upload";
-import { tusUpload } from "../../packages/feedback-widget/src/transport/tus";
+import { UploadError, uploadBlob } from "./upload";
+import { tusUpload } from "./tus";
 
 type Recorded = {
   method: string;
@@ -128,7 +125,7 @@ describe("uploadBlob", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe(`${API}/api/widget/upload`);
-    expect((init.headers as Record<string, string>)["X-Widget-Key"]).toBe(KEY);
+    expect((init.headers as Record<string, string>)["X-Site-Key"]).toBe(KEY);
     expect(JSON.parse(init.body as string)).toEqual({
       kind: "screenshot",
       contentType: "image/png",

@@ -24,13 +24,15 @@ vi.mock("@/lib/supabase", () => ({
 
 vi.mock("@/lib/widget-auth", () => ({
   validateWidgetRequest: vi.fn(),
+  isKnownWidgetOrigin: vi.fn(),
 }));
 
-import { validateWidgetRequest } from "@/lib/widget-auth";
+import { isKnownWidgetOrigin, validateWidgetRequest } from "@/lib/widget-auth";
 import { OPTIONS, POST } from "../upload/route";
 
 const HUB = "11111111-1111-1111-1111-111111111111";
 const mockedValidate = vi.mocked(validateWidgetRequest);
+const mockedKnownOrigin = vi.mocked(isKnownWidgetOrigin);
 
 function authOk(prefix = "wk_abc") {
   mockedValidate.mockResolvedValue({
@@ -81,28 +83,42 @@ function post(body: unknown, origin = "https://customer.example") {
 beforeEach(() => {
   signedUploads.length = 0;
   mockedValidate.mockReset();
+  mockedKnownOrigin.mockReset();
+  mockedKnownOrigin.mockResolvedValue(true);
 });
 
+function preflight(origin: string) {
+  return OPTIONS(
+    new Request("http://localhost/api/widget/upload", {
+      method: "OPTIONS",
+      headers: { origin },
+    })
+  );
+}
+
 describe("OPTIONS /api/widget/upload", () => {
-  it("answers the preflight with CORS headers", async () => {
-    const res = await OPTIONS(
-      new Request("http://localhost/api/widget/upload", {
-        method: "OPTIONS",
-        headers: { origin: "https://customer.example" },
-      })
-    );
+  it("answers the preflight with CORS headers for a known origin", async () => {
+    const res = await preflight("https://customer.example");
     expect(res.status).toBe(204);
     expect(res.headers.get("Access-Control-Allow-Origin")).toBe(
       "https://customer.example"
     );
-    expect(res.headers.get("Access-Control-Allow-Headers")).toContain(
-      "X-Widget-Key"
-    );
+    expect(res.headers.get("Access-Control-Allow-Methods")).toBe("POST, OPTIONS");
+    expect(res.headers.get("Access-Control-Allow-Headers")).toContain("X-Site-Key");
+    expect(res.headers.get("Vary")).toBe("Origin");
+  });
+
+  it("grants no CORS to an unknown origin", async () => {
+    mockedKnownOrigin.mockResolvedValue(false);
+    const res = await preflight("https://evil.example");
+    expect(res.status).toBe(204);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    expect(res.headers.get("Vary")).toBe("Origin");
   });
 });
 
 describe("POST /api/widget/upload", () => {
-  it("rejects when the widget key / origin check fails", async () => {
+  it("rejects when the origin check fails, with no CORS on the 403", async () => {
     mockedValidate.mockResolvedValue({ error: "Origin not allowed", status: 403 });
     const res = await post({
       kind: "screenshot",
@@ -110,6 +126,19 @@ describe("POST /api/widget/upload", () => {
       sizeBytes: 1024,
     });
     expect(res.status).toBe(403);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    expect(signedUploads).toEqual([]);
+  });
+
+  it("keeps a 401 on a known origin readable by the page", async () => {
+    mockedValidate.mockResolvedValue({ error: "Invalid or inactive widget key", status: 401 });
+    const res = await post({
+      kind: "screenshot",
+      contentType: "image/png",
+      sizeBytes: 1024,
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://customer.example");
     expect(signedUploads).toEqual([]);
   });
 

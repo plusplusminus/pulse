@@ -39,7 +39,7 @@ export class UploadError extends Error {
 
 export async function uploadBlob(
   apiUrl: string,
-  widgetKey: string,
+  siteKey: string,
   kind: UploadKind,
   blob: Blob,
   options: UploadOptions = {}
@@ -49,7 +49,7 @@ export async function uploadBlob(
     throw new UploadError(`Cannot upload ${kind}: blob has no content type`, 'ticket')
   }
 
-  const ticket = await requestTicket(apiUrl, widgetKey, {
+  const ticket = await requestTicket(apiUrl, siteKey, {
     kind,
     contentType,
     sizeBytes: blob.size,
@@ -66,7 +66,7 @@ export async function uploadBlob(
 
 async function requestTicket(
   apiUrl: string,
-  widgetKey: string,
+  siteKey: string,
   body: { kind: UploadKind; contentType: string; sizeBytes: number }
 ): Promise<UploadTicket> {
   let response: Response
@@ -75,7 +75,7 @@ async function requestTicket(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Widget-Key': widgetKey,
+        'X-Site-Key': siteKey,
       },
       body: JSON.stringify(body),
     })

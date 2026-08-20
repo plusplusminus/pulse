@@ -40,6 +40,7 @@ vi.mock("@/lib/supabase", () => ({
 
 vi.mock("@/lib/widget-auth", () => ({
   validateWidgetRequest: vi.fn(),
+  isKnownWidgetOrigin: vi.fn(async () => true),
 }));
 
 vi.mock("@/lib/widget-linear", async () => {
