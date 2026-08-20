@@ -33,6 +33,8 @@ export interface BuildPickOptions {
   id?: string
   comment?: string
   intent?: PickIntent
+  /** The page selection at click time (PULSE-353); omitted from the pick when empty. */
+  selectedText?: string
 }
 
 /**
@@ -60,6 +62,8 @@ export function buildPick(el: Element, options: BuildPickOptions = {}): WidgetPi
     xpath: getXPath(el),
     relocation: getRelocationHints(el),
   }
+  // Absent rather than empty: the renderer branches on presence.
+  if (options.selectedText) pick.selectedText = options.selectedText
   return pick
 }
 

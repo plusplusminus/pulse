@@ -14,6 +14,7 @@ import { buildPick, buildMultiPick, buildAreaPick } from './capture/pick-builder
 import { MultiSelection } from './capture/multi-select'
 import { collectAreaCandidates, findMarqueeElements, resolveMarquee } from './capture/area-select'
 import { PageFreezer } from './capture/freeze'
+import { captureSelectedText, clearSelection } from './capture/text-selection'
 import { PickPopup, type PickPopupResult } from './ui/pick-popup'
 import { PickMarkers, type Marker } from './ui/pick-markers'
 import { PickOutlines } from './ui/pick-outlines'
@@ -236,8 +237,10 @@ export class Widget {
 
   private handlePick(target: Element, point: Point): void {
     if (!this.picker || !this.popup || !this.markers) return
+    // Read the selection before pausing the picker: pausing touches the page.
+    const selectedText = captureSelectedText()
     this.picker.pause()
-    this.openPickPopup(buildPick(target), point)
+    this.openPickPopup(buildPick(target, { selectedText }), point)
   }
 
   /** Stage a fresh pick: pending marker at `point`, comment popup anchored on it. */
@@ -374,6 +377,7 @@ export class Widget {
       this.picks.push(pending.pick)
       this.markersById.set(pending.pick.id, pending.marker)
       this.markers?.add(pending.marker)
+      clearSelection()
     }
     this.exitPickMode()
   }
