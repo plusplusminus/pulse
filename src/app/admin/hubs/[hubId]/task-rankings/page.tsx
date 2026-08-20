@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { supabaseAdmin } from "@/lib/supabase";
+import { fetchAllPages } from "@/lib/supabase-paginate";
 import { fetchTaskPriorityProjectIds } from "@/lib/hub-task-priorities";
 import { AdminTaskRankings } from "@/components/admin/admin-task-rankings";
 import Link from "next/link";
@@ -43,17 +44,22 @@ export default async function TaskRankingsPage({
   let issues: Array<{ id: string; title: string; identifier: string }> = [];
 
   if (enabledArray.length > 0) {
-    const { data: issueRows } = await supabaseAdmin
-      .from("synced_issues")
-      .select("linear_id, data")
-      .eq("user_id", "workspace");
+    // Filter by project in SQL and page through the results. This used to pull
+    // every workspace issue (~23MB of JSONB) and filter in JS, which PostgREST
+    // silently truncated to the first 1000 rows.
+    const issueRows = await fetchAllPages<{ linear_id: string; data: unknown }>(
+      "task-rankings issues",
+      (from, to) =>
+        supabaseAdmin
+          .from("synced_issues")
+          .select("linear_id, data")
+          .eq("user_id", "workspace")
+          .in("project_id", enabledArray)
+          .order("linear_id", { ascending: true })
+          .range(from, to)
+    );
 
-    issues = (issueRows ?? [])
-      .filter((row) => {
-        const d = row.data as Record<string, unknown>;
-        const proj = d?.project as Record<string, unknown> | undefined;
-        return proj?.id && enabledArray.includes(proj.id as string);
-      })
+    issues = issueRows
       .map((row) => {
         const d = row.data as Record<string, unknown>;
         return {

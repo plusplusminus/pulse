@@ -43,6 +43,19 @@ function createChain(result: { data: unknown; error: unknown }) {
 // Track all queries to verify hub scoping
 let queryLog: Array<{ table: string; filters: Record<string, unknown> }> = [];
 
+/** A chain that resolves to zero rows — used for pages past the first. */
+function createEmptyChain() {
+  const empty: Record<string, unknown> = {
+    then: (resolve: (v: { data: unknown[]; error: null }) => unknown) =>
+      Promise.resolve({ data: [], error: null }).then(resolve),
+  };
+  for (const m of ["select", "eq", "in", "is", "order", "limit", "range"]) {
+    empty[m] = vi.fn(() => empty);
+  }
+  empty.single = vi.fn(() => Promise.resolve({ data: null, error: null }));
+  return empty;
+}
+
 vi.mock("@/lib/supabase", () => {
   return {
     supabaseAdmin: {
@@ -66,6 +79,12 @@ vi.mock("@/lib/supabase", () => {
           is: vi.fn((..._args: unknown[]) => chain),
           order: vi.fn((..._args: unknown[]) => chain),
           limit: vi.fn((..._args: unknown[]) => chain),
+          // hub-read pages through PostgREST's 1000-row cap via .range(); the
+          // fixtures are far smaller than one page, so only the first page has rows.
+          range: vi.fn((from: number, _to: number) => {
+            entry.filters["__range_from"] = from;
+            return from === 0 ? chain : createEmptyChain();
+          }),
           single: vi.fn(() => {
             // Return appropriate data based on table + filters
             if (table === "hub_team_mappings") {
