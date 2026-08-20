@@ -54,3 +54,13 @@ next-env.d.ts
 # perf tooling output
 perf-snapshots/
 k6-summary-*.json
+
+# widget bundles copied from packages/feedback-widget/dist by scripts/publish-widget.mjs
+/public/widget/
+
+# Agent-OS
+specs/
+agent-os/.env.local
+
+# linear-loop journals
+.claude/linear-loop/

@@ -18,6 +18,21 @@ const nextConfig: NextConfig = {
       { protocol: "https", hostname: "kzxhksvvyfpkicodyzdi.supabase.co" },
     ],
   },
+  async headers() {
+    return [
+      {
+        // Embed bundles (copied into public/ by scripts/publish-widget.mjs).
+        source: "/widget/v1/:path*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400",
+          },
+          { key: "Access-Control-Allow-Origin", value: "*" },
+        ],
+      },
+    ];
+  },
   webpack: (config, { isServer }) => {
     if (isServer) {
       config.resolve.fallback = {

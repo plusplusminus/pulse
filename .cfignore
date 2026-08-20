@@ -4,6 +4,9 @@ src/app/api/og/
 # Ignore scripts directory
 scripts/
 
+# Workspace packages (widget is built separately, never bundled into the Worker)
+packages/
+
 # Ignore development files
 *.log
 .env.local

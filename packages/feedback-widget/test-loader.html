@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Pulse Loader Test</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; }
+    .status { padding: 12px; border-radius: 6px; margin: 12px 0; font-weight: 600; }
+    .enabled { background: #d4edda; color: #155724; }
+    .disabled { background: #f8d7da; color: #721c24; }
+    button { padding: 8px 16px; margin: 4px; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; }
+    #log { background: #f5f5f5; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 13px; white-space: pre-wrap; min-height: 60px; }
+  </style>
+</head>
+<body>
+  <h1>Pulse Cookie Loader Test</h1>
+
+  <div id="cookie-status" class="status"></div>
+
+  <div>
+    <button onclick="enableCookie()">Enable Cookie</button>
+    <button onclick="disableCookie()">Disable Cookie</button>
+    <button onclick="location.reload()">Reload Page</button>
+  </div>
+
+  <h3>Log</h3>
+  <div id="log"></div>
+
+  <script>
+    var log = document.getElementById('log');
+    function addLog(msg) { log.textContent += msg + '\n'; }
+
+    // Show cookie status
+    var hasCookie = /(?:^|;\s*)pulse_enabled=1/.test(document.cookie);
+    var statusEl = document.getElementById('cookie-status');
+    statusEl.textContent = hasCookie ? 'Cookie: ENABLED — loader will inject full script' : 'Cookie: DISABLED — loader will skip';
+    statusEl.className = 'status ' + (hasCookie ? 'enabled' : 'disabled');
+
+    function enableCookie() {
+      document.cookie = 'pulse_enabled=1; path=/; max-age=31536000';
+      addLog('Cookie set. Reload to test loader.');
+    }
+    function disableCookie() {
+      document.cookie = 'pulse_enabled=; path=/; max-age=0';
+      addLog('Cookie cleared. Reload to test loader.');
+    }
+
+    // Intercept script injection to verify the loader works
+    var origCreateElement = document.createElement.bind(document);
+    document.createElement = function(tag) {
+      var el = origCreateElement(tag);
+      if (tag === 'script') {
+        var origSrc = Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype, 'src');
+        Object.defineProperty(el, 'src', {
+          set: function(v) {
+            if (v && v.includes('pulse.js')) {
+              addLog('SUCCESS: Loader injected script: ' + v);
+              // Prevent actual load in test
+              return;
+            }
+            origSrc.set.call(el, v);
+          },
+          get: function() { return origSrc.get.call(el); }
+        });
+      }
+      return el;
+    };
+  </script>
+
+  <!-- Simulate the client embed -->
+  <script>
+    window.PulseConfig = { siteKey: 'sk_test123', loaderBase: './dist' };
+  </script>
+  <script src="dist/pulse-loader.global.js"></script>
+
+  <script>
+    if (!hasCookie) {
+      addLog('Loader skipped (no cookie) — correct behavior.');
+    }
+  </script>
+</body>
+</html>
