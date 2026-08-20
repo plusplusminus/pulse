@@ -15,6 +15,13 @@ import { MultiSelection } from './capture/multi-select'
 import { collectAreaCandidates, findMarqueeElements, resolveMarquee } from './capture/area-select'
 import { PageFreezer } from './capture/freeze'
 import { captureSelectedText, clearSelection } from './capture/text-selection'
+import {
+  frameFromStream,
+  isTabCaptureSupported,
+  isUserCancel,
+  requestTabStream,
+  type CaptureSurface,
+} from './capture/tab-capture'
 import { PickPopup, type PickPopupResult } from './ui/pick-popup'
 import { PickMarkers, type Marker } from './ui/pick-markers'
 import { PickOutlines } from './ui/pick-outlines'
@@ -31,6 +38,7 @@ export interface PulseCore {
     screenshot?: Blob | null
     picks?: WidgetPick[]
     screenshotAnnotations?: ScreenshotAnnotation[]
+    captureSurface?: CaptureSurface
   }): Promise<SubmitResult>
   captureScreenshot(): Promise<Blob | null>
   setWidgetHost(host: HTMLElement): void
@@ -65,6 +73,7 @@ export class Widget {
   /** Bitmap as captured, so re-annotating never stacks rects onto a flattened export. */
   private originalScreenshot: Blob | null = null
   private annotations: ScreenshotAnnotation[] = []
+  private captureSurface: CaptureSurface | undefined
   private user: { email?: string; name?: string }
   private themeQuery: MediaQueryList | null = null
   private themeHandler: ((e: MediaQueryListEvent) => void) | null = null
@@ -100,11 +109,13 @@ export class Widget {
       user: this.user,
       allowScreenshot: this.config.capture.screenshot,
       allowElementPick: this.config.capture.elementPick,
+      allowCaptureTab: this.config.capture.captureTab && isTabCaptureSupported(),
       onSubmit: (data) => this.handleSubmit(data),
       onClose: () => this.close(),
       onAnnotate: () => this.startAnnotation(),
       onRetakeScreenshot: () => this.retakeScreenshot(),
       onCaptureScreenshot: () => this.captureFullScreen(),
+      onCaptureTab: () => this.captureTab(),
       onPickElement: () => this.startPick(),
       onEditPick: (id) => this.startEditPick(id),
       onDeletePick: (id) => this.deletePick(id),
@@ -450,23 +461,64 @@ export class Widget {
   }
 
   /** Captured bitmap + its annotations move together; null clears both. */
-  private setScreenshot(blob: Blob | null): void {
+  private setScreenshot(blob: Blob | null, surface?: CaptureSurface): void {
     this.originalScreenshot = blob
     this.currentScreenshot = blob
     this.annotations = []
+    this.captureSurface = blob ? surface : undefined
     this.panel.setScreenshot(blob)
   }
 
-  private async captureFullScreen(): Promise<void> {
+  /**
+   * Native tab capture. getDisplayMedia is called with the user activation from
+   * this click still live — nothing may be awaited before it, or the browser
+   * silently refuses to prompt. Hiding the host is synchronous, so it is safe
+   * to do first.
+   */
+  private captureTab(): void {
     this.host.style.display = 'none'
+    let stream: Promise<MediaStream>
+    try {
+      stream = requestTabStream()
+    } catch (e) {
+      this.host.style.display = ''
+      this.panel.setCaptureError(e instanceof Error ? e.message : 'Tab capture failed')
+      return
+    }
+    void this.finishTabCapture(stream)
+  }
+
+  private async finishTabCapture(pending: Promise<MediaStream>): Promise<void> {
+    try {
+      const { blob, surface } = await frameFromStream(await pending)
+      this.setScreenshot(blob, surface)
+      this.panel.setCaptureError(null)
+    } catch (e) {
+      // Declining the picker is a normal outcome, not an error to report.
+      if (!isUserCancel(e)) {
+        this.panel.setCaptureError(e instanceof Error ? e.message : 'Tab capture failed')
+      }
+    } finally {
+      this.host.style.display = ''
+      this.state = 'open'
+      this.panel.setState('open')
+    }
+  }
+
+  /**
+   * The capture engine excludes #pulse-widget itself, so the widget no longer
+   * has to hide (and flash) to stay out of the shot.
+   */
+  private async captureFullScreen(): Promise<void> {
     let blob: Blob | null = null
+    let error: string | null = null
     try {
       blob = await this.pulse.captureScreenshot()
-    } catch {
-      blob = null
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Screenshot capture failed'
     }
-    this.host.style.display = ''
     this.setScreenshot(blob)
+    this.panel.setCaptureError(error)
     this.state = 'open'
     this.panel.setState('open')
   }
@@ -517,6 +569,7 @@ export class Widget {
       screenshot: this.currentScreenshot,
       picks: this.picks,
       screenshotAnnotations: this.annotations,
+      captureSurface: this.captureSurface,
     })
 
     if (result.status === 'created') {
@@ -524,6 +577,7 @@ export class Widget {
       this.originalScreenshot = null
       this.currentScreenshot = null
       this.annotations = []
+      this.captureSurface = undefined
       this.picks = []
       this.markersById.clear()
       this.markers?.clear()

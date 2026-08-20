@@ -80,6 +80,18 @@ Pulse.init({
             Script Tag
           </p>
           <CodeBlock code={scriptSnippet} copyable={hasFullKey} />
+          <p className="text-[11px] text-muted-foreground mt-1.5">
+            Screenshot capture is fetched on first use from{" "}
+            <code className="text-[11px] bg-muted px-1 rounded">
+              {origin}/widget/v1/capture-engine.js
+            </code>
+            , the same origin as the snippet above — if you run a Content
+            Security Policy, the{" "}
+            <code className="text-[11px] bg-muted px-1 rounded">script-src</code>{" "}
+            entry that allows{" "}
+            <code className="text-[11px] bg-muted px-1 rounded">{origin}</code>{" "}
+            already covers it. No extra directive is needed.
+          </p>
         </div>
 
         <div>

@@ -11,6 +11,10 @@ const out = resolve(root, "public/widget/v1");
 const files = [
   ["embed.global.js", "pulse.js"],
   ["embed.global.js.map", "pulse.js.map"],
+  // Lazily fetched by the embed on first viewport capture (PULSE-397). The URL
+  // is derived from the widget's own API base, so it must sit next to pulse.js.
+  ["capture-engine.global.js", "capture-engine.js"],
+  ["capture-engine.global.js.map", "capture-engine.js.map"],
   ["pulse-loader.global.js", "pulse-loader.js"],
 ];
 

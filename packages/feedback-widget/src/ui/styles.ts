@@ -376,6 +376,21 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
       margin-bottom: 12px;
     }
 
+    .pulse-screenshot-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .pulse-capture-note {
+      font-size: 11px;
+      line-height: 1.4;
+      color: ${c.muted};
+    }
+
+    .pulse-capture-note--error {
+      color: ${c.error};
+    }
+
     .pulse-add-screenshot {
       flex: 1;
       display: flex;

@@ -1,4 +1,5 @@
 import type { WidgetState, SubmitResult, WidgetPick } from '../types'
+import { CROSS_ORIGIN_NOTICE } from '../screenshot'
 
 export interface PanelFormData {
   title: string
@@ -16,6 +17,7 @@ export class FeedbackPanel {
   private screenshotUrl: string | null = null
   private picks: WidgetPick[] = []
   private paused = false
+  private captureError: string | null = null
   private pauseBtn: HTMLButtonElement | null = null
   private user: { email?: string; name?: string }
 
@@ -31,11 +33,14 @@ export class FeedbackPanel {
       allowScreenshot?: boolean
       /** Per-site capture.elementPick from bootstrap; hides the pick controls when false. */
       allowElementPick?: boolean
+      /** capture.captureTab AND browser support; hides the native capture button when false. */
+      allowCaptureTab?: boolean
       onSubmit: (data: PanelFormData) => Promise<SubmitResult>
       onClose: () => void
       onAnnotate: () => void
       onRetakeScreenshot: () => void
       onCaptureScreenshot: () => void
+      onCaptureTab: () => void
       onPickElement: () => void
       onEditPick: (id: string) => void
       onDeletePick: (id: string) => void
@@ -426,6 +431,7 @@ export class FeedbackPanel {
   private renderAddScreenshotButtons(): HTMLElement {
     const container = document.createElement('div')
     container.className = 'pulse-screenshot-options'
+    container.style.flexDirection = 'column'
 
     const btn = document.createElement('button')
     btn.className = 'pulse-add-screenshot'
@@ -448,9 +454,55 @@ export class FeedbackPanel {
     label.textContent = 'Add screenshot'
     btn.appendChild(label)
     btn.addEventListener('click', () => this.config.onCaptureScreenshot())
-    container.appendChild(btn)
+
+    const row = document.createElement('div')
+    row.className = 'pulse-screenshot-row'
+    row.appendChild(btn)
+
+    if (this.config.allowCaptureTab) {
+      const tabBtn = document.createElement('button')
+      tabBtn.className = 'pulse-add-screenshot'
+      tabBtn.type = 'button'
+      const tabSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+      tabSvg.setAttribute('viewBox', '0 0 16 16')
+      tabSvg.setAttribute('fill', 'none')
+      const tabPath = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+      tabPath.setAttribute('d', 'M2 4a1 1 0 0 1 1-1h4l1.5 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4Z')
+      tabPath.setAttribute('stroke', 'currentColor')
+      tabPath.setAttribute('stroke-width', '1.25')
+      tabPath.setAttribute('stroke-linejoin', 'round')
+      tabSvg.appendChild(tabPath)
+      tabBtn.appendChild(tabSvg)
+      const tabLabel = document.createElement('span')
+      tabLabel.textContent = 'Capture tab'
+      tabBtn.appendChild(tabLabel)
+      // Must reach getDisplayMedia with the user activation intact: no await here.
+      tabBtn.addEventListener('click', () => this.config.onCaptureTab())
+      row.appendChild(tabBtn)
+    }
+
+    container.appendChild(row)
+
+    if (this.captureError) {
+      const error = document.createElement('div')
+      error.className = 'pulse-capture-note pulse-capture-note--error'
+      error.setAttribute('role', 'alert')
+      error.textContent = this.captureError
+      container.appendChild(error)
+    }
+
+    const note = document.createElement('div')
+    note.className = 'pulse-capture-note'
+    note.textContent = CROSS_ORIGIN_NOTICE
+    container.appendChild(note)
 
     return container
+  }
+
+  /** Surfaced under the capture controls when a viewport capture fails outright. */
+  setCaptureError(message: string | null): void {
+    this.captureError = message
+    if (this.state === 'open') this.renderForm()
   }
 
   private renderCapturing(): void {

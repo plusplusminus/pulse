@@ -179,7 +179,12 @@ export type WidgetMetadata = {
   console: ConsoleEntry[]
   sentry: SentryContext | null
   custom: Record<string, string>
+  /** Surface a native tab capture recorded, when the screenshot came that way (PULSE-335). */
+  captureSurface?: CaptureSurface
 }
+
+export const CAPTURE_SURFACES = ['browser', 'window', 'monitor'] as const
+export type CaptureSurface = (typeof CAPTURE_SURFACES)[number]
 
 export type ConsoleEntry = {
   level: string
