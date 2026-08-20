@@ -54,3 +54,6 @@ next-env.d.ts
 # Agent-OS
 specs/
 agent-os/.env.local
+
+# linear-loop journals
+.claude/linear-loop/

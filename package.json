@@ -11,7 +11,11 @@
 		"preview": "npm run build:worker && wrangler dev",
 		"deploy": "npm run build:worker && wrangler deploy",
 		"cf-typegen": "wrangler types --env-interface CloudflareEnv ./env.d.ts",
-		"generate-og": "node scripts/generate-og.js"
+		"generate-og": "node scripts/generate-og.js",
+		"widget:build": "pnpm --filter @pulse/feedback-widget build",
+		"widget:dev": "pnpm --filter @pulse/feedback-widget dev",
+		"widget:typecheck": "pnpm --filter @pulse/feedback-widget typecheck",
+		"widget:test": "pnpm --filter @pulse/feedback-widget test"
 	},
 	"dependencies": {
 		"@dnd-kit/core": "^6.3.1",

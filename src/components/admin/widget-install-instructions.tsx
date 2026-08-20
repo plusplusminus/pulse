@@ -34,7 +34,7 @@ export function WidgetInstallInstructions({
 
 <!-- Enable via console: document.cookie = "pulse_enabled=1; path=/; max-age=31536000" -->`;
 
-  const npmSnippet = `import { Pulse } from '@linear-gratis/feedback-widget'
+  const npmSnippet = `import { Pulse } from '@pulse/feedback-widget'
 
 Pulse.init({
   widgetKey: '${displayKey}',
@@ -67,7 +67,7 @@ Pulse.init({
           <p className="text-xs font-medium text-muted-foreground mb-1.5">
             NPM Package
           </p>
-          <CodeBlock code="npm install @linear-gratis/feedback-widget" />
+          <CodeBlock code="npm install @pulse/feedback-widget" />
           <div className="mt-1.5">
             <CodeBlock code={npmSnippet} />
           </div>
