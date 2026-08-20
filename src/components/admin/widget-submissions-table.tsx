@@ -1,17 +1,25 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { useFetch } from "@/hooks/use-fetch";
 import {
-  ChevronDown,
-  ChevronRight,
+  Camera,
   ExternalLink,
-  RefreshCw,
+  Film,
   Loader2,
-  Image as ImageIcon,
+  MousePointerClick,
+  PlayCircle,
+  RefreshCw,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  submissionArtefacts,
+  type ArtefactState,
+  type SubmissionArtefacts,
+} from "@/lib/widget-artefacts";
 import type { WidgetSubmission } from "@/lib/widget-types";
 
 interface WidgetSubmissionsTableProps {
@@ -20,6 +28,9 @@ interface WidgetSubmissionsTableProps {
 
 type TypeFilter = "all" | "bug" | "feedback" | "idea";
 type StatusFilter = "all" | "synced" | "failed" | "pending";
+
+const COLUMNS =
+  "grid-cols-[110px_minmax(0,1fr)_76px_150px_116px_84px_92px]";
 
 export function WidgetSubmissionsTable({ hubId }: WidgetSubmissionsTableProps) {
   const {
@@ -30,7 +41,6 @@ export function WidgetSubmissionsTable({ hubId }: WidgetSubmissionsTableProps) {
     `/api/widget/submissions?hubId=${hubId}`
   );
 
-  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [retryingId, setRetryingId] = useState<string | null>(null);
@@ -102,25 +112,22 @@ export function WidgetSubmissionsTable({ hubId }: WidgetSubmissionsTableProps) {
       {/* Table */}
       <div className="border border-border rounded-lg overflow-hidden bg-card">
         {/* Header */}
-        <div className="grid grid-cols-[120px_1fr_80px_140px_80px_100px] gap-2 px-4 py-2 bg-muted/30 border-b border-border">
-          <span className="text-xs font-medium text-muted-foreground">
-            Date
-          </span>
-          <span className="text-xs font-medium text-muted-foreground">
-            Title
-          </span>
-          <span className="text-xs font-medium text-muted-foreground">
-            Type
-          </span>
-          <span className="text-xs font-medium text-muted-foreground">
-            Reporter
-          </span>
-          <span className="text-xs font-medium text-muted-foreground">
-            Status
-          </span>
-          <span className="text-xs font-medium text-muted-foreground">
-            Linear
-          </span>
+        <div
+          className={cn(
+            "grid gap-2 px-4 py-2 bg-muted/30 border-b border-border",
+            COLUMNS
+          )}
+        >
+          {["Date", "Title", "Type", "Reporter", "Artefacts", "Status", "Linear"].map(
+            (label) => (
+              <span
+                key={label}
+                className="text-xs font-medium text-muted-foreground"
+              >
+                {label}
+              </span>
+            )
+          )}
         </div>
 
         {/* Rows */}
@@ -129,198 +136,134 @@ export function WidgetSubmissionsTable({ hubId }: WidgetSubmissionsTableProps) {
             No submissions found.
           </div>
         ) : (
-          filtered.map((sub, i) => {
-            const isExpanded = expandedId === sub.id;
-            return (
-              <div
-                key={sub.id}
-                className={cn(
-                  i < filtered.length - 1 && "border-b border-border"
-                )}
-              >
-                {/* Row */}
-                <button
-                  onClick={() =>
-                    setExpandedId(isExpanded ? null : sub.id)
-                  }
-                  className="w-full grid grid-cols-[120px_1fr_80px_140px_80px_100px] gap-2 px-4 py-2.5 text-left hover:bg-accent/30 transition-colors items-center"
-                >
-                  <span className="text-xs text-muted-foreground tabular-nums">
-                    {new Date(sub.created_at).toLocaleDateString()}
-                  </span>
-                  <span className="text-sm truncate flex items-center gap-1.5">
-                    {isExpanded ? (
-                      <ChevronDown className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
-                    ) : (
-                      <ChevronRight className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
-                    )}
-                    {sub.title}
-                  </span>
-                  <TypeBadge type={sub.type} />
-                  <span className="text-xs text-muted-foreground truncate">
-                    {sub.reporter_email}
-                  </span>
-                  <StatusBadge status={sub.sync_status} />
-                  <span className="text-xs">
-                    {sub.linear_issue_url ? (
-                      <a
-                        href={sub.linear_issue_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="inline-flex items-center gap-1 text-primary hover:underline"
-                      >
-                        View
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    ) : (
-                      <span className="text-muted-foreground">--</span>
-                    )}
-                  </span>
-                </button>
+          filtered.map((sub, i) => (
+            <div
+              key={sub.id}
+              className={cn(
+                "relative grid gap-2 px-4 py-2.5 items-center hover:bg-accent/30 transition-colors",
+                COLUMNS,
+                i < filtered.length - 1 && "border-b border-border"
+              )}
+            >
+              {/* Whole-row link. Absolute rather than wrapping the row so the
+                  Linear link and retry button stay valid, clickable elements. */}
+              <Link
+                href={`/admin/hubs/${hubId}/widget/submissions/${sub.id}`}
+                aria-label={`Open submission: ${sub.title}`}
+                className="absolute inset-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
+              />
 
-                {/* Expanded Detail */}
-                {isExpanded && (
-                  <div className="px-4 pb-4 pt-1 space-y-3 border-t border-border/50 bg-muted/10">
-                    {sub.description && (
-                      <div>
-                        <p className="text-xs font-medium text-muted-foreground mb-1">
-                          Description
-                        </p>
-                        <p className="text-sm">{sub.description}</p>
-                      </div>
-                    )}
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {new Date(sub.created_at).toLocaleDateString()}
+              </span>
+              <span className="text-sm truncate">{sub.title}</span>
+              <TypeBadge type={sub.type} />
+              <span className="text-xs text-muted-foreground truncate">
+                {sub.reporter_email}
+              </span>
+              <ArtefactIcons artefacts={submissionArtefacts(sub)} />
+              <StatusBadge
+                status={sub.sync_status}
+                error={sub.sync_error}
+              />
 
-                    {sub.page_url && (
-                      <div>
-                        <p className="text-xs font-medium text-muted-foreground mb-1">
-                          Page URL
-                        </p>
-                        <a
-                          href={sub.page_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs text-primary hover:underline break-all"
-                        >
-                          {sub.page_url}
-                        </a>
-                      </div>
-                    )}
-
-                    {sub.screenshot_url && (
-                      <div>
-                        <p className="text-xs font-medium text-muted-foreground mb-1">
-                          Screenshot
-                        </p>
-                        <a
-                          href={sub.screenshot_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
-                        >
-                          <ImageIcon className="w-3.5 h-3.5" />
-                          View screenshot
-                        </a>
-                      </div>
-                    )}
-
-                    {sub.metadata?.console &&
-                      sub.metadata.console.length > 0 && (
-                        <div>
-                          <p className="text-xs font-medium text-muted-foreground mb-1">
-                            Console ({sub.metadata.console.length})
-                          </p>
-                          <div className="max-h-40 overflow-y-auto border border-border rounded-md bg-muted/30">
-                            {sub.metadata.console.map((entry, idx) => (
-                              <div
-                                key={idx}
-                                className={cn(
-                                  "px-2.5 py-1 text-xs font-mono",
-                                  idx > 0 && "border-t border-border/50",
-                                  entry.level === "error" && "text-red-500",
-                                  entry.level === "warn" &&
-                                    "text-yellow-600 dark:text-yellow-500"
-                                )}
-                              >
-                                <span className="text-muted-foreground mr-2">
-                                  [{entry.level}]
-                                </span>
-                                {entry.message}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
+              <span className="relative z-10 text-xs justify-self-start">
+                {sub.linear_issue_url ? (
+                  <a
+                    href={sub.linear_issue_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-primary hover:underline"
+                  >
+                    View
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                ) : sub.sync_status === "failed" ? (
+                  <button
+                    type="button"
+                    onClick={() => retrySync(sub.id)}
+                    disabled={retryingId === sub.id}
+                    title={sub.sync_error ?? "Retry Linear sync"}
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border hover:bg-accent/50 disabled:opacity-50 transition-colors"
+                  >
+                    <RefreshCw
+                      className={cn(
+                        "w-3 h-3",
+                        retryingId === sub.id && "animate-spin"
                       )}
-
-                    {sub.metadata?.sentry?.replayUrl && (
-                      <div>
-                        <p className="text-xs font-medium text-muted-foreground mb-1">
-                          Sentry Replay
-                        </p>
-                        <a
-                          href={sub.metadata.sentry.replayUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                        >
-                          Open replay
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                      </div>
-                    )}
-
-                    {sub.metadata && (
-                      <div>
-                        <p className="text-xs font-medium text-muted-foreground mb-1">
-                          Metadata
-                        </p>
-                        <pre className="text-xs bg-muted/50 border border-border rounded-md p-2.5 overflow-x-auto font-mono max-h-48 overflow-y-auto">
-                          {JSON.stringify(
-                            {
-                              url: sub.metadata.url,
-                              userAgent: sub.metadata.userAgent,
-                              viewport: sub.metadata.viewport,
-                              timestamp: sub.metadata.timestamp,
-                              custom: sub.metadata.custom,
-                            },
-                            null,
-                            2
-                          )}
-                        </pre>
-                      </div>
-                    )}
-
-                    {sub.sync_status === "failed" && (
-                      <div className="flex items-center gap-3">
-                        {sub.sync_error && (
-                          <p className="text-xs text-red-500 flex-1">
-                            {sub.sync_error}
-                          </p>
-                        )}
-                        <button
-                          onClick={() => retrySync(sub.id)}
-                          disabled={retryingId === sub.id}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
-                        >
-                          <RefreshCw
-                            className={cn(
-                              "w-3.5 h-3.5",
-                              retryingId === sub.id && "animate-spin"
-                            )}
-                          />
-                          Retry Sync
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                    />
+                    Retry
+                  </button>
+                ) : (
+                  <span className="text-muted-foreground">--</span>
                 )}
-              </div>
-            );
-          })
+              </span>
+            </div>
+          ))
         )}
       </div>
     </div>
   );
+}
+
+/**
+ * PULSE-348 — which artefacts a row carries. Purged media (PULSE-317 nulls the
+ * storage path and stamps `media_purged_at`) gets its own icon so a triaged row
+ * is not mistaken for one that never had media.
+ */
+function ArtefactIcons({ artefacts }: { artefacts: SubmissionArtefacts }) {
+  const { screenshot, video, replay, pickCount } = artefacts;
+
+  if (!artefacts.hasAny) {
+    return <span className="text-xs text-muted-foreground">--</span>;
+  }
+
+  const purged = [screenshot, video, replay].some(
+    (state) => state === "purged"
+  );
+
+  return (
+    <span className="flex items-center gap-1.5 text-muted-foreground">
+      {pickCount > 0 && (
+        <span
+          title={`${pickCount} element pick${pickCount === 1 ? "" : "s"}`}
+          className="inline-flex items-center gap-0.5"
+        >
+          <MousePointerClick className="w-3.5 h-3.5" />
+          <span className="text-[10px] font-medium tabular-nums">
+            {pickCount}
+          </span>
+        </span>
+      )}
+      <ArtefactIcon state={screenshot} label="Screenshot">
+        <Camera className="w-3.5 h-3.5" />
+      </ArtefactIcon>
+      <ArtefactIcon state={video} label="Video">
+        <Film className="w-3.5 h-3.5" />
+      </ArtefactIcon>
+      <ArtefactIcon state={replay} label="Session replay">
+        <PlayCircle className="w-3.5 h-3.5" />
+      </ArtefactIcon>
+      {purged && (
+        <span title="Media removed after the retention period">
+          <Trash2 className="w-3.5 h-3.5 opacity-60" />
+        </span>
+      )}
+    </span>
+  );
+}
+
+function ArtefactIcon({
+  state,
+  label,
+  children,
+}: {
+  state: ArtefactState;
+  label: string;
+  children: React.ReactNode;
+}) {
+  if (state !== "present") return null;
+  return <span title={label}>{children}</span>;
 }
 
 function TypeBadge({ type }: { type: string }) {
@@ -342,15 +285,22 @@ function TypeBadge({ type }: { type: string }) {
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({
+  status,
+  error,
+}: {
+  status: string;
+  error?: string | null;
+}) {
   const styles: Record<string, string> = {
     synced: "bg-[var(--badge-green-bg)] text-[var(--badge-green-text)]",
-    failed: "bg-red-500/10 text-red-500",
+    failed: "bg-[var(--badge-red-bg)] text-[var(--badge-red-text)]",
     pending: "bg-[var(--badge-yellow-bg)] text-[var(--badge-yellow-text)]",
   };
 
   return (
     <span
+      title={error ?? undefined}
       className={cn(
         "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium w-fit",
         styles[status] ?? "bg-[var(--badge-gray-bg)] text-[var(--badge-gray-text)]"
