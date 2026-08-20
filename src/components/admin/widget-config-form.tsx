@@ -16,14 +16,48 @@ import {
   X,
 } from "lucide-react";
 import type {
+  WidgetCaptureConfig,
   WidgetConfig,
   WidgetConfigCreateResponse,
   WidgetConfigRotateResponse,
   WidgetUIConfig,
 } from "@/lib/widget-types";
+import { BOOTSTRAP_DEFAULTS } from "@/lib/widget-bootstrap";
 
 interface WidgetConfigFormProps {
   hubId: string;
+}
+
+type CaptureToggleKey = Exclude<keyof WidgetCaptureConfig, "replay">;
+
+const CAPTURE_TOGGLES: Array<{ key: CaptureToggleKey; label: string; hint: string }> = [
+  { key: "screenshot", label: "Screenshot", hint: "Area / full-viewport capture with annotation" },
+  { key: "captureTab", label: "Capture tab", hint: "Native tab capture (getDisplayMedia)" },
+  { key: "elementPick", label: "Element pick", hint: "Click an element to attach its selector + markup" },
+  { key: "video", label: "Video", hint: "Short screen recording" },
+  { key: "console", label: "Console errors", hint: "Attach recent console.error / warn entries" },
+  { key: "sentry", label: "Sentry context", hint: "Link the reporter's Sentry replay / trace when present" },
+];
+
+function captureFromConfig(config: WidgetUIConfig): Record<CaptureToggleKey, boolean> {
+  const d = BOOTSTRAP_DEFAULTS.capture;
+  const c = config.capture ?? {};
+  return {
+    screenshot: c.screenshot ?? d.screenshot,
+    captureTab: c.captureTab ?? d.captureTab,
+    elementPick: c.elementPick ?? d.elementPick,
+    video: c.video ?? d.video,
+    console: c.console ?? d.console,
+    sentry: c.sentry ?? d.sentry,
+  };
+}
+
+function maskTextFromConfig(config: WidgetUIConfig): string {
+  return (config.privacy?.maskSelectors ?? []).join("\n");
+}
+
+function parseMaskText(text: string): string[] {
+  return Array.from(new Set(text.split(/[\n,]/).map((s) => s.trim()).filter(Boolean)));
 }
 
 const inputClass =
@@ -55,6 +89,10 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
   const [triggerText, setTriggerText] = useState("Feedback");
   const [origins, setOrigins] = useState<string[]>([]);
   const [originInput, setOriginInput] = useState("");
+  const [capture, setCapture] = useState<Record<CaptureToggleKey, boolean>>(
+    captureFromConfig({})
+  );
+  const [maskText, setMaskText] = useState("");
   const [dirty, setDirty] = useState(false);
 
   // Sync state from fetched config
@@ -65,6 +103,8 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
       setPosition(activeConfig.config.position ?? "bottom-right");
       setTriggerText(activeConfig.config.triggerText ?? "Feedback");
       setOrigins(activeConfig.allowed_origins ?? []);
+      setCapture(captureFromConfig(activeConfig.config));
+      setMaskText(maskTextFromConfig(activeConfig.config));
       setDirty(false);
     }
   }, [activeConfig]);
@@ -77,9 +117,12 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
       theme !== (activeConfig.config.theme ?? "auto") ||
       position !== (activeConfig.config.position ?? "bottom-right") ||
       triggerText !== (activeConfig.config.triggerText ?? "Feedback") ||
-      JSON.stringify(origins) !== JSON.stringify(activeConfig.allowed_origins ?? []);
+      JSON.stringify(origins) !== JSON.stringify(activeConfig.allowed_origins ?? []) ||
+      JSON.stringify(capture) !== JSON.stringify(captureFromConfig(activeConfig.config)) ||
+      JSON.stringify(parseMaskText(maskText)) !==
+        JSON.stringify(activeConfig.config.privacy?.maskSelectors ?? []);
     setDirty(isDirty);
-  }, [widgetName, theme, position, triggerText, origins, activeConfig]);
+  }, [widgetName, theme, position, triggerText, origins, capture, maskText, activeConfig]);
 
   const generateKey = useCallback(() => {
     startTransition(async () => {
@@ -187,7 +230,15 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
           body: JSON.stringify({
             name: widgetName.trim(),
             allowed_origins: origins,
-            config: { theme, position, triggerText: triggerText.trim() },
+            // Merge so fields owned by other slices (e.g. replay) survive a save.
+            config: {
+              ...activeConfig.config,
+              theme,
+              position,
+              triggerText: triggerText.trim(),
+              capture: { ...activeConfig.config.capture, ...capture },
+              privacy: { ...activeConfig.config.privacy, maskSelectors: parseMaskText(maskText) },
+            } satisfies WidgetUIConfig,
           }),
         });
         if (!res.ok) {
@@ -201,7 +252,7 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
         toast.error(e instanceof Error ? e.message : "Failed to save");
       }
     });
-  }, [activeConfig, widgetName, theme, position, triggerText, origins, refetch]);
+  }, [activeConfig, widgetName, theme, position, triggerText, origins, capture, maskText, refetch]);
 
   const addOrigin = () => {
     const val = originInput.trim();
@@ -393,6 +444,52 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
               onChange={(e) => setTriggerText(e.target.value)}
               placeholder="Feedback"
               className={inputClass}
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium mb-1.5">
+              Capture modes
+            </label>
+            <p className="text-[11px] text-muted-foreground mb-2">
+              Applied on the next page load of the client site via the bootstrap endpoint — no redeploy needed.
+            </p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {CAPTURE_TOGGLES.map((t) => (
+                <label
+                  key={t.key}
+                  className="flex items-start gap-2 rounded-md border border-border px-3 py-2 cursor-pointer hover:bg-accent/30 transition-colors"
+                >
+                  <input
+                    type="checkbox"
+                    checked={capture[t.key]}
+                    onChange={(e) =>
+                      setCapture((prev) => ({ ...prev, [t.key]: e.target.checked }))
+                    }
+                    className="mt-0.5 accent-primary"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-xs font-medium">{t.label}</span>
+                    <span className="block text-[11px] text-muted-foreground">{t.hint}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium mb-1.5">
+              Mask selectors
+            </label>
+            <p className="text-[11px] text-muted-foreground mb-1.5">
+              CSS selectors excluded from screenshots and replays. One per line.
+            </p>
+            <textarea
+              value={maskText}
+              onChange={(e) => setMaskText(e.target.value)}
+              rows={3}
+              placeholder={".account-balance\n[data-pii]"}
+              className={cn(inputClass, "font-mono text-xs")}
             />
           </div>
 

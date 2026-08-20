@@ -1,4 +1,4 @@
-import type { PulseConfig, SubmitResult, WidgetState } from './types'
+import type { RuntimeConfig, SubmitResult, WidgetState } from './types'
 import { getWidgetStyles } from './ui/styles'
 import { TriggerButton } from './ui/trigger'
 import { FeedbackPanel, type PanelFormData } from './ui/panel'
@@ -17,7 +17,7 @@ export interface PulseCore {
   captureScreenshot(): Promise<Blob | null>
   cropScreenshot(blob: Blob, rect: { x: number; y: number; width: number; height: number }): Promise<Blob>
   setWidgetHost(host: HTMLElement): void
-  getConfig(): PulseConfig
+  getRuntimeConfig(): RuntimeConfig
   getUser(): { email?: string; name?: string }
 }
 
@@ -37,7 +37,7 @@ export class Widget {
 
   constructor(
     private pulse: PulseCore,
-    private config: PulseConfig
+    private config: RuntimeConfig
   ) {
     this.user = { ...config.user }
   }
@@ -55,14 +55,15 @@ export class Widget {
     this.shadow.appendChild(this.styleEl)
 
     this.trigger = new TriggerButton(this.shadow, {
-      text: this.config.triggerText ?? 'Feedback',
-      position: this.config.position ?? 'bottom-right',
+      text: this.config.ui.triggerText,
+      position: this.config.ui.position,
       onClick: () => this.open(),
     })
 
     this.panel = new FeedbackPanel(this.shadow, {
-      position: this.config.position ?? 'bottom-right',
+      position: this.config.ui.position,
       user: this.user,
+      allowScreenshot: this.config.capture.screenshot,
       onSubmit: (data) => this.handleSubmit(data),
       onClose: () => this.close(),
       onAnnotate: () => this.startAnnotation(),
@@ -71,7 +72,7 @@ export class Widget {
       onCaptureFullScreen: () => this.captureFullScreen(),
     })
 
-    if (this.config.theme === 'auto' || !this.config.theme) {
+    if (this.config.ui.theme === 'auto') {
       this.watchTheme()
     }
 
@@ -124,8 +125,8 @@ export class Widget {
   }
 
   private resolveTheme(): 'light' | 'dark' {
-    if (this.config.theme === 'dark') return 'dark'
-    if (this.config.theme === 'light') return 'light'
+    if (this.config.ui.theme === 'dark') return 'dark'
+    if (this.config.ui.theme === 'light') return 'light'
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
   }
 

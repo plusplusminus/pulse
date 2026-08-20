@@ -72,3 +72,40 @@ export type PulseGlobalConfig = Partial<PulseConfig> & {
   /** Called by the cookie loader once pulse.js has loaded. */
   onReady?: () => void
 }
+
+/** Mirror of WidgetBootstrapPayload in src/lib/widget-types.ts (Pulse app). */
+export interface BootstrapPayload {
+  site: { name: string }
+  api: { base: string }
+  capture: {
+    screenshot: boolean
+    captureTab: boolean
+    elementPick: boolean
+    video: boolean
+    console: boolean
+    sentry: boolean
+    replay: { enabled: boolean; bufferSeconds: number; maskAllInputs: boolean }
+  }
+  privacy: { maskSelectors: string[] }
+  ui: {
+    theme: 'auto' | 'light' | 'dark'
+    position: 'bottom-right' | 'bottom-left'
+    triggerText: string
+  }
+}
+
+/** Fully resolved runtime config: bootstrap (or safe defaults) merged with the host page's PulseConfig. */
+export interface RuntimeConfig {
+  siteKey: string
+  apiUrl: string
+  siteName: string | null
+  ui: BootstrapPayload['ui']
+  capture: BootstrapPayload['capture']
+  privacy: BootstrapPayload['privacy']
+  user: { email?: string; name?: string }
+  custom: Record<string, string>
+  consoleLimit: number
+  onSubmit?: (result: SubmitResult) => void
+  onOpen?: () => void
+  onClose?: () => void
+}

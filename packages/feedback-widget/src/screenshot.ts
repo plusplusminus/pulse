@@ -12,8 +12,22 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   ])
 }
 
+/** True when the node matches any admin-configured mask selector (invalid selectors are ignored). */
+export function isMaskedNode(node: Element, maskSelectors: readonly string[]): boolean {
+  if (typeof node.matches !== 'function') return false
+  for (const selector of maskSelectors) {
+    try {
+      if (node.matches(selector)) return true
+    } catch {
+      // invalid selector from config; skip
+    }
+  }
+  return false
+}
+
 async function captureHtmlToImage(
-  widgetHost: HTMLElement | null
+  widgetHost: HTMLElement | null,
+  maskSelectors: readonly string[]
 ): Promise<Blob> {
   const viewportWidth = window.innerWidth
   const viewportHeight = window.innerHeight
@@ -29,6 +43,7 @@ async function captureHtmlToImage(
     },
     filter: (node: HTMLElement) => {
       if (widgetHost && node === widgetHost) return false
+      if (maskSelectors.length && node instanceof Element && isMaskedNode(node, maskSelectors)) return false
       return true
     },
   }
@@ -91,13 +106,14 @@ async function captureNative(): Promise<Blob | null> {
 }
 
 export async function captureScreenshot(
-  widgetHost: HTMLElement | null
+  widgetHost: HTMLElement | null,
+  maskSelectors: readonly string[] = []
 ): Promise<Blob | null> {
   if (widgetHost) widgetHost.style.display = 'none'
 
   try {
     try {
-      return await captureHtmlToImage(widgetHost)
+      return await captureHtmlToImage(widgetHost, maskSelectors)
     } catch {
       const nativeBlob = await captureNative()
       if (nativeBlob) return nativeBlob

@@ -3,7 +3,7 @@ import { claimInstance, getActiveInstance, releaseInstance, type InstanceRegistr
 import type { PulseInstance } from './index'
 
 function fakeInstance(): PulseInstance {
-  return { open() {}, close() {}, destroy() {}, identify() {}, setCustom() {} }
+  return { open() {}, close() {}, destroy() {}, identify() {}, setCustom() {}, ready: Promise.resolve() }
 }
 
 describe('double-init guard', () => {
