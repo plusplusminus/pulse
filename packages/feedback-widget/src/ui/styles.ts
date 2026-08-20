@@ -338,6 +338,37 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
       color: ${c.error};
     }
 
+    .pulse-header__pause {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      margin-left: auto;
+      margin-right: 4px;
+      padding: 0;
+      border: none;
+      border-radius: 5px;
+      background: transparent;
+      color: ${c.muted};
+      cursor: pointer;
+    }
+
+    .pulse-header__pause svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    .pulse-header__pause:hover {
+      background: ${c.inputBg};
+      color: ${c.text};
+    }
+
+    .pulse-header__pause--active {
+      background: ${c.primary}1f;
+      color: ${c.primary};
+    }
+
     /* Screenshot option buttons */
     .pulse-screenshot-options {
       display: flex;

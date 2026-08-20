@@ -15,6 +15,8 @@ export class FeedbackPanel {
   private screenshotBlob: Blob | null = null
   private screenshotUrl: string | null = null
   private picks: WidgetPick[] = []
+  private paused = false
+  private pauseBtn: HTMLButtonElement | null = null
   private user: { email?: string; name?: string }
 
   private bodyEl!: HTMLElement
@@ -37,6 +39,7 @@ export class FeedbackPanel {
       onPickElement: () => void
       onEditPick: (id: string) => void
       onDeletePick: (id: string) => void
+      onTogglePause: () => void
     }
   ) {
     this.user = { ...config.user }
@@ -71,6 +74,8 @@ export class FeedbackPanel {
     title.textContent = 'Feedback'
     header.appendChild(title)
 
+    header.appendChild(this.renderPauseButton())
+
     const closeBtn = document.createElement('button')
     closeBtn.className = 'pulse-header__close'
     closeBtn.setAttribute('aria-label', 'Close')
@@ -89,6 +94,52 @@ export class FeedbackPanel {
     header.appendChild(closeBtn)
 
     return header
+  }
+
+  /**
+   * Freezes host-page motion so a timing bug can be captured at one frame.
+   * Lives in the header next to Close; the global pause CSS excludes the widget,
+   * so this button stays interactive while the page is frozen.
+   */
+  private renderPauseButton(): HTMLButtonElement {
+    const btn = document.createElement('button')
+    btn.className = 'pulse-header__pause'
+    btn.type = 'button'
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+    svg.setAttribute('viewBox', '0 0 16 16')
+    svg.setAttribute('fill', 'none')
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+    path.setAttribute('stroke', 'currentColor')
+    path.setAttribute('stroke-width', '1.5')
+    path.setAttribute('stroke-linecap', 'round')
+    path.setAttribute('stroke-linejoin', 'round')
+    svg.appendChild(path)
+    btn.appendChild(svg)
+    btn.addEventListener('click', () => this.config.onTogglePause())
+    this.pauseBtn = btn
+    this.applyPauseState()
+    return btn
+  }
+
+  private applyPauseState(): void {
+    const btn = this.pauseBtn
+    if (!btn) return
+    const label = this.paused ? 'Resume page animations' : 'Pause page animations'
+    btn.title = label
+    btn.setAttribute('aria-label', label)
+    btn.setAttribute('aria-pressed', String(this.paused))
+    btn.classList.toggle('pulse-header__pause--active', this.paused)
+    // Paused shows "play" (the action available); running shows "pause".
+    btn.querySelector('path')?.setAttribute('d', this.paused ? 'M5 3.5l7 4.5-7 4.5v-9Z' : 'M6 3.5v9M10 3.5v9')
+  }
+
+  setPaused(paused: boolean): void {
+    this.paused = paused
+    this.applyPauseState()
+  }
+
+  isPaused(): boolean {
+    return this.paused
   }
 
   private renderFooter(): HTMLElement {

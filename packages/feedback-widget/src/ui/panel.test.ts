@@ -22,6 +22,7 @@ let config: {
   onEditPick: Mock<(id: string) => void>
   onDeletePick: Mock<(id: string) => void>
   onPickElement: Mock<() => void>
+  onTogglePause: Mock<() => void>
 }
 
 function makePanel(allowElementPick = true): FeedbackPanel {
@@ -45,6 +46,7 @@ beforeEach(() => {
     onEditPick: vi.fn<(id: string) => void>(),
     onDeletePick: vi.fn<(id: string) => void>(),
     onPickElement: vi.fn<() => void>(),
+    onTogglePause: vi.fn<() => void>(),
   }
 })
 
@@ -92,5 +94,31 @@ describe('picks list', () => {
     panel.setState('open')
     panel.setPicks([pick('a', 'button "Save"', '')])
     expect(shadow.querySelector('.pulse-picks')).toBeNull()
+  })
+})
+
+describe('pause toggle', () => {
+  it('routes clicks to onTogglePause and reflects the state the widget reports back', () => {
+    const panel = makePanel()
+    panel.setState('open')
+
+    const btn = shadow.querySelector('.pulse-header__pause') as HTMLButtonElement
+    expect(btn).not.toBeNull()
+    expect(btn.getAttribute('aria-pressed')).toBe('false')
+    expect(btn.title).toBe('Pause page animations')
+
+    btn.click()
+    expect(config.onTogglePause).toHaveBeenCalledTimes(1)
+    // The widget owns the freeze, so the panel only changes on setPaused.
+    expect(btn.getAttribute('aria-pressed')).toBe('false')
+
+    panel.setPaused(true)
+    expect(panel.isPaused()).toBe(true)
+    expect(btn.getAttribute('aria-pressed')).toBe('true')
+    expect(btn.title).toBe('Resume page animations')
+    expect(btn.classList.contains('pulse-header__pause--active')).toBe(true)
+
+    panel.setPaused(false)
+    expect(btn.classList.contains('pulse-header__pause--active')).toBe(false)
   })
 })

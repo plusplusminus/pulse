@@ -13,6 +13,7 @@ import { ElementPicker, type DragRect, type Point } from './capture/pick-mode'
 import { buildPick, buildMultiPick, buildAreaPick } from './capture/pick-builder'
 import { MultiSelection } from './capture/multi-select'
 import { collectAreaCandidates, findMarqueeElements, resolveMarquee } from './capture/area-select'
+import { PageFreezer } from './capture/freeze'
 import { PickPopup, type PickPopupResult } from './ui/pick-popup'
 import { PickMarkers, type Marker } from './ui/pick-markers'
 import { PickOutlines } from './ui/pick-outlines'
@@ -56,6 +57,7 @@ export class Widget {
   private pendingPick: { pick: WidgetPick; marker: Marker } | null = null
   private editingPickId: string | null = null
   private multi = new MultiSelection()
+  private freezer = new PageFreezer()
   private lastModifierPoint: Point | null = null
   private state: WidgetState = 'closed'
   private currentScreenshot: Blob | null = null
@@ -105,6 +107,7 @@ export class Widget {
       onPickElement: () => this.startPick(),
       onEditPick: (id) => this.startEditPick(id),
       onDeletePick: (id) => this.deletePick(id),
+      onTogglePause: () => this.togglePause(),
     })
 
     if (this.config.capture.elementPick) {
@@ -154,8 +157,20 @@ export class Widget {
     this.config.onOpen?.()
   }
 
+  /** Motion freeze is a debugging aid, never a state the host page is left in. */
+  private togglePause(): void {
+    this.panel.setPaused(this.freezer.toggle())
+  }
+
+  private resumePage(): void {
+    if (!this.freezer.isFrozen) return
+    this.freezer.unfreeze()
+    this.panel.setPaused(false)
+  }
+
   close(): void {
     if (this.state === 'closed') return
+    this.resumePage()
     this.teardownPickMode()
     this.state = 'closed'
     this.panel.setState('closed')
@@ -173,6 +188,7 @@ export class Widget {
     if (this.themeQuery && this.themeHandler) {
       this.themeQuery.removeEventListener('change', this.themeHandler)
     }
+    this.freezer.destroy()
     this.teardownPickMode()
     this.picker = null
     this.popup?.destroy()
@@ -484,6 +500,8 @@ export class Widget {
   }
 
   private async handleSubmit(formData: PanelFormData): Promise<SubmitResult> {
+    // Never leave the host page frozen behind a submitted report.
+    this.resumePage()
     this.state = 'submitting'
 
     const result = await this.pulse.submitFeedback({
