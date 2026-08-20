@@ -759,6 +759,17 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
       text-align: center;
     }
 
+    /* Drag area-select rectangle */
+    .pulse-marquee {
+      position: fixed;
+      z-index: 2147483646;
+      box-sizing: border-box;
+      border: 1px solid ${c.primary};
+      background: ${c.primary}1a;
+      border-radius: 2px;
+      pointer-events: none;
+    }
+
     .pulse-pick-status {
       position: fixed;
       z-index: 2147483647;

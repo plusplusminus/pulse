@@ -84,3 +84,25 @@ export function buildMultiPick(elements: Element[], options: BuildPickOptions = 
     elementBoundingBoxes: boxes,
   }
 }
+
+/**
+ * An empty region the user swept out (PULSE-350). No element metadata is
+ * captured — there is no element — so only the geometry and the comment carry
+ * meaning. `rect` is in viewport coordinates; area picks are never fixed.
+ */
+export function buildAreaPick(rect: PickRect, options: BuildPickOptions = {}): WidgetPick {
+  const area = pageRect(rect, false)
+  return {
+    id: options.id ?? newPickId(),
+    elementPath: `region at (${area.x}, ${area.y})`,
+    name: 'Area selection',
+    classes: '',
+    boundingBox: area,
+    nearbyText: '',
+    comment: options.comment ?? '',
+    intent: options.intent ?? 'fix',
+    isFixed: false,
+    isArea: true,
+    areaRect: area,
+  }
+}

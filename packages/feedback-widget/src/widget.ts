@@ -9,13 +9,15 @@ import { getWidgetStyles } from './ui/styles'
 import { TriggerButton } from './ui/trigger'
 import { FeedbackPanel, type PanelFormData } from './ui/panel'
 import { AnnotationCanvas } from './ui/annotation'
-import { ElementPicker, type Point } from './capture/pick-mode'
-import { buildPick, buildMultiPick } from './capture/pick-builder'
+import { ElementPicker, type DragRect, type Point } from './capture/pick-mode'
+import { buildPick, buildMultiPick, buildAreaPick } from './capture/pick-builder'
 import { MultiSelection } from './capture/multi-select'
+import { collectAreaCandidates, findMarqueeElements, resolveMarquee } from './capture/area-select'
 import { PickPopup, type PickPopupResult } from './ui/pick-popup'
 import { PickMarkers, type Marker } from './ui/pick-markers'
 import { PickOutlines } from './ui/pick-outlines'
 import { PickStatus } from './ui/pick-status'
+import { Marquee } from './ui/marquee'
 
 export interface PulseCore {
   submitFeedback(data: {
@@ -46,6 +48,9 @@ export class Widget {
   private markers: PickMarkers | null = null
   private outlines: PickOutlines | null = null
   private status: PickStatus | null = null
+  private marquee: Marquee | null = null
+  /** Candidate elements snapshotted once per drag; the page cannot change mid-marquee. */
+  private dragCandidates: Element[] = []
   private picks: WidgetPick[] = []
   private markersById = new Map<string, Marker>()
   private pendingPick: { pick: WidgetPick; marker: Marker } | null = null
@@ -106,12 +111,16 @@ export class Widget {
       this.markers = new PickMarkers(this.shadow)
       this.outlines = new PickOutlines(this.shadow)
       this.status = new PickStatus(this.shadow)
+      this.marquee = new Marquee(this.shadow)
       this.popup = new PickPopup(this.shadow, {
         onSave: (result) => this.handlePopupSave(result),
         onCancel: () => this.handlePopupCancel(),
       })
       this.picker = new ElementPicker(this.shadow, this.host, {
         onPick: (target, point) => this.handlePick(target, point),
+        onDragStart: () => this.handleDragStart(),
+        onDragMove: (rect) => this.handleDragMove(rect),
+        onDragEnd: (rect) => this.handleDragEnd(rect),
         onModifierEnter: () => this.handleModifierEnter(),
         onModifierClick: (target, point) => this.handleModifierClick(target, point),
         onModifierRelease: () => this.handleModifierRelease(),
@@ -170,6 +179,7 @@ export class Widget {
     this.markers?.destroy()
     this.outlines?.destroy()
     this.status?.destroy()
+    this.marquee?.destroy()
     this.trigger.destroy()
     this.panel.destroy()
     this.annotation?.destroy()
@@ -204,6 +214,7 @@ export class Widget {
     this.editingPickId = null
     this.markers?.setPending(null)
     this.clearMultiSelect()
+    this.cancelDrag()
     this.picker?.stop()
   }
 
@@ -265,6 +276,50 @@ export class Widget {
   private clearMultiSelect(): void {
     this.multi.clear()
     this.lastModifierPoint = null
+    this.outlines?.clear()
+    this.status?.hide()
+  }
+
+  // -- drag area-select (marquee) ----------------------------------------------
+
+  private handleDragStart(): void {
+    if (this.state !== 'picking') return
+    this.dragCandidates = collectAreaCandidates(this.host)
+    this.status?.show('Release to comment on this area')
+  }
+
+  /** Live preview: outline whatever the marquee would currently commit. */
+  private handleDragMove(rect: DragRect): void {
+    if (this.state !== 'picking') return
+    this.marquee?.set(rect)
+    this.outlines?.set(findMarqueeElements(this.dragCandidates, rect))
+  }
+
+  /**
+   * Elements inside the marquee win; an empty box big enough to be deliberate
+   * becomes an area annotation; anything smaller was a stray click.
+   */
+  private handleDragEnd(rect: DragRect): void {
+    const outcome = resolveMarquee(this.dragCandidates, rect)
+    this.dragCandidates = []
+    this.marquee?.hide()
+    this.outlines?.clear()
+    this.status?.hide()
+    if (this.state !== 'picking' || outcome.kind === 'none') return
+    if (!this.picker || !this.popup || !this.markers) return
+
+    this.picker.pause()
+    // Popup anchors at the centre-bottom of the marquee.
+    const anchor: Point = { x: rect.x + rect.width / 2, y: rect.y + rect.height }
+    this.openPickPopup(
+      outcome.kind === 'area' ? buildAreaPick(rect) : buildMultiPick(outcome.elements),
+      anchor
+    )
+  }
+
+  private cancelDrag(): void {
+    this.dragCandidates = []
+    this.marquee?.hide()
     this.outlines?.clear()
     this.status?.hide()
   }
