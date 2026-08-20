@@ -2,7 +2,7 @@ import type { PulseConfig, RuntimeConfig, ScreenshotAnnotation, SubmitResult, Wi
 import { ConsoleInterceptor } from './console'
 import { detectSentry } from './sentry'
 import { collectContext } from './context'
-import { captureScreenshot } from './screenshot'
+import { captureViewport } from './screenshot'
 import { submitFeedback } from './api'
 import { uploadBlob } from './transport/upload'
 import { Widget } from './widget'
@@ -170,9 +170,10 @@ export class Pulse implements PulseInstance {
     this.widgetHost = host
   }
 
+  /** null means the site has screenshots switched off; a real failure rejects. */
   async captureScreenshot(): Promise<Blob | null> {
     if (!this.runtime.capture.screenshot) return null
-    return captureScreenshot(this.widgetHost, this.runtime.privacy.maskSelectors)
+    return captureViewport({ maskSelectors: this.runtime.privacy.maskSelectors })
   }
 
 }

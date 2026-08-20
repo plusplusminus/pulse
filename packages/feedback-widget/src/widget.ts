@@ -457,16 +457,20 @@ export class Widget {
     this.panel.setScreenshot(blob)
   }
 
+  /**
+   * The capture engine excludes #pulse-widget itself, so the widget no longer
+   * has to hide (and flash) to stay out of the shot.
+   */
   private async captureFullScreen(): Promise<void> {
-    this.host.style.display = 'none'
     let blob: Blob | null = null
+    let error: string | null = null
     try {
       blob = await this.pulse.captureScreenshot()
-    } catch {
-      blob = null
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Screenshot capture failed'
     }
-    this.host.style.display = ''
     this.setScreenshot(blob)
+    this.panel.setCaptureError(error)
     this.state = 'open'
     this.panel.setState('open')
   }

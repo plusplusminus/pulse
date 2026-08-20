@@ -1,4 +1,5 @@
 import type { WidgetState, SubmitResult, WidgetPick } from '../types'
+import { CROSS_ORIGIN_NOTICE } from '../screenshot'
 
 export interface PanelFormData {
   title: string
@@ -16,6 +17,7 @@ export class FeedbackPanel {
   private screenshotUrl: string | null = null
   private picks: WidgetPick[] = []
   private paused = false
+  private captureError: string | null = null
   private pauseBtn: HTMLButtonElement | null = null
   private user: { email?: string; name?: string }
 
@@ -426,6 +428,7 @@ export class FeedbackPanel {
   private renderAddScreenshotButtons(): HTMLElement {
     const container = document.createElement('div')
     container.className = 'pulse-screenshot-options'
+    container.style.flexDirection = 'column'
 
     const btn = document.createElement('button')
     btn.className = 'pulse-add-screenshot'
@@ -450,7 +453,26 @@ export class FeedbackPanel {
     btn.addEventListener('click', () => this.config.onCaptureScreenshot())
     container.appendChild(btn)
 
+    if (this.captureError) {
+      const error = document.createElement('div')
+      error.className = 'pulse-capture-note pulse-capture-note--error'
+      error.setAttribute('role', 'alert')
+      error.textContent = this.captureError
+      container.appendChild(error)
+    }
+
+    const note = document.createElement('div')
+    note.className = 'pulse-capture-note'
+    note.textContent = CROSS_ORIGIN_NOTICE
+    container.appendChild(note)
+
     return container
+  }
+
+  /** Surfaced under the capture controls when a viewport capture fails outright. */
+  setCaptureError(message: string | null): void {
+    this.captureError = message
+    if (this.state === 'open') this.renderForm()
   }
 
   private renderCapturing(): void {

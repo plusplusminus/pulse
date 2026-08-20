@@ -28,7 +28,7 @@
   },
   "dependencies": {
     "@medv/finder": "^4.0.2",
-    "html-to-image": "^1.11.11"
+    "@zumer/snapdom": "^2.24.3"
   },
   "devDependencies": {
     "jsdom": "^30.0.1",
