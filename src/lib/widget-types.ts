@@ -11,9 +11,14 @@ export type WidgetConfig = {
   is_active: boolean
   config: WidgetUIConfig
   allowed_origins: string[]
+  /** Per-pick verbosity in the Linear body (PULSE-329/332). Column default 'standard'. */
+  output_detail_level: OutputDetailLevel
   created_at: string
   updated_at: string
 }
+
+export const OUTPUT_DETAIL_LEVELS = ['compact', 'standard', 'detailed', 'forensic'] as const
+export type OutputDetailLevel = (typeof OUTPUT_DETAIL_LEVELS)[number]
 
 /**
  * Per-site settings stored in widget_configs.config (JSONB). Every field is optional;
@@ -78,6 +83,8 @@ export type WidgetSubmission = {
   replay_storage_path: string | null
   media_purged_at: string | null
   metadata: WidgetMetadata
+  /** Element picks (PULSE-329). Defaults to [] for rows created before the column existed. */
+  picks: WidgetPick[]
   reporter_email: string
   reporter_name: string | null
   linear_issue_id: string | null
@@ -86,6 +93,60 @@ export type WidgetSubmission = {
   sync_error: string | null
   page_url: string | null
   created_at: string
+}
+
+// -- Element picks (PULSE-329) --------------------------------------------
+
+export const PICK_INTENTS = ['fix', 'change', 'question', 'approve'] as const
+export type PickIntent = (typeof PICK_INTENTS)[number]
+
+export type PickRect = { x: number; y: number; width: number; height: number }
+
+/** Geometry + text hash so a relocator can score candidates when selector and XPath miss (PULSE-328). */
+export type PickRelocation = {
+  rect: PickRect & { top: number; left: number; right: number; bottom: number }
+  scrollX: number
+  scrollY: number
+  viewport: { width: number; height: number }
+  dpr: number
+  textHash: string
+}
+
+/**
+ * One element pick. Mirrored in packages/feedback-widget/src/types.ts and validated
+ * by widgetPickSchema (src/lib/widget-picks.ts). Named WidgetPick because `Pick`
+ * collides with the TypeScript utility type.
+ */
+export type WidgetPick = {
+  id: string
+
+  // Always captured (every level)
+  elementPath: string
+  name: string
+  classes: string
+  boundingBox: PickRect
+  nearbyText: string
+  comment: string
+  intent: PickIntent
+  isFixed: boolean
+
+  // Multi-pick / area
+  isMultiSelect?: boolean
+  isArea?: boolean
+  areaRect?: PickRect
+  elementBoundingBoxes?: PickRect[]
+
+  // Captured at pick time, used for detailed / forensic output
+  selectedText?: string
+  fullPath?: string
+  computedStyles?: Record<string, string>
+  accessibility?: string
+  nearbyElements?: string
+
+  // Machine-relocatable identity (PULSE-328)
+  selector?: string | null
+  xpath?: string
+  relocation?: PickRelocation
 }
 
 // -- Metadata types -------------------------------------------------------
@@ -126,6 +187,8 @@ export type WidgetFeedbackRequest = {
   }
   /** Object key in the private widget-media bucket, minted by POST /api/widget/upload */
   screenshotStoragePath?: string
+  /** Element picks; max 50 (PULSE-329) */
+  picks?: WidgetPick[]
 }
 
 export type WidgetFeedbackResponse = {
@@ -161,4 +224,5 @@ export type WidgetConfigUpdateRequest = {
   is_active?: boolean
   allowed_origins?: string[]
   config?: WidgetUIConfig
+  output_detail_level?: OutputDetailLevel
 }

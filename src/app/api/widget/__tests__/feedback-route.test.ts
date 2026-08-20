@@ -76,6 +76,7 @@ function authOk(hubId = HUB_A) {
       is_active: true,
       config: {},
       allowed_origins: [],
+      output_detail_level: "standard",
       created_at: "",
       updated_at: "",
     },
@@ -190,5 +191,40 @@ describe("POST /api/widget/feedback (storage path cut-over)", () => {
     expect(inserts[0].screenshot_url).toBeNull();
     const [call] = mockedCreateIssue.mock.calls;
     expect(call[0].description).toContain("_No screenshot attached_");
+  });
+});
+
+describe("POST /api/widget/feedback (element picks, PULSE-329)", () => {
+  const pick = {
+    id: "p1",
+    elementPath: "main > .hero > button",
+    name: 'button "Sign up"',
+    classes: "btn, primary",
+    boundingBox: { x: 1, y: 2, width: 3, height: 4 },
+    nearbyText: "Sign up",
+    comment: "Make this bigger",
+    intent: "fix",
+    isFixed: false,
+  };
+
+  it("persists picks on the submission row", async () => {
+    authOk(HUB_A);
+    const res = await post(payload({ picks: [pick, { ...pick, id: "p2", intent: "question" }] }));
+    expect(res.status).toBe(201);
+    expect(inserts[0].picks).toEqual([pick, { ...pick, id: "p2", intent: "question" }]);
+  });
+
+  it("defaults picks to [] when the widget sends none", async () => {
+    authOk(HUB_A);
+    const res = await post(payload());
+    expect(res.status).toBe(201);
+    expect(inserts[0].picks).toEqual([]);
+  });
+
+  it("rejects invalid picks at the schema (bad intent, too many)", async () => {
+    authOk(HUB_A);
+    expect((await post(payload({ picks: [{ ...pick, intent: "nuke" }] }))).status).toBe(400);
+    expect((await post(payload({ picks: Array.from({ length: 51 }, () => pick) }))).status).toBe(400);
+    expect(inserts).toEqual([]);
   });
 });

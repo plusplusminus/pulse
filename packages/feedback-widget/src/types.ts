@@ -59,6 +59,57 @@ export interface FeedbackPayload {
   }
   /** Object key in the private widget-media bucket (from uploadBlob) */
   screenshotStoragePath?: string
+  /** Element picks (PULSE-329); max 50 */
+  picks?: WidgetPick[]
+}
+
+// -- Element picks: mirror of WidgetPick in src/lib/widget-types.ts (Pulse app) ----------
+
+export const PICK_INTENTS = ['fix', 'change', 'question', 'approve'] as const
+export type PickIntent = (typeof PICK_INTENTS)[number]
+
+export interface PickRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface PickRelocation {
+  rect: PickRect & { top: number; left: number; right: number; bottom: number }
+  scrollX: number
+  scrollY: number
+  viewport: { width: number; height: number }
+  dpr: number
+  textHash: string
+}
+
+export interface WidgetPick {
+  id: string
+
+  elementPath: string
+  name: string
+  classes: string
+  boundingBox: PickRect
+  nearbyText: string
+  comment: string
+  intent: PickIntent
+  isFixed: boolean
+
+  isMultiSelect?: boolean
+  isArea?: boolean
+  areaRect?: PickRect
+  elementBoundingBoxes?: PickRect[]
+
+  selectedText?: string
+  fullPath?: string
+  computedStyles?: Record<string, string>
+  accessibility?: string
+  nearbyElements?: string
+
+  selector?: string | null
+  xpath?: string
+  relocation?: PickRelocation
 }
 
 export type WidgetState = 'closed' | 'open' | 'capturing' | 'annotating' | 'submitting' | 'success' | 'error'

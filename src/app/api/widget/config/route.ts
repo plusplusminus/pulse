@@ -32,7 +32,7 @@ export async function GET(request: Request) {
     const { data, error } = await supabaseAdmin
       .from("widget_configs")
       .select(
-        "id, hub_id, api_key_prefix, name, is_active, config, allowed_origins, created_at, updated_at"
+        "id, hub_id, api_key_prefix, name, is_active, config, allowed_origins, output_detail_level, created_at, updated_at"
       )
       .eq("hub_id", hubId)
       .order("created_at", { ascending: false });

@@ -14,6 +14,7 @@ import {
 } from "@/lib/widget-linear";
 import type { WidgetFeedbackResponse } from "@/lib/widget-types";
 import { STORAGE_PATH_PATTERN } from "@/lib/widget-upload";
+import { picksSchema } from "@/lib/widget-picks";
 
 // In-memory rate limiter: apiKeyPrefix -> timestamps
 const rateLimitMap = new Map<string, number[]>();
@@ -87,6 +88,8 @@ const feedbackSchema = z.object({
     .string()
     .regex(STORAGE_PATH_PATTERN, "Invalid storage path")
     .optional(),
+  // Element picks (PULSE-329); rendered into the Linear body per output_detail_level.
+  picks: picksSchema,
 });
 
 export async function POST(request: Request) {
@@ -172,6 +175,7 @@ export async function POST(request: Request) {
         screenshot_url: screenshotUrl ?? null,
         screenshot_storage_path: data.screenshotStoragePath ?? null,
         metadata: data.metadata,
+        picks: data.picks,
         reporter_email: data.reporter.email,
         reporter_name: data.reporter.name ?? null,
         page_url: data.metadata.url,
