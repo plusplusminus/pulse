@@ -50,3 +50,7 @@ next-env.d.ts
 # opennext build output
 .open-next
 .env*.local
+
+# perf tooling output
+perf-snapshots/
+k6-summary-*.json
