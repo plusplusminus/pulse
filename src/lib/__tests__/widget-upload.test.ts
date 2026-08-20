@@ -138,6 +138,39 @@ describe("signWidgetUpload", () => {
     }
   });
 
+  // Regression, found by driving the built widget against a live upload route:
+  // MediaRecorder reports "video/webm;codecs=vp9" and the widget forwards it
+  // verbatim, but the allowlist is keyed on the base type. Every test here used
+  // a bare "video/webm", so both sides passed and real video upload 400'd.
+  it("accepts the parameterised content types MediaRecorder actually emits", async () => {
+    const { storage } = fakeStorage();
+    const cases: Array<[string, string]> = [
+      ["video/webm;codecs=vp9", "webm"],
+      ["video/webm;codecs=vp8", "webm"],
+      ["video/webm; codecs=\"vp9,opus\"", "webm"],
+      ["video/mp4;codecs=avc1", "mp4"],
+      ["VIDEO/WEBM;CODECS=VP9", "webm"],
+    ];
+    for (const [contentType, ext] of cases) {
+      const result = await signWidgetUpload(
+        baseInput(storage, { kind: "video", contentType })
+      );
+      expect(result.storagePath.endsWith(`.${ext}`)).toBe(true);
+      // the codec parameter must never leak into the object key
+      expect(result.storagePath).not.toContain(";");
+      expect(result.storagePath).not.toContain("codecs");
+    }
+  });
+
+  it("still rejects a parameterised type that is not allowed for the kind", async () => {
+    const { storage } = fakeStorage();
+    await expect(
+      signWidgetUpload(
+        baseInput(storage, { kind: "screenshot", contentType: "video/webm;codecs=vp9" })
+      )
+    ).rejects.toThrow(/content type/i);
+  });
+
   it("rejects an unknown content type", async () => {
     const { storage } = fakeStorage();
     await expect(

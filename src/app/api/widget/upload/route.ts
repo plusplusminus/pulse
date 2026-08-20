@@ -10,6 +10,7 @@ import {
 } from "@/lib/widget-rate-limit";
 import {
   WIDGET_MEDIA_CONTENT_TYPES,
+  baseContentType,
   WIDGET_MEDIA_KINDS,
   WIDGET_MEDIA_MAX_BYTES,
   signWidgetUpload,
@@ -96,7 +97,7 @@ export async function POST(request: Request) {
     }
     const { kind, contentType, sizeBytes } = parsed.data;
 
-    if (!(contentType in WIDGET_MEDIA_CONTENT_TYPES[kind])) {
+    if (!(baseContentType(contentType) in WIDGET_MEDIA_CONTENT_TYPES[kind])) {
       return NextResponse.json(
         {
           error: `Content type "${contentType}" is not allowed for ${kind}. Accepted: ${Object.keys(WIDGET_MEDIA_CONTENT_TYPES[kind]).join(", ")}`,
