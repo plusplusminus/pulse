@@ -6,11 +6,8 @@ export interface PulseConfig {
   theme?: 'auto' | 'light' | 'dark'
   position?: 'bottom-right' | 'bottom-left'
   triggerText?: string
-  collectConsole?: boolean
+  /** Max console entries kept when the site has console capture enabled (bootstrap). */
   consoleLimit?: number
-  sentry?: {
-    enabled?: boolean
-  }
   user?: {
     email?: string
     name?: string

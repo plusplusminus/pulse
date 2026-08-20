@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabase";
-import { validateWidgetRequest } from "@/lib/widget-auth";
+import { validateWidgetRequest, isKnownWidgetOrigin } from "@/lib/widget-auth";
+import {
+  corsHeaders as originCorsHeaders,
+  pageUrlMatchesOrigin,
+  stripUrlForStorage,
+} from "@/lib/widget-origin";
 import {
   buildWidgetIssueDescription,
   createWidgetLinearIssue,
@@ -26,18 +31,19 @@ function isRateLimited(keyPrefix: string): boolean {
   return false;
 }
 
-function corsHeaders(origin: string | null): Record<string, string> {
-  return {
-    "Access-Control-Allow-Origin": origin || "*",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, X-Site-Key, X-Widget-Key",
-    "Access-Control-Max-Age": "86400",
-  };
+// CORS is only ever granted to an allowlisted origin (PULSE-392); no "*" fallback.
+function corsHeaders(origin: string | null, allowed: boolean): Record<string, string> {
+  return originCorsHeaders(origin, { allowed, methods: "POST, OPTIONS" });
 }
 
 export async function OPTIONS(request: Request) {
   const origin = request.headers.get("origin");
-  return new NextResponse(null, { status: 204, headers: corsHeaders(origin) });
+  // Preflight carries no site key: allow when any active site lists this origin.
+  const allowed = await isKnownWidgetOrigin(origin);
+  return new NextResponse(null, {
+    status: allowed ? 204 : 403,
+    headers: corsHeaders(origin, allowed),
+  });
 }
 
 const feedbackSchema = z.object({
@@ -79,18 +85,23 @@ const feedbackSchema = z.object({
 
 export async function POST(request: Request) {
   const origin = request.headers.get("origin");
-  const headers = corsHeaders(origin);
+  // No CORS headers until the site key resolves and the origin matched its allowlist.
+  let headers = corsHeaders(origin, false);
 
   try {
     // Validate widget key + origin
     const authResult = await validateWidgetRequest(request);
     if ("error" in authResult) {
+      // 401 (bad key) on a known origin stays readable by the page; 403 never gets CORS.
+      const readable =
+        authResult.status !== 403 && (await isKnownWidgetOrigin(origin));
       return NextResponse.json(
         { error: authResult.error },
-        { status: authResult.status, headers }
+        { status: authResult.status, headers: corsHeaders(origin, readable) }
       );
     }
     const { config } = authResult;
+    headers = corsHeaders(origin, true);
 
     // Rate limit
     if (isRateLimited(config.api_key_prefix)) {
@@ -110,6 +121,15 @@ export async function POST(request: Request) {
       );
     }
     const data = parsed.data;
+
+    // metadata.url must be on the requesting origin; strip query/hash before storage/Linear.
+    if (!pageUrlMatchesOrigin(data.metadata.url, origin)) {
+      return NextResponse.json(
+        { error: "origin_mismatch", message: "metadata.url origin does not match the request origin" },
+        { status: 422, headers }
+      );
+    }
+    data.metadata = { ...data.metadata, url: stripUrlForStorage(data.metadata.url) };
 
     // Upload screenshot if provided
     let screenshotUrl: string | undefined;

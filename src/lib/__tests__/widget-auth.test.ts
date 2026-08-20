@@ -50,3 +50,64 @@ describe("readSiteKey", () => {
     expect(readSiteKey(new Request("https://pulse.test/"))).toBeNull();
   });
 });
+
+describe("validateWidgetRequest", () => {
+  // Re-import with a supabase mock that returns a fixed config for any hash.
+  const makeConfig = (allowed_origins: string[], is_active = true) => ({
+    id: "cfg_1",
+    hub_id: "hub_1",
+    api_key_hash: "h",
+    api_key_prefix: "sk_abc",
+    name: "Site",
+    is_active,
+    config: {},
+    allowed_origins,
+    created_at: "",
+    updated_at: "",
+  });
+
+  async function load(row: ReturnType<typeof makeConfig> | null) {
+    vi.resetModules();
+    vi.doMock("../supabase", () => ({
+      supabaseAdmin: {
+        from: () => ({
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: row, error: row ? null : { message: "nf" } }),
+            }),
+          }),
+        }),
+      },
+    }));
+    return import("../widget-auth");
+  }
+
+  const req = (headers: Record<string, string>) =>
+    new Request("https://pulse.test/api/widget/feedback", { method: "POST", headers });
+
+  it("401 without a site key", async () => {
+    const { validateWidgetRequest } = await load(makeConfig(["https://acme.example"]));
+    expect(await validateWidgetRequest(req({ Origin: "https://acme.example" }))).toMatchObject({ status: 401 });
+  });
+
+  it("401 for an unknown or inactive key", async () => {
+    const { validateWidgetRequest } = await load(null);
+    expect(await validateWidgetRequest(req({ "X-Site-Key": "sk_x", Origin: "https://acme.example" }))).toMatchObject({ status: 401 });
+    const inactive = await load(makeConfig(["https://acme.example"], false));
+    expect(await inactive.validateWidgetRequest(req({ "X-Site-Key": "sk_x", Origin: "https://acme.example" }))).toMatchObject({ status: 401 });
+  });
+
+  it("403 for a non-allowlisted origin, a missing Origin, or an empty allowlist", async () => {
+    const { validateWidgetRequest } = await load(makeConfig(["https://acme.example"]));
+    expect(await validateWidgetRequest(req({ "X-Site-Key": "sk_x", Origin: "https://evil.example" }))).toMatchObject({ status: 403 });
+    expect(await validateWidgetRequest(req({ "X-Site-Key": "sk_x" }))).toMatchObject({ status: 403 });
+    const empty = await load(makeConfig([]));
+    expect(await empty.validateWidgetRequest(req({ "X-Site-Key": "sk_x", Origin: "https://acme.example" }))).toMatchObject({ status: 403 });
+  });
+
+  it("returns the config for an allowlisted origin (normalised match)", async () => {
+    const { validateWidgetRequest } = await load(makeConfig(["https://Acme.Example/"]));
+    const result = await validateWidgetRequest(req({ "X-Widget-Key": "sk_x", Origin: "https://acme.example" }));
+    expect("config" in result && result.config.id).toBe("cfg_1");
+  });
+});

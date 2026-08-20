@@ -141,6 +141,9 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
         setNewApiKey(data.apiKey);
         setKeyCopied(false);
         setShowKeyModal(true);
+        toast.message("Site key created (inactive)", {
+          description: "Add an allowed origin, save, then activate the key.",
+        });
         refetch();
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "Failed to generate key");
@@ -185,8 +188,8 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
             body: JSON.stringify({ is_active: !currentActive }),
           });
           if (!res.ok) {
-            const err = (await res.json()) as { error?: string };
-            throw new Error(err.error ?? "Failed to update");
+            const err = (await res.json()) as { error?: string; message?: string };
+            throw new Error(err.message ?? err.error ?? "Failed to update");
           }
           toast.success(currentActive ? "Key deactivated" : "Key activated");
           refetch();
@@ -242,8 +245,8 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
           }),
         });
         if (!res.ok) {
-          const err = (await res.json()) as { error?: string };
-          throw new Error(err.error ?? "Failed to save");
+          const err = (await res.json()) as { error?: string; message?: string };
+          throw new Error(err.message ?? err.error ?? "Failed to save");
         }
         toast.success("Configuration saved");
         setDirty(false);
@@ -255,12 +258,20 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
   }, [activeConfig, widgetName, theme, position, triggerText, origins, capture, maskText, refetch]);
 
   const addOrigin = () => {
-    const val = originInput.trim();
-    if (!val || origins.includes(val)) {
-      setOriginInput("");
+    const raw = originInput.trim();
+    if (!raw) return;
+    let normalised: string;
+    try {
+      const url = new URL(raw.includes("://") ? raw : `https://${raw}`);
+      if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("scheme");
+      normalised = url.origin.toLowerCase();
+    } catch {
+      toast.error("Enter a valid origin, e.g. https://app.example.com");
       return;
     }
-    setOrigins((prev) => [...prev, val]);
+    if (!origins.includes(normalised)) {
+      setOrigins((prev) => [...prev, normalised]);
+    }
     setOriginInput("");
   };
 
@@ -339,8 +350,16 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
                 </span>
                 <button
                   onClick={() => toggleActive(config.id, config.is_active)}
-                  disabled={isPending}
-                  className="text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                  disabled={
+                    isPending ||
+                    (!config.is_active && (config.allowed_origins?.length ?? 0) === 0)
+                  }
+                  title={
+                    !config.is_active && (config.allowed_origins?.length ?? 0) === 0
+                      ? "Add at least one allowed origin before activating"
+                      : undefined
+                  }
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {config.is_active ? "Deactivate" : "Activate"}
                 </button>
@@ -521,7 +540,7 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
           <div>
             <h3 className="text-sm font-semibold">Allowed Origins</h3>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Restrict which domains can use the widget. Leave empty to allow all origins.
+              Only these origins can load the widget and submit feedback. At least one is required before the site key can be activated. Exact match — include the scheme and any non-default port.
             </p>
           </div>
 
@@ -547,6 +566,13 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
               Add
             </button>
           </div>
+
+          {origins.length === 0 && (
+            <p className="flex items-center gap-1.5 text-xs text-yellow-600 dark:text-yellow-500">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              No origins yet — the widget will reject every request until you add one and save.
+            </p>
+          )}
 
           {origins.length > 0 && (
             <div className="flex flex-wrap gap-1.5">

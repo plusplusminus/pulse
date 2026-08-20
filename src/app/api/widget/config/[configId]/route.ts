@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { withHubAuthWrite, type HubAuthError } from "@/lib/hub-auth";
+import { canActivate, invalidOrigins, normaliseOrigins } from "@/lib/widget-origin";
 
 async function getConfigHubId(configId: string): Promise<string | null> {
   const { data } = await supabaseAdmin
@@ -9,6 +10,17 @@ async function getConfigHubId(configId: string): Promise<string | null> {
     .eq("id", configId)
     .single();
   return data?.hub_id ?? null;
+}
+
+async function getConfigState(
+  configId: string
+): Promise<{ is_active: boolean; allowed_origins: string[] } | null> {
+  const { data } = await supabaseAdmin
+    .from("widget_configs")
+    .select("is_active, allowed_origins")
+    .eq("id", configId)
+    .single();
+  return data ?? null;
 }
 
 export async function PATCH(
@@ -42,12 +54,37 @@ export async function PATCH(
       config?: Record<string, unknown>;
     };
 
+    if (allowed_origins !== undefined) {
+      const bad = invalidOrigins(allowed_origins);
+      if (bad.length > 0) {
+        return NextResponse.json(
+          { error: "invalid_origin", message: `Not a valid origin: ${bad.join(", ")}` },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Activation requires a non-empty allowlist (evaluate the resulting state).
+    const current = await getConfigState(configId);
+    const resultingOrigins =
+      allowed_origins !== undefined ? normaliseOrigins(allowed_origins) : normaliseOrigins(current?.allowed_origins);
+    const resultingActive = is_active !== undefined ? is_active : (current?.is_active ?? false);
+    if (resultingActive && !canActivate(resultingOrigins)) {
+      return NextResponse.json(
+        {
+          error: "origins_required",
+          message: "Add at least one allowed origin before activating this site key",
+        },
+        { status: 400 }
+      );
+    }
+
     const updates: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
     };
     if (name !== undefined) updates.name = name;
     if (is_active !== undefined) updates.is_active = is_active;
-    if (allowed_origins !== undefined) updates.allowed_origins = allowed_origins;
+    if (allowed_origins !== undefined) updates.allowed_origins = resultingOrigins;
     if (config !== undefined) updates.config = config;
 
     const { data, error } = await supabaseAdmin

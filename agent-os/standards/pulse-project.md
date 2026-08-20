@@ -25,7 +25,7 @@ Overrides the house core where they disagree (backend.md is NestJS/Drizzle, fron
 - Auth guards, pick one per route family:
   - `/api/admin/**` -> `withAdminAuth()` (`src/lib/admin-auth.ts`, 39 routes).
   - `/api/hub/**`, `/api/hubs/**`, widget config -> `withHubAuth(hubId)` / `withHubAuthWrite(hubId)` (rejects `view_only`) (`src/lib/hub-auth.ts`, 34 routes). PPM admins get synthetic role `"admin"`.
-  - `/api/widget/feedback` -> `validateWidgetRequest(request)` (`X-Widget-Key` SHA-256 hash + `allowed_origins`) in `src/lib/widget-auth.ts`, plus CORS `OPTIONS` handler.
+  - `/api/widget/feedback` -> `validateWidgetRequest(request)` (`X-Site-Key` SHA-256 hash + required `allowed_origins` exact match) in `src/lib/widget-auth.ts`; `/api/widget/v1/bootstrap/[siteKey]` (public, key in path). CORS for both comes from `corsHeaders(origin, { allowed })` in `src/lib/widget-origin.ts` — headers only for a matched origin, `Vary: Origin`, never `*`; preflights use `isKnownWidgetOrigin`.
   - `/api/cron/**`, `/api/sync/reconcile` -> `Authorization: Bearer ${CRON_SECRET}` compare (`src/app/api/cron/send-digests/route.ts`).
   - `/api/webhooks/linear` -> `verifyWebhookSignature` with secret from `workspace_settings.linear_webhook_secret` (`src/app/api/webhooks/linear/route.ts`).
 - Guards return a discriminated result; the idiom is `const auth = await withX(); if ("error" in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });` (`src/lib/admin-auth.ts` docblock).
