@@ -24,6 +24,8 @@ export class FeedbackPanel {
     private config: {
       position: 'bottom-right' | 'bottom-left'
       user?: { email?: string; name?: string }
+      /** Per-site capture.screenshot from bootstrap; hides the screenshot controls when false. */
+      allowScreenshot?: boolean
       onSubmit: (data: PanelFormData) => Promise<SubmitResult>
       onClose: () => void
       onAnnotate: () => void
@@ -133,7 +135,7 @@ export class FeedbackPanel {
 
     if (this.screenshotBlob) {
       this.bodyEl.appendChild(this.renderScreenshotPreview())
-    } else {
+    } else if (this.config.allowScreenshot !== false) {
       this.bodyEl.appendChild(this.renderAddScreenshotButtons())
     }
 

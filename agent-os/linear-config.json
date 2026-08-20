@@ -49,6 +49,7 @@
     "typecheck": "pnpm exec tsc --noEmit",
     "lint": "pnpm lint",
     "test": "pnpm exec vitest run",
-    "widget:build": "pnpm --dir packages/feedback-widget build"
+    "widget:build": "pnpm widget:build",
+    "widget:typecheck": "pnpm widget:typecheck"
   }
 }

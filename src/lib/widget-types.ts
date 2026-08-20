@@ -15,11 +15,54 @@ export type WidgetConfig = {
   updated_at: string
 }
 
+/**
+ * Per-site settings stored in widget_configs.config (JSONB). Every field is optional;
+ * buildBootstrapPayload (src/lib/widget-bootstrap.ts) applies the defaults.
+ */
 export type WidgetUIConfig = {
   theme?: 'auto' | 'light' | 'dark'
   position?: 'bottom-right' | 'bottom-left'
   triggerText?: string
   accentColor?: string
+  capture?: WidgetCaptureConfig
+  privacy?: {
+    maskSelectors?: string[]
+  }
+}
+
+export type WidgetCaptureConfig = {
+  screenshot?: boolean
+  captureTab?: boolean
+  elementPick?: boolean
+  video?: boolean
+  console?: boolean
+  sentry?: boolean
+  replay?: {
+    enabled?: boolean
+    bufferSeconds?: number
+    maskAllInputs?: boolean
+  }
+}
+
+/** Public runtime config served by GET /api/widget/v1/bootstrap/:siteKey. Never contains hashes or secrets. */
+export type WidgetBootstrapPayload = {
+  site: { name: string }
+  api: { base: string }
+  capture: {
+    screenshot: boolean
+    captureTab: boolean
+    elementPick: boolean
+    video: boolean
+    console: boolean
+    sentry: boolean
+    replay: { enabled: boolean; bufferSeconds: number; maskAllInputs: boolean }
+  }
+  privacy: { maskSelectors: string[] }
+  ui: {
+    theme: 'auto' | 'light' | 'dark'
+    position: 'bottom-right' | 'bottom-left'
+    triggerText: string
+  }
 }
 
 export type WidgetSubmission = {
@@ -99,6 +142,12 @@ export type WidgetConfigCreateResponse = {
   apiKey: string
   apiKeyPrefix: string
   name: string
+}
+
+export type WidgetConfigRotateResponse = {
+  id: string
+  apiKey: string
+  apiKeyPrefix: string
 }
 
 export type WidgetConfigUpdateRequest = {

@@ -4,8 +4,10 @@ import { withHubAuth, withHubAuthWrite, type HubAuthError } from "@/lib/hub-auth
 import {
   generateWidgetApiKey,
   hashWidgetApiKey,
+  widgetApiKeyPrefix,
 } from "@/lib/widget-auth";
 import type { WidgetConfigCreateResponse } from "@/lib/widget-types";
+import { canActivate, invalidOrigins, normaliseOrigins } from "@/lib/widget-origin";
 
 export async function GET(request: Request) {
   try {
@@ -77,9 +79,18 @@ export async function POST(request: Request) {
       );
     }
 
+    const bad = invalidOrigins(allowed_origins ?? []);
+    if (bad.length > 0) {
+      return NextResponse.json(
+        { error: "invalid_origin", message: `Not a valid origin: ${bad.join(", ")}` },
+        { status: 400 }
+      );
+    }
+    const origins = normaliseOrigins(allowed_origins);
+
     const apiKey = generateWidgetApiKey();
     const apiKeyHash = await hashWidgetApiKey(apiKey);
-    const apiKeyPrefix = apiKey.slice(0, 10);
+    const apiKeyPrefix = widgetApiKeyPrefix(apiKey);
 
     const { data, error } = await supabaseAdmin
       .from("widget_configs")
@@ -88,7 +99,9 @@ export async function POST(request: Request) {
         api_key_hash: apiKeyHash,
         api_key_prefix: apiKeyPrefix,
         name: name || "Default Widget",
-        allowed_origins: allowed_origins ?? [],
+        allowed_origins: origins,
+        // A site cannot be active without an allowlist; created inactive until origins are added.
+        is_active: canActivate(origins),
         config: config ?? {},
       })
       .select("id")

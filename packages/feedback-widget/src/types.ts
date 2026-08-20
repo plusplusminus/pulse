@@ -1,14 +1,13 @@
 export interface PulseConfig {
-  widgetKey: string
+  /** Public site identifier issued by the Pulse admin (sk_...). Not a secret. */
+  siteKey: string
+  /** Pulse API origin. Defaults to the origin baked in at build time; never the host page. */
   apiUrl?: string
   theme?: 'auto' | 'light' | 'dark'
   position?: 'bottom-right' | 'bottom-left'
   triggerText?: string
-  collectConsole?: boolean
+  /** Max console entries kept when the site has console capture enabled (bootstrap). */
   consoleLimit?: number
-  sentry?: {
-    enabled?: boolean
-  }
   user?: {
     email?: string
     name?: string
@@ -62,3 +61,48 @@ export interface FeedbackPayload {
 }
 
 export type WidgetState = 'closed' | 'open' | 'capturing' | 'annotating' | 'submitting' | 'success' | 'error'
+
+/** Shape of `window.PulseConfig` for the script-tag / loader install path. */
+export type PulseGlobalConfig = Partial<PulseConfig> & {
+  /** Base URL the cookie loader fetches pulse.js from. */
+  loaderBase?: string
+  /** Called by the cookie loader once pulse.js has loaded. */
+  onReady?: () => void
+}
+
+/** Mirror of WidgetBootstrapPayload in src/lib/widget-types.ts (Pulse app). */
+export interface BootstrapPayload {
+  site: { name: string }
+  api: { base: string }
+  capture: {
+    screenshot: boolean
+    captureTab: boolean
+    elementPick: boolean
+    video: boolean
+    console: boolean
+    sentry: boolean
+    replay: { enabled: boolean; bufferSeconds: number; maskAllInputs: boolean }
+  }
+  privacy: { maskSelectors: string[] }
+  ui: {
+    theme: 'auto' | 'light' | 'dark'
+    position: 'bottom-right' | 'bottom-left'
+    triggerText: string
+  }
+}
+
+/** Fully resolved runtime config: bootstrap (or safe defaults) merged with the host page's PulseConfig. */
+export interface RuntimeConfig {
+  siteKey: string
+  apiUrl: string
+  siteName: string | null
+  ui: BootstrapPayload['ui']
+  capture: BootstrapPayload['capture']
+  privacy: BootstrapPayload['privacy']
+  user: { email?: string; name?: string }
+  custom: Record<string, string>
+  consoleLimit: number
+  onSubmit?: (result: SubmitResult) => void
+  onOpen?: () => void
+  onClose?: () => void
+}

@@ -1,21 +1,32 @@
 {
-  "name": "@linear-gratis/feedback-widget",
+  "name": "@pulse/feedback-widget",
   "version": "0.1.0",
   "private": false,
-  "main": "dist/index.js",
-  "module": "dist/index.mjs",
-  "types": "dist/index.d.ts",
+  "main": "dist/sdk.mjs",
+  "module": "dist/sdk.mjs",
+  "types": "dist/sdk.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/sdk.d.mts",
+      "import": "./dist/sdk.mjs"
+    },
+    "./embed": "./dist/embed.global.js",
+    "./loader": "./dist/pulse-loader.global.js"
+  },
   "files": ["dist"],
+  "sideEffects": ["./dist/embed.global.js", "./dist/pulse-loader.global.js"],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "html-to-image": "^1.11.11"
   },
   "devDependencies": {
     "tsup": "^8.4.0",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "vitest": "^4.0.18"
   }
 }

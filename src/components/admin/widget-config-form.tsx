@@ -16,13 +16,48 @@ import {
   X,
 } from "lucide-react";
 import type {
+  WidgetCaptureConfig,
   WidgetConfig,
   WidgetConfigCreateResponse,
+  WidgetConfigRotateResponse,
   WidgetUIConfig,
 } from "@/lib/widget-types";
+import { BOOTSTRAP_DEFAULTS } from "@/lib/widget-bootstrap";
 
 interface WidgetConfigFormProps {
   hubId: string;
+}
+
+type CaptureToggleKey = Exclude<keyof WidgetCaptureConfig, "replay">;
+
+const CAPTURE_TOGGLES: Array<{ key: CaptureToggleKey; label: string; hint: string }> = [
+  { key: "screenshot", label: "Screenshot", hint: "Area / full-viewport capture with annotation" },
+  { key: "captureTab", label: "Capture tab", hint: "Native tab capture (getDisplayMedia)" },
+  { key: "elementPick", label: "Element pick", hint: "Click an element to attach its selector + markup" },
+  { key: "video", label: "Video", hint: "Short screen recording" },
+  { key: "console", label: "Console errors", hint: "Attach recent console.error / warn entries" },
+  { key: "sentry", label: "Sentry context", hint: "Link the reporter's Sentry replay / trace when present" },
+];
+
+function captureFromConfig(config: WidgetUIConfig): Record<CaptureToggleKey, boolean> {
+  const d = BOOTSTRAP_DEFAULTS.capture;
+  const c = config.capture ?? {};
+  return {
+    screenshot: c.screenshot ?? d.screenshot,
+    captureTab: c.captureTab ?? d.captureTab,
+    elementPick: c.elementPick ?? d.elementPick,
+    video: c.video ?? d.video,
+    console: c.console ?? d.console,
+    sentry: c.sentry ?? d.sentry,
+  };
+}
+
+function maskTextFromConfig(config: WidgetUIConfig): string {
+  return (config.privacy?.maskSelectors ?? []).join("\n");
+}
+
+function parseMaskText(text: string): string[] {
+  return Array.from(new Set(text.split(/[\n,]/).map((s) => s.trim()).filter(Boolean)));
 }
 
 const inputClass =
@@ -36,10 +71,12 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
     refetch,
   } = useFetch<WidgetConfig[]>(`/api/widget/config?hubId=${hubId}`);
 
-  // Key modal state
+  // Key modal state. Full keys live only in memory (configId -> key) for this page session.
   const [showKeyModal, setShowKeyModal] = useState(false);
   const [newApiKey, setNewApiKey] = useState("");
   const [keyCopied, setKeyCopied] = useState(false);
+  const [fullKeys, setFullKeys] = useState<Record<string, string>>({});
+  const [confirmRotateId, setConfirmRotateId] = useState<string | null>(null);
 
   // Delete confirmation
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -52,6 +89,10 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
   const [triggerText, setTriggerText] = useState("Feedback");
   const [origins, setOrigins] = useState<string[]>([]);
   const [originInput, setOriginInput] = useState("");
+  const [capture, setCapture] = useState<Record<CaptureToggleKey, boolean>>(
+    captureFromConfig({})
+  );
+  const [maskText, setMaskText] = useState("");
   const [dirty, setDirty] = useState(false);
 
   // Sync state from fetched config
@@ -62,6 +103,8 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
       setPosition(activeConfig.config.position ?? "bottom-right");
       setTriggerText(activeConfig.config.triggerText ?? "Feedback");
       setOrigins(activeConfig.allowed_origins ?? []);
+      setCapture(captureFromConfig(activeConfig.config));
+      setMaskText(maskTextFromConfig(activeConfig.config));
       setDirty(false);
     }
   }, [activeConfig]);
@@ -74,9 +117,12 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
       theme !== (activeConfig.config.theme ?? "auto") ||
       position !== (activeConfig.config.position ?? "bottom-right") ||
       triggerText !== (activeConfig.config.triggerText ?? "Feedback") ||
-      JSON.stringify(origins) !== JSON.stringify(activeConfig.allowed_origins ?? []);
+      JSON.stringify(origins) !== JSON.stringify(activeConfig.allowed_origins ?? []) ||
+      JSON.stringify(capture) !== JSON.stringify(captureFromConfig(activeConfig.config)) ||
+      JSON.stringify(parseMaskText(maskText)) !==
+        JSON.stringify(activeConfig.config.privacy?.maskSelectors ?? []);
     setDirty(isDirty);
-  }, [widgetName, theme, position, triggerText, origins, activeConfig]);
+  }, [widgetName, theme, position, triggerText, origins, capture, maskText, activeConfig]);
 
   const generateKey = useCallback(() => {
     startTransition(async () => {
@@ -91,15 +137,46 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
           throw new Error(err.error ?? "Failed to generate key");
         }
         const data: WidgetConfigCreateResponse = await res.json();
+        setFullKeys((prev) => ({ ...prev, [data.id]: data.apiKey }));
         setNewApiKey(data.apiKey);
         setKeyCopied(false);
         setShowKeyModal(true);
+        toast.message("Site key created (inactive)", {
+          description: "Add an allowed origin, save, then activate the key.",
+        });
         refetch();
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "Failed to generate key");
       }
     });
   }, [hubId, refetch]);
+
+  const rotateKey = useCallback(
+    (configId: string) => {
+      startTransition(async () => {
+        try {
+          const res = await fetch(`/api/widget/config/${configId}/rotate`, {
+            method: "POST",
+          });
+          if (!res.ok) {
+            const err = (await res.json()) as { error?: string };
+            throw new Error(err.error ?? "Failed to rotate key");
+          }
+          const data: WidgetConfigRotateResponse = await res.json();
+          setFullKeys((prev) => ({ ...prev, [data.id]: data.apiKey }));
+          setNewApiKey(data.apiKey);
+          setKeyCopied(false);
+          setConfirmRotateId(null);
+          setShowKeyModal(true);
+          toast.success("Site key rotated — the old key no longer works");
+          refetch();
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : "Failed to rotate key");
+        }
+      });
+    },
+    [refetch]
+  );
 
   const toggleActive = useCallback(
     (configId: string, currentActive: boolean) => {
@@ -111,8 +188,8 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
             body: JSON.stringify({ is_active: !currentActive }),
           });
           if (!res.ok) {
-            const err = (await res.json()) as { error?: string };
-            throw new Error(err.error ?? "Failed to update");
+            const err = (await res.json()) as { error?: string; message?: string };
+            throw new Error(err.message ?? err.error ?? "Failed to update");
           }
           toast.success(currentActive ? "Key deactivated" : "Key activated");
           refetch();
@@ -156,12 +233,20 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
           body: JSON.stringify({
             name: widgetName.trim(),
             allowed_origins: origins,
-            config: { theme, position, triggerText: triggerText.trim() },
+            // Merge so fields owned by other slices (e.g. replay) survive a save.
+            config: {
+              ...activeConfig.config,
+              theme,
+              position,
+              triggerText: triggerText.trim(),
+              capture: { ...activeConfig.config.capture, ...capture },
+              privacy: { ...activeConfig.config.privacy, maskSelectors: parseMaskText(maskText) },
+            } satisfies WidgetUIConfig,
           }),
         });
         if (!res.ok) {
-          const err = (await res.json()) as { error?: string };
-          throw new Error(err.error ?? "Failed to save");
+          const err = (await res.json()) as { error?: string; message?: string };
+          throw new Error(err.message ?? err.error ?? "Failed to save");
         }
         toast.success("Configuration saved");
         setDirty(false);
@@ -170,15 +255,23 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
         toast.error(e instanceof Error ? e.message : "Failed to save");
       }
     });
-  }, [activeConfig, widgetName, theme, position, triggerText, origins, refetch]);
+  }, [activeConfig, widgetName, theme, position, triggerText, origins, capture, maskText, refetch]);
 
   const addOrigin = () => {
-    const val = originInput.trim();
-    if (!val || origins.includes(val)) {
-      setOriginInput("");
+    const raw = originInput.trim();
+    if (!raw) return;
+    let normalised: string;
+    try {
+      const url = new URL(raw.includes("://") ? raw : `https://${raw}`);
+      if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("scheme");
+      normalised = url.origin.toLowerCase();
+    } catch {
+      toast.error("Enter a valid origin, e.g. https://app.example.com");
       return;
     }
-    setOrigins((prev) => [...prev, val]);
+    if (!origins.includes(normalised)) {
+      setOrigins((prev) => [...prev, normalised]);
+    }
     setOriginInput("");
   };
 
@@ -206,20 +299,20 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
       {/* A: API Keys */}
       <div className="border border-border rounded-lg p-4 bg-card">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold">API Keys</h3>
+          <h3 className="text-sm font-semibold">Site Keys</h3>
           <button
             onClick={generateKey}
             disabled={isPending}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />
-            Generate New Key
+            Generate New Site Key
           </button>
         </div>
 
         {!configs || configs.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-4">
-            No API keys yet. Generate one to get started.
+            No site keys yet. Generate one to get started.
           </p>
         ) : (
           <div className="border border-border rounded-md overflow-hidden">
@@ -257,8 +350,16 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
                 </span>
                 <button
                   onClick={() => toggleActive(config.id, config.is_active)}
-                  disabled={isPending}
-                  className="text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                  disabled={
+                    isPending ||
+                    (!config.is_active && (config.allowed_origins?.length ?? 0) === 0)
+                  }
+                  title={
+                    !config.is_active && (config.allowed_origins?.length ?? 0) === 0
+                      ? "Add at least one allowed origin before activating"
+                      : undefined
+                  }
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {config.is_active ? "Deactivate" : "Activate"}
                 </button>
@@ -365,6 +466,52 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
             />
           </div>
 
+          <div>
+            <label className="block text-xs font-medium mb-1.5">
+              Capture modes
+            </label>
+            <p className="text-[11px] text-muted-foreground mb-2">
+              Applied on the next page load of the client site via the bootstrap endpoint — no redeploy needed.
+            </p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {CAPTURE_TOGGLES.map((t) => (
+                <label
+                  key={t.key}
+                  className="flex items-start gap-2 rounded-md border border-border px-3 py-2 cursor-pointer hover:bg-accent/30 transition-colors"
+                >
+                  <input
+                    type="checkbox"
+                    checked={capture[t.key]}
+                    onChange={(e) =>
+                      setCapture((prev) => ({ ...prev, [t.key]: e.target.checked }))
+                    }
+                    className="mt-0.5 accent-primary"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-xs font-medium">{t.label}</span>
+                    <span className="block text-[11px] text-muted-foreground">{t.hint}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium mb-1.5">
+              Mask selectors
+            </label>
+            <p className="text-[11px] text-muted-foreground mb-1.5">
+              CSS selectors excluded from screenshots and replays. One per line.
+            </p>
+            <textarea
+              value={maskText}
+              onChange={(e) => setMaskText(e.target.value)}
+              rows={3}
+              placeholder={".account-balance\n[data-pii]"}
+              className={cn(inputClass, "font-mono text-xs")}
+            />
+          </div>
+
           <div className="flex items-center gap-3">
             <button
               onClick={saveConfig}
@@ -393,7 +540,7 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
           <div>
             <h3 className="text-sm font-semibold">Allowed Origins</h3>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Restrict which domains can use the widget. Leave empty to allow all origins.
+              Only these origins can load the widget and submit feedback. At least one is required before the site key can be activated. Exact match — include the scheme and any non-default port.
             </p>
           </div>
 
@@ -420,6 +567,13 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
             </button>
           </div>
 
+          {origins.length === 0 && (
+            <p className="flex items-center gap-1.5 text-xs text-yellow-600 dark:text-yellow-500">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              No origins yet — the widget will reject every request until you add one and save.
+            </p>
+          )}
+
           {origins.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
               {origins.map((origin) => (
@@ -443,10 +597,34 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
 
       {/* D: Install Instructions */}
       {activeConfig && (
-        <div className="border border-border rounded-lg p-4 bg-card">
+        <div className="border border-border rounded-lg p-4 bg-card space-y-3">
           <WidgetInstallInstructions
-            apiKeyPrefix={activeConfig.api_key_prefix}
+            siteKey={fullKeys[activeConfig.id]}
+            siteKeyPrefix={activeConfig.api_key_prefix}
+            onRotate={() => setConfirmRotateId(activeConfig.id)}
+            rotating={isPending}
           />
+          {confirmRotateId === activeConfig.id && (
+            <div className="flex items-center gap-3 rounded-md border border-yellow-500/30 bg-yellow-500/5 px-3 py-2 text-xs">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-yellow-600 dark:text-yellow-500" />
+              <span className="flex-1">
+                Rotating issues a new site key and invalidates the current one immediately. Sites using the old key stop working until updated.
+              </span>
+              <button
+                onClick={() => rotateKey(activeConfig.id)}
+                disabled={isPending}
+                className="font-medium text-red-500 hover:text-red-600 transition-colors disabled:opacity-50"
+              >
+                Rotate
+              </button>
+              <button
+                onClick={() => setConfirmRotateId(null)}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -459,7 +637,7 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
           />
           <div className="relative w-full max-w-md bg-background border border-border rounded-lg shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-              <h3 className="text-sm font-semibold">Your API Key</h3>
+              <h3 className="text-sm font-semibold">Your Site Key</h3>
               <button
                 onClick={() => setShowKeyModal(false)}
                 className="p-1 text-muted-foreground hover:text-foreground transition-colors"
@@ -470,7 +648,7 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
             <div className="p-4 space-y-3">
               <div className="flex items-start gap-2 text-xs text-yellow-600 dark:text-yellow-500">
                 <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                <p>Copy this key now. It won&apos;t be shown again.</p>
+                <p>Copy this key now. It is shown once; the install snippets below are pre-filled while you stay on this page.</p>
               </div>
               <div className="flex items-center gap-2">
                 <code className="flex-1 text-xs font-mono bg-muted/50 border border-border rounded-md px-3 py-2 break-all">

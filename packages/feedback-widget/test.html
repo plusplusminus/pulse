@@ -55,34 +55,18 @@
     <ol>
       <li>Start the Next.js dev server: <code>pnpm dev</code></li>
       <li>Go to admin UI → hub → Widget → generate an API key</li>
-      <li>Replace <code>wk_YOUR_KEY</code> below with your real key</li>
-      <li>Open this file in browser (or serve it)</li>
+      <li>Replace <code>sk_YOUR_KEY</code> in the script tag at the bottom with your real site key</li>
+      <li>Serve this directory on another port (e.g. <code>npx serve packages/feedback-widget -l 5173</code>) and add that origin to Allowed Origins</li>
       <li>Click the "Feedback" button in the bottom-right</li>
     </ol>
   </div>
 
-  <!-- Cookie-gated loader: only loads the full widget when pulse_enabled=1 cookie is set -->
-  <script>
-    window.PulseConfig = {
-      widgetKey: 'wk_dd815a2f01f12f772e9a428a3faaf553',
-      loaderBase: 'dist',
-      onReady: function() {
-        Pulse.Pulse.init({
-          widgetKey: window.PulseConfig.widgetKey,
-          apiUrl: 'http://localhost:3001',
-          theme: 'auto',
-          position: 'bottom-right',
-          triggerText: 'Feedback',
-          user: { email: 'tester@example.com', name: 'Test User' },
-          custom: { plan: 'pro', testMode: 'true' },
-          onSubmit: function(result) { console.log('[Pulse] Submitted:', result); },
-          onOpen: function() { console.log('[Pulse] Widget opened'); },
-          onClose: function() { console.log('[Pulse] Widget closed'); },
-        });
-        console.log('[Pulse] Widget initialized via cookie loader.');
-      },
-    };
-  </script>
-  <script src="dist/pulse-loader.global.js"></script>
+  <!--
+    Script-tag install (what the admin "Install Instructions" emits), pointed at the local build.
+    Serve this directory from a different origin than the API to prove cross-origin posting, e.g.
+      pnpm widget:build && npx serve packages/feedback-widget -l 5173   (page on :5173, API on :3000)
+    Replace sk_YOUR_KEY with a real site key and add http://localhost:5173 to the config's allowed origins.
+  -->
+  <script async src="dist/embed.global.js" data-site="sk_YOUR_KEY" data-api="http://localhost:3000"></script>
 </body>
 </html>

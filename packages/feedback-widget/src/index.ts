@@ -1,12 +1,24 @@
-import type { PulseConfig, SubmitResult } from './types'
+import type { PulseConfig, RuntimeConfig, SubmitResult } from './types'
 import { ConsoleInterceptor } from './console'
 import { detectSentry } from './sentry'
 import { collectContext } from './context'
 import { captureScreenshot, cropBlob, blobToBase64 } from './screenshot'
 import { submitFeedback } from './api'
 import { Widget } from './widget'
+import { normaliseApiUrl } from './config'
+import { fetchBootstrap, resolveRuntimeConfig } from './bootstrap'
+import { claimInstance, releaseInstance } from './singleton'
 
-export type { PulseConfig, SubmitResult, ConsoleEntry, SentryContext, WidgetContext } from './types'
+export type {
+  PulseConfig,
+  PulseGlobalConfig,
+  RuntimeConfig,
+  BootstrapPayload,
+  SubmitResult,
+  ConsoleEntry,
+  SentryContext,
+  WidgetContext,
+} from './types'
 
 export interface PulseInstance {
   open(): void
@@ -14,44 +26,49 @@ export interface PulseInstance {
   destroy(): void
   identify(user: { email?: string; name?: string }): void
   setCustom(data: Record<string, string>): void
+  /** Resolves once bootstrap has been applied and the widget is mounted (or init was abandoned). */
+  ready: Promise<void>
 }
 
-export class Pulse {
-  private config: Required<Pick<PulseConfig, 'widgetKey'>> & PulseConfig
+export class Pulse implements PulseInstance {
+  private readonly pageConfig: PulseConfig & { apiUrl: string }
+  private runtime: RuntimeConfig
   private consoleInterceptor: ConsoleInterceptor
   private user: { email?: string; name?: string }
   private custom: Record<string, string>
   private widgetHost: HTMLElement | null = null
   private destroyed = false
-  private widgetUI: { open: () => void; close: () => void; destroy: () => void; setUser: (user: { email?: string; name?: string }) => void } | null = null
+  private widgetUI: Widget | null = null
+  readonly ready: Promise<void>
 
   private constructor(config: PulseConfig) {
-    this.config = {
-      ...config,
-      apiUrl: config.apiUrl ?? window.location.origin,
-      theme: config.theme ?? 'auto',
-      position: config.position ?? 'bottom-right',
-      triggerText: config.triggerText ?? 'Feedback',
-      collectConsole: config.collectConsole ?? true,
-      consoleLimit: config.consoleLimit ?? 50,
-    }
-
+    if (!config.siteKey) throw new Error('[Pulse] siteKey is required')
+    this.pageConfig = { ...config, apiUrl: normaliseApiUrl(config.apiUrl) }
+    // Safe defaults until bootstrap arrives; never mounts before then.
+    this.runtime = resolveRuntimeConfig(this.pageConfig, null)
     this.user = { ...config.user }
     this.custom = { ...config.custom }
-
-    this.consoleInterceptor = new ConsoleInterceptor(this.config.consoleLimit)
-
-    if (this.config.collectConsole) {
-      this.consoleInterceptor.start()
-    }
+    this.consoleInterceptor = new ConsoleInterceptor(this.runtime.consoleLimit)
+    this.ready = this.boot()
   }
 
+  /** Mounts the widget. Only one instance per page: a second call warns and returns the first. */
   static init(config: PulseConfig): PulseInstance {
-    const instance = new Pulse(config)
-    const widget = new Widget(instance, config)
-    instance.widgetUI = widget
+    return claimInstance(() => new Pulse(config))
+  }
+
+  private async boot(): Promise<void> {
+    const payload = await fetchBootstrap(this.pageConfig.apiUrl, this.pageConfig.siteKey)
+    if (this.destroyed) return
+    this.runtime = resolveRuntimeConfig(this.pageConfig, payload)
+
+    if (this.runtime.capture.console) {
+      this.consoleInterceptor.start()
+    }
+
+    const widget = new Widget(this, this.runtime)
+    this.widgetUI = widget
     widget.mount()
-    return instance
   }
 
   open(): void {
@@ -67,6 +84,7 @@ export class Pulse {
   destroy(): void {
     if (this.destroyed) return
     this.destroyed = true
+    releaseInstance(this)
     this.consoleInterceptor.stop()
     this.widgetUI?.destroy()
     if (this.widgetHost) {
@@ -92,22 +110,20 @@ export class Pulse {
     name?: string
     screenshot?: Blob | null
   }): Promise<SubmitResult> {
-    const sentryContext = this.config.sentry?.enabled !== false
-      ? detectSentry()
-      : null
+    const sentryContext = this.runtime.capture.sentry ? detectSentry() : null
 
     const context = collectContext(
-      this.consoleInterceptor.getEntries(),
+      this.runtime.capture.console ? this.consoleInterceptor.getEntries() : [],
       sentryContext,
       this.custom
     )
 
     let screenshotBase64: string | undefined
-    if (formData.screenshot) {
+    if (formData.screenshot && this.runtime.capture.screenshot) {
       screenshotBase64 = await blobToBase64(formData.screenshot)
     }
 
-    const result = await submitFeedback(this.config.apiUrl!, this.config.widgetKey, {
+    const result = await submitFeedback(this.runtime.apiUrl, this.runtime.siteKey, {
       title: formData.title,
       description: formData.description,
       type: formData.type,
@@ -119,12 +135,12 @@ export class Pulse {
       screenshot: screenshotBase64,
     })
 
-    this.config.onSubmit?.(result)
+    this.runtime.onSubmit?.(result)
     return result
   }
 
-  getConfig(): PulseConfig {
-    return this.config
+  getRuntimeConfig(): RuntimeConfig {
+    return this.runtime
   }
 
   getUser(): { email?: string; name?: string } {
@@ -140,7 +156,8 @@ export class Pulse {
   }
 
   async captureScreenshot(): Promise<Blob | null> {
-    return captureScreenshot(this.widgetHost)
+    if (!this.runtime.capture.screenshot) return null
+    return captureScreenshot(this.widgetHost, this.runtime.privacy.maskSelectors)
   }
 
   async cropScreenshot(blob: Blob, rect: { x: number; y: number; width: number; height: number }): Promise<Blob> {
