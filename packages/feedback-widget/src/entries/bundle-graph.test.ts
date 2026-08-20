@@ -51,6 +51,7 @@ function walk(entry: string): { files: Set<string>; packages: Set<string> } {
 }
 
 const ENGINE = resolve(SRC, 'capture/engine.ts')
+const WEBM_DURATION_ENTRY = resolve(SRC, 'entries/webm-duration.ts')
 
 describe('embed entry', () => {
   const graph = walk(resolve(SRC, 'entries/embed.ts'))
@@ -65,6 +66,16 @@ describe('embed entry', () => {
 
   it('still reaches the screenshot loader, so capture is not simply gone', () => {
     expect([...graph.files]).toContain(resolve(SRC, 'screenshot.ts'))
+  })
+
+  it('never reaches fix-webm-duration — ~4 KB gz, only needed once a recording ends', () => {
+    expect([...graph.packages]).not.toContain('fix-webm-duration')
+    expect([...graph.files]).not.toContain(WEBM_DURATION_ENTRY)
+  })
+
+  it('still reaches the recorder and the duration-fixer loader', () => {
+    expect([...graph.files]).toContain(resolve(SRC, 'capture/video.ts'))
+    expect([...graph.files]).toContain(resolve(SRC, 'capture/webm-duration.ts'))
   })
 })
 
@@ -85,5 +96,22 @@ describe('capture-engine entry', () => {
 
   it('carries snapdom — it is the whole point of the artefact', () => {
     expect([...graph.packages]).toContain('@zumer/snapdom')
+  })
+
+  it('does not also drag in the duration fixer; they load independently', () => {
+    expect([...graph.packages]).not.toContain('fix-webm-duration')
+  })
+})
+
+describe('webm-duration entry', () => {
+  const graph = walk(WEBM_DURATION_ENTRY)
+
+  it('carries fix-webm-duration — it is the whole point of the artefact', () => {
+    expect([...graph.packages]).toContain('fix-webm-duration')
+  })
+
+  it('carries nothing else: no snapdom, no widget UI', () => {
+    expect([...graph.packages]).not.toContain('@zumer/snapdom')
+    expect([...graph.files]).toEqual([WEBM_DURATION_ENTRY])
   })
 })

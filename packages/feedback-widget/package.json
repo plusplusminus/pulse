@@ -28,7 +28,8 @@
   },
   "dependencies": {
     "@medv/finder": "^4.0.2",
-    "@zumer/snapdom": "^2.24.3"
+    "@zumer/snapdom": "^2.24.3",
+    "fix-webm-duration": "^1.0.6"
   },
   "devDependencies": {
     "jsdom": "^30.0.1",

@@ -257,6 +257,92 @@ describe("POST /api/widget/feedback (storage path cut-over)", () => {
     expect(inserts).toEqual([]);
   });
 
+  it("stores a video path and links the media proxy from the Linear body", async () => {
+    authOk(HUB_A);
+    const videoPath = `${HUB_A}/videos/clip.webm`;
+
+    const res = await post(payload({ videoStoragePath: videoPath }));
+
+    expect(res.status).toBe(201);
+    const row = inserts[0];
+    expect(row.video_storage_path).toBe(videoPath);
+    // Video renders as a link, never an image: Linear cannot inline a video.
+    const [call] = mockedCreateIssue.mock.calls;
+    expect(call[0].description).toContain(
+      `[Watch recording](https://pulse.test/api/widget/media/${row.id}/video)`
+    );
+  });
+
+  it("accepts an MP4 recording from desktop Safari", async () => {
+    authOk(HUB_A);
+    const res = await post(
+      payload({ videoStoragePath: `${HUB_A}/videos/clip.mp4` })
+    );
+    expect(res.status).toBe(201);
+    expect(inserts[0].video_storage_path).toBe(`${HUB_A}/videos/clip.mp4`);
+  });
+
+  it("stores a screenshot and a video together", async () => {
+    authOk(HUB_A);
+    const res = await post(
+      payload({
+        screenshotStoragePath: `${HUB_A}/screenshots/abc.png`,
+        videoStoragePath: `${HUB_A}/videos/clip.webm`,
+      })
+    );
+
+    expect(res.status).toBe(201);
+    const row = inserts[0];
+    expect(row.screenshot_storage_path).toBe(`${HUB_A}/screenshots/abc.png`);
+    expect(row.video_storage_path).toBe(`${HUB_A}/videos/clip.webm`);
+    const [call] = mockedCreateIssue.mock.calls;
+    expect(call[0].description).toContain("## Screenshot");
+    expect(call[0].description).toContain("## Video");
+  });
+
+  it("rejects a video path scoped to another hub", async () => {
+    authOk(HUB_A);
+    const res = await post(
+      payload({ videoStoragePath: `${HUB_B}/videos/clip.webm` })
+    );
+    expect(res.status).toBe(400);
+    expect(inserts).toEqual([]);
+    expect(mockedCreateIssue).not.toHaveBeenCalled();
+  });
+
+  it("rejects a video path outside the videos folder", async () => {
+    authOk(HUB_A);
+    const res = await post(
+      payload({ videoStoragePath: `${HUB_A}/screenshots/abc.png` })
+    );
+    expect(res.status).toBe(400);
+    expect(inserts).toEqual([]);
+  });
+
+  it("rejects a malformed / traversing video path at the schema", async () => {
+    authOk(HUB_A);
+    for (const bad of [
+      `${HUB_A}/videos/../../x.webm`,
+      "../videos/x.webm",
+      "not-a-path",
+      "",
+    ]) {
+      const res = await post(payload({ videoStoragePath: bad }));
+      expect(res.status).toBe(400);
+    }
+    expect(inserts).toEqual([]);
+  });
+
+  it("stores null and renders no Video section when no recording was made", async () => {
+    authOk(HUB_A);
+    const res = await post(payload());
+
+    expect(res.status).toBe(201);
+    expect(inserts[0].video_storage_path).toBeNull();
+    const [call] = mockedCreateIssue.mock.calls;
+    expect(call[0].description).not.toContain("## Video");
+  });
+
   it("ignores the legacy base64 screenshot field and stores no media", async () => {
     authOk(HUB_A);
     const res = await post(payload({ screenshot: "iVBORw0KGgo=" }));

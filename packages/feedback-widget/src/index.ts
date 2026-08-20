@@ -112,9 +112,11 @@ export class Pulse implements PulseInstance {
     email: string
     name?: string
     screenshot?: Blob | null
+    video?: { blob: Blob; mimeType: string } | null
     picks?: WidgetPick[]
     screenshotAnnotations?: ScreenshotAnnotation[]
     captureSurface?: WidgetContext['captureSurface']
+    onUploadProgress?: (sent: number, total: number) => void
   }): Promise<SubmitResult> {
     const sentryContext = this.runtime.capture.sentry ? detectSentry() : null
 
@@ -136,6 +138,23 @@ export class Pulse implements PulseInstance {
       )
     }
 
+    // A recording is the one artefact big enough to need the resumable path
+    // (> 6 MB) and slow enough to need a progress readout. The recorder's real
+    // mimeType picks the extension server-side; never relabel it here.
+    let videoStoragePath: string | undefined
+    if (formData.video && this.runtime.capture.video) {
+      videoStoragePath = await uploadBlob(
+        this.runtime.apiUrl,
+        this.runtime.siteKey,
+        'video',
+        formData.video.blob,
+        {
+          contentType: formData.video.mimeType,
+          onProgress: formData.onUploadProgress,
+        }
+      )
+    }
+
     const result = await submitFeedback(this.runtime.apiUrl, this.runtime.siteKey, {
       title: formData.title,
       description: formData.description,
@@ -146,6 +165,7 @@ export class Pulse implements PulseInstance {
         name: formData.name,
       },
       screenshotStoragePath,
+      videoStoragePath,
       picks: this.runtime.capture.elementPick && formData.picks?.length ? formData.picks : undefined,
       screenshotAnnotations: formData.screenshotAnnotations?.length
         ? formData.screenshotAnnotations

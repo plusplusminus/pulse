@@ -61,6 +61,8 @@ export interface FeedbackPayload {
   }
   /** Object key in the private widget-media bucket (from uploadBlob) */
   screenshotStoragePath?: string
+  /** Screen recording object key under {hubId}/videos/ (PULSE-337) */
+  videoStoragePath?: string
   /** Element picks (PULSE-329); max 50 */
   picks?: WidgetPick[]
   /** Screenshot annotation rects (PULSE-333); max 50 */
@@ -130,7 +132,16 @@ export interface WidgetPick {
   relocation?: PickRelocation
 }
 
-export type WidgetState = 'closed' | 'open' | 'picking' | 'capturing' | 'annotating' | 'submitting' | 'success' | 'error'
+export type WidgetState =
+  | 'closed'
+  | 'open'
+  | 'picking'
+  | 'capturing'
+  | 'recording'
+  | 'annotating'
+  | 'submitting'
+  | 'success'
+  | 'error'
 
 /** Shape of `window.PulseConfig` for the script-tag / loader install path. */
 export type PulseGlobalConfig = Partial<PulseConfig> & {

@@ -39,6 +39,22 @@ function tooManyRequests(verdict: RateLimitResult, headers: Record<string, strin
   );
 }
 
+/**
+ * A path's hub segment must be this site's hub and its folder must match the
+ * kind it was submitted as: a ticket minted for another site — or a video key
+ * passed off as a screenshot — cannot be attached here (PULSE-324).
+ */
+function pathBelongsToSite(
+  storagePath: string,
+  hubId: string,
+  folder: "screenshots" | "videos"
+): boolean {
+  const [pathHubId, pathFolder] = storagePath.split("/");
+  return (
+    pathHubId.toLowerCase() === hubId.toLowerCase() && pathFolder === folder
+  );
+}
+
 // CORS is only ever granted to an allowlisted origin (PULSE-392); no "*" fallback.
 function corsHeaders(origin: string | null, allowed: boolean): Record<string, string> {
   return originCorsHeaders(origin, { allowed, methods: "POST, OPTIONS" });
@@ -90,8 +106,13 @@ const feedbackSchema = z.object({
     email: z.string().email("Valid email is required"),
     name: z.string().optional(),
   }),
-  // Object key minted by POST /api/widget/upload — bytes never come through here.
+  // Object keys minted by POST /api/widget/upload — bytes never come through here.
   screenshotStoragePath: z
+    .string()
+    .regex(STORAGE_PATH_PATTERN, "Invalid storage path")
+    .optional(),
+  // Screen recording (PULSE-337); .webm or .mp4 under {hubId}/videos/.
+  videoStoragePath: z
     .string()
     .regex(STORAGE_PATH_PATTERN, "Invalid storage path")
     .optional(),
@@ -156,26 +177,34 @@ export async function POST(request: Request) {
     }
     data.metadata = { ...data.metadata, url: stripUrlForStorage(data.metadata.url) };
 
-    // The path's hub segment must be this site's hub: a ticket minted for
-    // another site cannot be attached here (PULSE-324).
-    if (data.screenshotStoragePath) {
-      const [pathHubId, folder] = data.screenshotStoragePath.split("/");
-      if (
-        pathHubId.toLowerCase() !== config.hub_id.toLowerCase() ||
-        folder !== "screenshots"
-      ) {
-        return NextResponse.json(
-          { error: "screenshotStoragePath does not belong to this site" },
-          { status: 400, headers }
-        );
-      }
+    if (
+      data.screenshotStoragePath &&
+      !pathBelongsToSite(data.screenshotStoragePath, config.hub_id, "screenshots")
+    ) {
+      return NextResponse.json(
+        { error: "screenshotStoragePath does not belong to this site" },
+        { status: 400, headers }
+      );
     }
 
-    // Generate the id up front so the media-proxy URL can be stored and
+    if (
+      data.videoStoragePath &&
+      !pathBelongsToSite(data.videoStoragePath, config.hub_id, "videos")
+    ) {
+      return NextResponse.json(
+        { error: "videoStoragePath does not belong to this site" },
+        { status: 400, headers }
+      );
+    }
+
+    // Generate the id up front so the media-proxy URLs can be stored and
     // rendered into Linear in the same pass.
     const submissionId = crypto.randomUUID();
     const screenshotUrl = data.screenshotStoragePath
       ? widgetMediaUrl(submissionId, "screenshot")
+      : undefined;
+    const videoUrl = data.videoStoragePath
+      ? widgetMediaUrl(submissionId, "video")
       : undefined;
 
     // Insert submission
@@ -190,6 +219,7 @@ export async function POST(request: Request) {
         type: data.type,
         screenshot_url: screenshotUrl ?? null,
         screenshot_storage_path: data.screenshotStoragePath ?? null,
+        video_storage_path: data.videoStoragePath ?? null,
         metadata: data.metadata,
         picks: data.picks,
         screenshot_annotations: data.screenshotAnnotations,
@@ -230,6 +260,7 @@ export async function POST(request: Request) {
             reporter: data.reporter,
             metadata: data.metadata,
             screenshotUrl,
+            videoUrl,
           },
           picks: data.picks,
           config,

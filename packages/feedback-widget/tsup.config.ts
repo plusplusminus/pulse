@@ -42,6 +42,20 @@ export default defineConfig([
     define: { __PULSE_API_URL__: JSON.stringify(PULSE_API_URL) },
   },
   {
+    // Lazily injected WebM duration fixer (PULSE-336). Same reasoning as the
+    // capture engine: iife cannot code-split, so keeping fix-webm-duration out
+    // of the embed means keeping it out of the embed's import graph entirely.
+    entry: { 'webm-duration': 'src/entries/webm-duration.ts' },
+    format: ['iife'],
+    globalName: '__PulseWebmDuration',
+    sourcemap: true,
+    clean: false,
+    target: 'es2020',
+    minify: true,
+    treeshake: true,
+    define: { __PULSE_API_URL__: JSON.stringify(PULSE_API_URL) },
+  },
+  {
     // Cookie-gated loader; unchanged semantics
     entry: { 'pulse-loader': 'src/loader.ts' },
     format: ['iife'],

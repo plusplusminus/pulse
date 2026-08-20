@@ -1,6 +1,14 @@
 import type { WidgetState, SubmitResult, WidgetPick } from '../types'
 import { CROSS_ORIGIN_NOTICE } from '../screenshot'
 
+/**
+ * The widget hides itself for the whole recording so it stays out of the shot,
+ * which means there is no in-page stop button to offer — the browser's own
+ * "Stop sharing" control is the one the reporter must use.
+ */
+export const RECORDING_NOTICE =
+  'Your browser will ask what to share. Pulse hides itself while recording — stop with your browser’s “Stop sharing” button, or press Esc.'
+
 export interface PanelFormData {
   title: string
   description?: string
@@ -15,6 +23,11 @@ export class FeedbackPanel {
   private formData: PanelFormData = { title: '', type: 'bug', email: '' }
   private screenshotBlob: Blob | null = null
   private screenshotUrl: string | null = null
+  private videoBlob: Blob | null = null
+  private videoUrl: string | null = null
+  private videoDurationMs = 0
+  private videoError: string | null = null
+  private uploadPercent: number | null = null
   private picks: WidgetPick[] = []
   private paused = false
   private captureError: string | null = null
@@ -35,12 +48,16 @@ export class FeedbackPanel {
       allowElementPick?: boolean
       /** capture.captureTab AND browser support; hides the native capture button when false. */
       allowCaptureTab?: boolean
+      /** capture.video AND getDisplayMedia support; hides the record button when false (PULSE-339). */
+      allowVideo?: boolean
       onSubmit: (data: PanelFormData) => Promise<SubmitResult>
       onClose: () => void
       onAnnotate: () => void
       onRetakeScreenshot: () => void
       onCaptureScreenshot: () => void
       onCaptureTab: () => void
+      onRecordVideo: () => void
+      onRemoveVideo: () => void
       onPickElement: () => void
       onEditPick: (id: string) => void
       onDeletePick: (id: string) => void
@@ -202,6 +219,10 @@ export class FeedbackPanel {
       this.bodyEl.appendChild(this.renderScreenshotPreview())
     } else if (this.config.allowScreenshot !== false) {
       this.bodyEl.appendChild(this.renderAddScreenshotButtons())
+    }
+
+    if (this.config.allowVideo || this.videoBlob) {
+      this.bodyEl.appendChild(this.renderVideoSection())
     }
 
     this.bodyEl.appendChild(this.createField('Email', 'email', 'input', true, 'your@email.com'))
@@ -499,6 +520,159 @@ export class FeedbackPanel {
     return container
   }
 
+  // -- video (PULSE-338) -------------------------------------------------------
+
+  /** `1:23`, or `0:07`. Minutes never pad; the cap is two minutes. */
+  static formatDuration(ms: number): string {
+    const total = Math.max(0, Math.round(ms / 1000))
+    return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
+  }
+
+  static formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`
+    const kb = bytes / 1024
+    if (kb < 1024) return `${Math.round(kb)} KB`
+    return `${(kb / 1024).toFixed(1)} MB`
+  }
+
+  private renderVideoSection(): HTMLElement {
+    return this.videoBlob ? this.renderVideoPreview() : this.renderRecordButton()
+  }
+
+  private renderVideoPreview(): HTMLElement {
+    const container = document.createElement('div')
+    container.className = 'pulse-screenshot pulse-video'
+
+    if (this.videoUrl) {
+      const video = document.createElement('video')
+      video.className = 'pulse-video__player'
+      video.src = this.videoUrl
+      video.controls = true
+      video.playsInline = true
+      video.preload = 'metadata'
+      container.appendChild(video)
+    }
+
+    // The live readout is impossible while the widget is hidden, so the numbers
+    // land here the moment the panel comes back (PULSE-338).
+    const meta = document.createElement('div')
+    meta.className = 'pulse-video__meta'
+    meta.textContent = `${FeedbackPanel.formatDuration(this.videoDurationMs)} · ${FeedbackPanel.formatBytes(
+      this.videoBlob?.size ?? 0
+    )}`
+    container.appendChild(meta)
+
+    const actions = document.createElement('div')
+    actions.className = 'pulse-screenshot__actions'
+
+    const rerecord = document.createElement('button')
+    rerecord.className = 'pulse-screenshot__btn'
+    rerecord.type = 'button'
+    rerecord.textContent = 'Re-record'
+    // Straight back to getDisplayMedia: no await may precede it.
+    rerecord.addEventListener('click', () => this.config.onRecordVideo())
+    actions.appendChild(rerecord)
+
+    const remove = document.createElement('button')
+    remove.className = 'pulse-screenshot__btn pulse-screenshot__btn--danger'
+    remove.type = 'button'
+    remove.textContent = 'Remove'
+    remove.addEventListener('click', () => this.config.onRemoveVideo())
+    actions.appendChild(remove)
+
+    container.appendChild(actions)
+    return container
+  }
+
+  private renderRecordButton(): HTMLElement {
+    const container = document.createElement('div')
+    container.className = 'pulse-screenshot-options'
+    container.style.flexDirection = 'column'
+
+    const btn = document.createElement('button')
+    btn.className = 'pulse-add-screenshot pulse-record-btn'
+    btn.type = 'button'
+
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+    svg.setAttribute('viewBox', '0 0 16 16')
+    svg.setAttribute('fill', 'none')
+    const ring = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+    ring.setAttribute('cx', '8')
+    ring.setAttribute('cy', '8')
+    ring.setAttribute('r', '6.25')
+    ring.setAttribute('stroke', 'currentColor')
+    ring.setAttribute('stroke-width', '1.25')
+    svg.appendChild(ring)
+    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+    dot.setAttribute('cx', '8')
+    dot.setAttribute('cy', '8')
+    dot.setAttribute('r', '3')
+    dot.setAttribute('fill', 'currentColor')
+    svg.appendChild(dot)
+    btn.appendChild(svg)
+
+    const label = document.createElement('span')
+    label.textContent = 'Record video'
+    btn.appendChild(label)
+    // Must reach getDisplayMedia with the user activation intact: no await here.
+    btn.addEventListener('click', () => this.config.onRecordVideo())
+
+    const row = document.createElement('div')
+    row.className = 'pulse-screenshot-row'
+    row.appendChild(btn)
+    container.appendChild(row)
+
+    if (this.videoError) {
+      const error = document.createElement('div')
+      error.className = 'pulse-capture-note pulse-capture-note--error'
+      error.setAttribute('role', 'alert')
+      error.textContent = this.videoError
+      container.appendChild(error)
+    }
+
+    const note = document.createElement('div')
+    note.className = 'pulse-capture-note'
+    note.textContent = RECORDING_NOTICE
+    container.appendChild(note)
+
+    return container
+  }
+
+  /** Blob and its measured duration move together; null clears both. */
+  setVideo(blob: Blob | null, durationMs = 0): void {
+    if (this.videoUrl) {
+      URL.revokeObjectURL(this.videoUrl)
+      this.videoUrl = null
+    }
+    this.videoBlob = blob
+    this.videoDurationMs = blob ? durationMs : 0
+    if (blob) this.videoUrl = URL.createObjectURL(blob)
+    if (this.state === 'open') this.renderForm()
+  }
+
+  getVideo(): Blob | null {
+    return this.videoBlob
+  }
+
+  setVideoError(message: string | null): void {
+    this.videoError = message
+    if (this.state === 'open') this.renderForm()
+  }
+
+  /**
+   * Video is the reason the upload pipeline has a resumable path at all; a
+   * 60 MB recording on poor wifi needs to look like it is doing something.
+   */
+  setUploadProgress(sent: number, total: number): void {
+    const percent = total > 0 ? Math.min(100, Math.round((sent / total) * 100)) : null
+    if (percent === this.uploadPercent) return
+    this.uploadPercent = percent
+    const label = this.bodyEl.querySelector('.pulse-submit span')
+    if (label && percent !== null) {
+      label.textContent = percent < 100 ? `Uploading ${percent}%` : 'Submitting...'
+    }
+  }
+
   /** Surfaced under the capture controls when a viewport capture fails outright. */
   setCaptureError(message: string | null): void {
     this.captureError = message
@@ -523,6 +697,7 @@ export class FeedbackPanel {
   }
 
   private renderSubmitting(): void {
+    this.uploadPercent = null
     const submitBtn = this.bodyEl.querySelector('.pulse-submit') as HTMLButtonElement | null
     if (submitBtn) {
       submitBtn.disabled = true
@@ -643,6 +818,9 @@ export class FeedbackPanel {
       URL.revokeObjectURL(this.screenshotUrl)
       this.screenshotUrl = null
     }
+    this.videoError = null
+    this.uploadPercent = null
+    this.setVideo(null)
   }
 
   private validate(): string | null {
@@ -701,6 +879,9 @@ export class FeedbackPanel {
   destroy(): void {
     if (this.screenshotUrl) {
       URL.revokeObjectURL(this.screenshotUrl)
+    }
+    if (this.videoUrl) {
+      URL.revokeObjectURL(this.videoUrl)
     }
     this.element.remove()
   }

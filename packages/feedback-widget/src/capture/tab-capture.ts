@@ -8,11 +8,6 @@ export type CaptureSurface = 'browser' | 'window' | 'monitor'
 
 const SURFACES: CaptureSurface[] = ['browser', 'window', 'monitor']
 
-/** False on iOS Safari and anywhere else the API is absent; the button hides. */
-export function isTabCaptureSupported(): boolean {
-  return typeof navigator !== 'undefined' && typeof navigator.mediaDevices?.getDisplayMedia === 'function'
-}
-
 /**
  * Sentry's feedback-widget constraint set: pre-select this tab, permit sharing
  * it at all, and hide both the "switch tab" and whole-screen options so the

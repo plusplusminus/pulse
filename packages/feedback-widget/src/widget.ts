@@ -17,11 +17,18 @@ import { PageFreezer } from './capture/freeze'
 import { captureSelectedText, clearSelection } from './capture/text-selection'
 import {
   frameFromStream,
-  isTabCaptureSupported,
   isUserCancel,
   requestTabStream,
   type CaptureSurface,
 } from './capture/tab-capture'
+import { isGetDisplayMediaSupported } from './capture/display-media'
+import {
+  createVideoRecorder,
+  requestRecordingStream,
+  type VideoRecorder,
+  type VideoRecording,
+} from './capture/video'
+import { webmDurationPostProcess } from './capture/webm-duration'
 import { PickPopup, type PickPopupResult } from './ui/pick-popup'
 import { PickMarkers, type Marker } from './ui/pick-markers'
 import { PickOutlines } from './ui/pick-outlines'
@@ -36,9 +43,11 @@ export interface PulseCore {
     email: string
     name?: string
     screenshot?: Blob | null
+    video?: { blob: Blob; mimeType: string } | null
     picks?: WidgetPick[]
     screenshotAnnotations?: ScreenshotAnnotation[]
     captureSurface?: CaptureSurface
+    onUploadProgress?: (sent: number, total: number) => void
   }): Promise<SubmitResult>
   captureScreenshot(): Promise<Blob | null>
   setWidgetHost(host: HTMLElement): void
@@ -74,6 +83,8 @@ export class Widget {
   private originalScreenshot: Blob | null = null
   private annotations: ScreenshotAnnotation[] = []
   private captureSurface: CaptureSurface | undefined
+  private recorder: VideoRecorder | null = null
+  private recording: VideoRecording | null = null
   private user: { email?: string; name?: string }
   private themeQuery: MediaQueryList | null = null
   private themeHandler: ((e: MediaQueryListEvent) => void) | null = null
@@ -109,13 +120,18 @@ export class Widget {
       user: this.user,
       allowScreenshot: this.config.capture.screenshot,
       allowElementPick: this.config.capture.elementPick,
-      allowCaptureTab: this.config.capture.captureTab && isTabCaptureSupported(),
+      // One helper for both: the two getDisplayMedia features can never
+      // disagree about what the browser supports (PULSE-339).
+      allowCaptureTab: this.config.capture.captureTab && isGetDisplayMediaSupported(),
+      allowVideo: this.config.capture.video && isGetDisplayMediaSupported(),
       onSubmit: (data) => this.handleSubmit(data),
       onClose: () => this.close(),
       onAnnotate: () => this.startAnnotation(),
       onRetakeScreenshot: () => this.retakeScreenshot(),
       onCaptureScreenshot: () => this.captureFullScreen(),
       onCaptureTab: () => this.captureTab(),
+      onRecordVideo: () => this.startRecording(),
+      onRemoveVideo: () => this.setRecording(null),
       onPickElement: () => this.startPick(),
       onEditPick: (id) => this.startEditPick(id),
       onDeletePick: (id) => this.deletePick(id),
@@ -160,6 +176,7 @@ export class Widget {
     this.state = 'open'
     this.trigger.hide()
     this.setScreenshot(null)
+    this.setRecording(null)
     this.picks = []
     this.markersById.clear()
     this.markers?.clear()
@@ -200,6 +217,8 @@ export class Widget {
     if (this.themeQuery && this.themeHandler) {
       this.themeQuery.removeEventListener('change', this.themeHandler)
     }
+    this.recorder?.cancel()
+    this.recorder = null
     this.freezer.destroy()
     this.teardownPickMode()
     this.picker = null
@@ -432,7 +451,10 @@ export class Widget {
   private handleEscape(e: KeyboardEvent): void {
     if (this.state === 'closed') return
     e.stopPropagation()
-    if (this.popup?.isOpen) {
+    // The widget is hidden mid-recording, so Esc is the only control it owns.
+    if (this.state === 'recording') {
+      this.cancelRecording()
+    } else if (this.popup?.isOpen) {
       this.handlePopupCancel()
     } else if (this.state === 'picking' && this.multi.size > 0) {
       this.clearMultiSelect()
@@ -441,6 +463,88 @@ export class Widget {
     } else {
       this.close()
     }
+  }
+
+  // -- video recording (PULSE-338) ---------------------------------------------
+
+  /**
+   * getDisplayMedia is called with the user activation from this click still
+   * live — nothing may be awaited before it, or the browser silently refuses to
+   * prompt. Hiding the host is synchronous, so it is safe to do first, and it
+   * has to happen first: the widget must not appear in its own recording.
+   */
+  private startRecording(): void {
+    if (this.state !== 'open') return
+    this.panel.setVideoError(null)
+    this.hideForRecording()
+
+    let stream: Promise<MediaStream>
+    try {
+      stream = requestRecordingStream()
+    } catch (e) {
+      this.restoreAfterRecording()
+      this.panel.setVideoError(e instanceof Error ? e.message : 'Recording failed')
+      return
+    }
+
+    this.state = 'recording'
+    this.recorder = createVideoRecorder({
+      // Fetched only once a WebM recording finishes; see capture/webm-duration.
+      postProcess: webmDurationPostProcess(this.config.apiUrl),
+      onEnd: () => this.collectRecording(),
+    })
+    void this.beginRecording(stream)
+  }
+
+  private async beginRecording(stream: Promise<MediaStream>): Promise<void> {
+    try {
+      await this.recorder?.start(stream)
+    } catch (e) {
+      const recorder = this.recorder
+      this.recorder = null
+      this.restoreAfterRecording()
+      // Declining the share prompt is a normal outcome, not an error to report.
+      if (!isUserCancel(e) && recorder) {
+        this.panel.setVideoError(e instanceof Error ? e.message : 'Recording failed')
+      }
+    }
+  }
+
+  /** Runs on the user's Stop sharing, the 2-minute cap, or a dead source. */
+  private async collectRecording(): Promise<void> {
+    const recorder = this.recorder
+    if (!recorder) return
+    this.recorder = null
+    try {
+      this.setRecording(await recorder.stop())
+    } catch (e) {
+      this.panel.setVideoError(e instanceof Error ? e.message : 'Recording failed')
+    } finally {
+      this.restoreAfterRecording()
+    }
+  }
+
+  private cancelRecording(): void {
+    this.recorder?.cancel()
+    this.recorder = null
+    this.restoreAfterRecording()
+  }
+
+  private hideForRecording(): void {
+    this.panel.hide()
+    this.trigger.hide()
+    this.host.style.display = 'none'
+  }
+
+  private restoreAfterRecording(): void {
+    this.host.style.display = ''
+    this.state = 'open'
+    this.panel.setState('open')
+  }
+
+  private setRecording(recording: VideoRecording | null): void {
+    this.recording = recording
+    this.panel.setVideo(recording?.blob ?? null, recording?.durationMs ?? 0)
   }
 
   // -- screenshot --------------------------------------------------------------
@@ -567,9 +671,13 @@ export class Widget {
       email: formData.email,
       name: formData.name,
       screenshot: this.currentScreenshot,
+      video: this.recording
+        ? { blob: this.recording.blob, mimeType: this.recording.mimeType }
+        : null,
       picks: this.picks,
       screenshotAnnotations: this.annotations,
       captureSurface: this.captureSurface,
+      onUploadProgress: (sent, total) => this.panel.setUploadProgress(sent, total),
     })
 
     if (result.status === 'created') {
@@ -578,6 +686,7 @@ export class Widget {
       this.currentScreenshot = null
       this.annotations = []
       this.captureSurface = undefined
+      this.setRecording(null)
       this.picks = []
       this.markersById.clear()
       this.markers?.clear()
