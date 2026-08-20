@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { RefreshCw, Settings } from "lucide-react";
 import { useHub } from "@/contexts/hub-context";
+import { useHubStatus } from "@/hooks/use-hub-status";
 import { SimpleThemeToggle } from "@/components/theme-toggle";
 import { NotificationBell } from "@/components/hub/notification-bell";
 import { UserMenu } from "@/components/user-menu";
@@ -32,34 +33,13 @@ function useRelativeTime(timestamp: number | null) {
 export function HubTopBar() {
   const { firstName, email, role, isLoading, hubSlug, hubId } = useHub();
   const router = useRouter();
-  // Timestamp of the last completed sync run, from the server — not page-mount
-  // time. null until first fetched, so the label doesn't claim freshness it
-  // can't vouch for.
-  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
+  // Last completed sync timestamp + unread count come from one polled
+  // /status request shared by the top bar and the bell. lastSyncedAt is null
+  // until first fetched, so the label doesn't claim freshness it can't vouch for.
+  const { unreadCount, setUnreadCount, lastSyncedAt, refresh: refreshStatus } =
+    useHubStatus(hubId);
   const [refreshing, setRefreshing] = useState(false);
   const relativeTime = useRelativeTime(lastSyncedAt);
-
-  const fetchLastSync = useCallback(async () => {
-    if (!hubId) return;
-    try {
-      const res = await fetch(`/api/hub/${hubId}/last-sync`, {
-        cache: "no-store",
-      });
-      if (!res.ok) return;
-      const { lastSyncedAt: ts } = (await res.json()) as {
-        lastSyncedAt: string | null;
-      };
-      setLastSyncedAt(ts ? new Date(ts).getTime() : null);
-    } catch {
-      // Non-fatal: keep showing the last known value.
-    }
-  }, [hubId]);
-
-  useEffect(() => {
-    fetchLastSync();
-    const id = setInterval(fetchLastSync, 30_000);
-    return () => clearInterval(id);
-  }, [fetchLastSync]);
 
   // Only PPM admins can trigger a sync; everyone else sees a read-only label.
   const isAdmin = role === "admin";
@@ -76,9 +56,9 @@ export function HubTopBar() {
       // isn't a dead end, and the label keeps its last known value.
     }
     router.refresh();
-    await fetchLastSync();
+    await refreshStatus();
     setRefreshing(false);
-  }, [hubId, refreshing, router, fetchLastSync]);
+  }, [hubId, refreshing, router, refreshStatus]);
 
   const displayName = firstName ?? email;
 
@@ -106,7 +86,12 @@ export function HubTopBar() {
       </div>
 
       <div className="flex items-center gap-3">
-        <NotificationBell hubId={hubId} hubSlug={hubSlug} />
+        <NotificationBell
+          hubId={hubId}
+          hubSlug={hubSlug}
+          unreadCount={unreadCount}
+          onUnreadCountChange={setUnreadCount}
+        />
         <Link
           href={`/hub/${hubSlug}/settings`}
           className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"

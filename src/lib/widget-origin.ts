@@ -84,3 +84,14 @@ export function stripUrlForStorage(pageUrl: string): string {
     return pageUrl.split(/[?#]/)[0];
   }
 }
+
+/**
+ * Client IP for per-IP rate limiting: first hop of `x-forwarded-for` (set by
+ * Vercel), then `x-real-ip`, else "unknown" so all unattributable traffic
+ * shares one budget.
+ */
+export function readClientIp(request: Request): string {
+  const first = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  if (first) return first;
+  return request.headers.get("x-real-ip")?.trim() || "unknown";
+}

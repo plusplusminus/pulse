@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { withHubAuth, type HubAuthError } from "@/lib/hub-auth";
+import { getUnreadCount } from "@/lib/notification-read";
 import { getLastSyncedAt } from "@/lib/sync-status";
 
 /**
- * Returns the timestamp of the most recent completed sync run, so the hub
- * topbar can show an honest "Synced Xm ago" instead of a client-side timer
- * seeded at page load. Available to any authorised hub user (incl. view-only).
- * The topbar now polls /api/hub/[hubId]/status (unread + last-sync in one
- * request); this route is kept for compatibility.
+ * Single polled endpoint for the hub top bar: unread notification count and
+ * last completed sync timestamp. Replaces two separate pollers
+ * (/notifications/unread-count and /last-sync) so each tick costs one auth
+ * pass instead of two.
  */
 export async function GET(
   _request: Request,
@@ -24,10 +24,17 @@ export async function GET(
       );
     }
 
-    const lastSyncedAt = await getLastSyncedAt(hubId);
-    return NextResponse.json({ lastSyncedAt });
+    const [unreadCount, lastSyncedAt] = await Promise.all([
+      getUnreadCount(auth.user.id, hubId),
+      getLastSyncedAt(hubId),
+    ]);
+
+    return NextResponse.json(
+      { unreadCount, lastSyncedAt },
+      { headers: { "Cache-Control": "private, no-store" } }
+    );
   } catch (error) {
-    console.error("GET /api/hub/[hubId]/last-sync error:", error);
+    console.error("GET /api/hub/[hubId]/status error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

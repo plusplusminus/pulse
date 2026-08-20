@@ -51,6 +51,10 @@ next-env.d.ts
 .open-next
 .env*.local
 
+# perf tooling output
+perf-snapshots/
+k6-summary-*.json
+
 # widget bundles copied from packages/feedback-widget/dist by scripts/publish-widget.mjs
 /public/widget/
 

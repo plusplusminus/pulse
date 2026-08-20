@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import Link from "next/link";
 import { captureEvent } from "@/lib/posthog-client";
 import { POSTHOG_EVENTS } from "@/lib/posthog-events";
@@ -58,36 +65,20 @@ function formatRelativeTime(dateStr: string): string {
 export function NotificationBell({
   hubId,
   hubSlug,
+  unreadCount,
+  onUnreadCountChange: setUnreadCount,
 }: {
   hubId: string;
   hubSlug: string;
+  /** Polled by the hub top bar via useHubStatus; the bell only adjusts it optimistically. */
+  unreadCount: number;
+  onUnreadCountChange: Dispatch<SetStateAction<number>>;
 }) {
   const [open, setOpen] = useState(false);
-  const [unreadCount, setUnreadCount] = useState(0);
   const [events, setEvents] = useState<NotificationEvent[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
   const [markingAll, setMarkingAll] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-
-  // Poll unread count every 30s
-  const fetchUnreadCount = useCallback(async () => {
-    try {
-      const res = await fetch(
-        `/api/hub/${hubId}/notifications/unread-count`
-      );
-      if (!res.ok) return;
-      const data = (await res.json()) as { count: number };
-      setUnreadCount(data.count);
-    } catch {
-      // Non-critical
-    }
-  }, [hubId]);
-
-  useEffect(() => {
-    fetchUnreadCount();
-    const id = setInterval(fetchUnreadCount, 30_000);
-    return () => clearInterval(id);
-  }, [fetchUnreadCount]);
 
   // Fetch events when popover opens
   const fetchEvents = useCallback(async () => {
