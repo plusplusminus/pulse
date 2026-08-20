@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { withAuth } from "@workos-inc/authkit-nextjs";
 import { supabaseAdmin, type HubMemberRole } from "./supabase";
 import { isPPMAdmin } from "./ppm-admin";
@@ -6,8 +7,9 @@ import type { User } from "@workos-inc/node";
 /**
  * Resolve a Client Hub from its slug.
  * Returns the hub ID and WorkOS org ID, or null if not found/inactive.
+ * Memoised per server request: layout, metadata and page all resolve the same slug.
  */
-export async function resolveHubBySlug(slug: string) {
+export const resolveHubBySlug = cache(async function resolveHubBySlug(slug: string) {
   const { data } = await supabaseAdmin
     .from("client_hubs")
     .select("id, name, slug, workos_org_id, is_active")
@@ -16,7 +18,22 @@ export async function resolveHubBySlug(slug: string) {
 
   if (!data || !data.is_active) return null;
   return data;
-}
+});
+
+/** Per-request memoised "does this hub exist and is it active" check used by withHubAuth. */
+const getActiveHubById = cache(async function getActiveHubById(hubId: string) {
+  const { data } = await supabaseAdmin
+    .from("client_hubs")
+    .select("id, is_active")
+    .eq("id", hubId)
+    .single();
+  return data && data.is_active ? data : null;
+});
+
+const isPPMAdminCached = cache(isPPMAdmin);
+const getHubMembershipCached = cache(
+  (hubId: string, userId: string, email?: string) => getHubMembership(hubId, userId, email)
+);
 
 /**
  * Resolve a Client Hub from a WorkOS Organization ID.
@@ -157,25 +174,20 @@ export async function withHubAuth(
   }
 
   // Verify hub exists
-  const { data: hub } = await supabaseAdmin
-    .from("client_hubs")
-    .select("id, is_active")
-    .eq("id", hubId)
-    .single();
-
-  if (!hub || !hub.is_active) {
+  const hub = await getActiveHubById(hubId);
+  if (!hub) {
     return { error: "Hub not found", status: 404 };
   }
 
   // PPM admin bypass — check before membership so admins who are also
   // hub members get the "admin" role instead of their membership role
-  const admin = await isPPMAdmin(user.id, user.email);
+  const admin = await isPPMAdminCached(user.id, user.email);
   if (admin) {
     return { user, hubId, role: "admin" };
   }
 
   // Check membership
-  const membership = await getHubMembership(hubId, user.id, user.email);
+  const membership = await getHubMembershipCached(hubId, user.id, user.email);
   if (membership) {
     return { user, hubId, role: membership.role };
   }

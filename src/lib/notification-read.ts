@@ -53,26 +53,17 @@ export async function markAllAsRead(userId: string, hubId: string) {
  * Get the count of unread notification events for a user in a hub.
  */
 export async function getUnreadCount(userId: string, hubId: string): Promise<number> {
-  const { count: totalCount, error: totalError } = await supabaseAdmin
-    .from("notification_events")
-    .select("id", { count: "exact", head: true })
-    .eq("hub_id", hubId)
+  // Single anti-join in SQL (supabase/migrations/20260820_perf_rpcs.sql). This is
+  // polled by every open hub tab, so it must be one cheap round trip.
+  const { data, error } = await supabaseAdmin.rpc("notification_unread_count", {
+    p_user_id: userId,
+    p_hub_id: hubId,
+  })
 
-  if (totalError || totalCount === null) {
-    console.error("getUnreadCount total error:", totalError)
+  if (error) {
+    console.error("getUnreadCount error:", error)
     return 0
   }
 
-  if (totalCount === 0) return 0
-
-  // Count how many the user has read in this hub
-  // Join through notification_event_id → notification_events.hub_id
-  const { data: readEvents } = await supabaseAdmin
-    .from("notification_reads")
-    .select("notification_event_id, notification_events!inner(hub_id)")
-    .eq("user_id", userId)
-    .eq("notification_events.hub_id", hubId)
-
-  const readCount = readEvents?.length ?? 0
-  return totalCount - readCount
+  return Number(data ?? 0)
 }
