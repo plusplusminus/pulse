@@ -1,14 +1,22 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { captureEvent } from "@/lib/posthog-client";
 import { POSTHOG_EVENTS } from "@/lib/posthog-events";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
+import { proxyLinearUrl, isLinearCdnUrl, getFileIcon } from "@/lib/image-proxy";
+import { isHubAttachmentUrl } from "@/lib/hub-upload";
+import { LinearDocEmbed, extractLinearDocSlug } from "./linear-doc-embed";
 import { CommentComposer } from "./comment-composer";
+import { AdminLinearConnectBanner } from "./admin-linear-connect-banner";
 import { LabelEditor } from "./label-editor";
+import { ImageLightbox } from "./image-lightbox";
+import { useAdminLinearGate } from "@/hooks/use-admin-linear-gate";
+import { useHub } from "@/contexts/hub-context";
+import { LinearGlyph } from "./linear-glyph";
 import {
   X,
   Circle,
@@ -35,9 +43,13 @@ import {
   IterationCw,
   Zap,
   RotateCcw,
+  ImageOff,
+  ExternalLink,
+  Link,
+  Check,
 } from "lucide-react";
 
-type IssueDetail = {
+export type IssueDetail = {
   id: string;
   identifier: string;
   title: string;
@@ -50,9 +62,11 @@ type IssueDetail = {
   dueDate?: string;
   createdAt: string;
   updatedAt: string;
+  /** Canonical Linear issue URL (admins only — surfaced as "View in Linear"). */
+  url?: string;
 };
 
-type Comment = {
+export type Comment = {
   id: string;
   linearId?: string;
   body: string;
@@ -67,7 +81,7 @@ type Comment = {
   children?: Comment[];
 };
 
-type HistoryEntry = {
+export type HistoryEntry = {
   id: string;
   createdAt: string;
   type: "state" | "priority" | "label" | "workflow";
@@ -84,6 +98,105 @@ type HistoryEntry = {
   workflowTriggerLabelId?: string;
 };
 
+// -- Custom ReactMarkdown components ─────────────────────────────────────────
+
+function MarkdownImage({
+  src,
+  alt,
+  onImageClick,
+  ...props
+}: React.ImgHTMLAttributes<HTMLImageElement> & {
+  onImageClick: (src: string, alt?: string) => void;
+}) {
+  const [broken, setBroken] = useState(false);
+  const imgSrc = typeof src === "string" ? proxyLinearUrl(src) : undefined;
+
+  if (broken || !imgSrc) {
+    return (
+      <span className="flex items-center justify-center gap-2 w-full max-h-[300px] min-h-[80px] bg-muted rounded-lg border border-border text-muted-foreground text-xs">
+        <ImageOff className="w-4 h-4" />
+        Image not found
+      </span>
+    );
+  }
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      {...props}
+      src={imgSrc}
+      alt={alt ?? ""}
+      role="button"
+      tabIndex={0}
+      aria-label={alt ? `View image: ${alt}` : "View image"}
+      onError={() => setBroken(true)}
+      onClick={(e) => {
+        e.preventDefault();
+        onImageClick(imgSrc, alt ?? undefined);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onImageClick(imgSrc, alt ?? undefined);
+        }
+      }}
+      className="max-w-full max-h-[300px] rounded-lg border border-border cursor-pointer hover:opacity-90 transition-opacity"
+    />
+  );
+}
+
+export function useMarkdownComponents(onImageClick: (src: string, alt?: string) => void, hubId?: string): Components {
+  return useMemo(() => ({
+    img: (props: React.ComponentPropsWithoutRef<"img">) => (
+      <MarkdownImage {...props} onImageClick={onImageClick} />
+    ),
+    a: ({ href, children, ...props }: React.ComponentPropsWithoutRef<"a">) => {
+      // Linear document embeds
+      if (href && hubId && extractLinearDocSlug(href)) {
+        const linkText = typeof children === "string" ? children.trim() : "Document";
+        return <LinearDocEmbed href={href} hubId={hubId} linkText={linkText} />;
+      }
+
+      // Detect file attachment links — either a Pulse hub Supabase bucket
+      // (comment-attachments / form-attachments) or a Linear CDN URL.
+      const isAttachment = href && (isHubAttachmentUrl(href) || isLinearCdnUrl(href));
+      if (isAttachment) {
+        try {
+          const proxiedHref = isLinearCdnUrl(href!) ? proxyLinearUrl(href!) : href!;
+          const childText = typeof children === "string" ? children.trim() : "";
+          const url = new URL(href!, window.location.origin);
+          const pathParts = url.pathname.split("/");
+          const storageFilename = decodeURIComponent(pathParts[pathParts.length - 1]);
+          const displayName = childText || storageFilename;
+          const IconComponent = getFileIcon(displayName);
+
+          return (
+            <a
+              href={proxiedHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-border bg-muted/50 hover:bg-muted text-foreground no-underline transition-colors text-xs"
+              {...props}
+            >
+              <IconComponent className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+              <span className="truncate max-w-[200px]">{displayName}</span>
+            </a>
+          );
+        } catch {
+          // Malformed URL — fall through to regular link rendering
+        }
+      }
+
+      // Regular links
+      return (
+        <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
+          {children}
+        </a>
+      );
+    },
+  }), [onImageClick, hubId]);
+}
+
 export function IssueDetailPanel({
   issueId,
   hubId,
@@ -99,6 +212,10 @@ export function IssueDetailPanel({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const { blocked: adminLinearBlocked } = useAdminLinearGate();
+  const { role } = useHub();
+  const isAdmin = role === "admin";
   const [issue, setIssue] = useState<IssueDetail | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [replyingTo, setReplyingTo] = useState<{ parentId: string; authorName: string } | null>(null);
@@ -107,10 +224,16 @@ export function IssueDetailPanel({
   const [workflowRules, setWorkflowRules] = useState<Array<{ labelId: string; triggerType: string; description: string }>>([]);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  const [issueError, setIssueError] = useState(false);
   const [descExpanded, setDescExpanded] = useState(false);
   const [descOverflows, setDescOverflows] = useState(false);
   const descRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const [lightboxImage, setLightboxImage] = useState<{ src: string; alt?: string } | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const mdComponents = useMarkdownComponents((src, alt) => setLightboxImage({ src, alt }), hubId);
 
   // Track whether panel is being explicitly closed to avoid URL-driven reopen
   const [closing, setClosing] = useState(false);
@@ -140,6 +263,39 @@ export function IssueDetailPanel({
     if (issueId) setClosing(false);
   }, [issueId]);
 
+  // Build a standalone task URL: /hub/[slug]/[teamKey]/task/[issueId]
+  const getTaskUrl = useCallback(() => {
+    if (!activeId) return window.location.href;
+    const segments = pathname.split("/").filter(Boolean);
+    const hubIdx = segments.indexOf("hub");
+    const slug = hubIdx >= 0 ? segments[hubIdx + 1] : undefined;
+    const teamKey = hubIdx >= 0 ? segments[hubIdx + 2] : undefined;
+    if (!slug || !teamKey) return window.location.href;
+    return `${window.location.origin}/hub/${encodeURIComponent(slug)}/${encodeURIComponent(teamKey)}/task/${encodeURIComponent(activeId)}`;
+  }, [activeId, pathname]);
+
+  const handleCopyLink = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(getTaskUrl());
+      setLinkCopied(true);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setLinkCopied(false), 2000);
+    } catch {
+      // clipboard API unavailable — silently fail
+    }
+  }, [getTaskUrl]);
+
+  // Clean up copy timer on unmount
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    };
+  }, []);
+
+  const handleOpenNewWindow = useCallback(() => {
+    window.open(getTaskUrl(), "_blank", "noopener,noreferrer");
+  }, [getTaskUrl]);
+
   // Fetch issue data
   useEffect(() => {
     if (!activeId) {
@@ -151,37 +307,50 @@ export function IssueDetailPanel({
 
     let cancelled = false;
     setLoading(true);
+    setIssueError(false);
+    setIssue(null);
+    setComments([]);
+    setHubLabels([]);
+    setWorkflowLabelIds([]);
+    setWorkflowRules([]);
+    setHistory([]);
 
     async function fetchIssue() {
       try {
-        const [issueRes, historyRes] = await Promise.all([
+        const [issueResult, historyResult] = await Promise.allSettled([
           fetch(`/api/hub/${hubId}/issues/${activeId}`),
           fetch(`/api/hub/${hubId}/issues/${activeId}/history`),
         ]);
 
-        if (!cancelled && issueRes.ok) {
-          const data = (await issueRes.json()) as {
-            issue: IssueDetail;
-            comments: Comment[];
-            hubLabels: Array<{ id: string; name: string; color: string }>;
-            workflowLabelIds?: string[];
-            workflowRules?: Array<{ labelId: string; triggerType: string; description: string }>;
-          };
-          setIssue(data.issue);
-          setComments(data.comments);
-          setHubLabels(data.hubLabels ?? []);
-          setWorkflowLabelIds(data.workflowLabelIds ?? []);
-          setWorkflowRules(data.workflowRules ?? []);
-        }
+        if (!cancelled) {
+          if (issueResult.status === "fulfilled" && issueResult.value.ok) {
+            const data = (await issueResult.value.json()) as {
+              issue: IssueDetail;
+              comments: Comment[];
+              hubLabels: Array<{ id: string; name: string; color: string }>;
+              workflowLabelIds?: string[];
+              workflowRules?: Array<{ labelId: string; triggerType: string; description: string }>;
+            };
+            setIssue(data.issue);
+            setComments(data.comments);
+            setHubLabels(data.hubLabels ?? []);
+            setWorkflowLabelIds(data.workflowLabelIds ?? []);
+            setWorkflowRules(data.workflowRules ?? []);
+          } else {
+            setIssueError(true);
+          }
 
-        if (!cancelled && historyRes.ok) {
-          const historyData = (await historyRes.json()) as {
-            history: HistoryEntry[];
-          };
-          setHistory(historyData.history ?? []);
+          if (historyResult.status === "fulfilled" && historyResult.value.ok) {
+            const historyData = (await historyResult.value.json()) as {
+              history: HistoryEntry[];
+            };
+            setHistory(historyData.history ?? []);
+          }
         }
       } catch {
-        // silently fail
+        if (!cancelled) {
+          setIssueError(true);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -201,15 +370,15 @@ export function IssueDetailPanel({
     }
   }, [issueId, router, searchParams]);
 
-  // Escape key closes panel
+  // Escape key closes panel (skip if lightbox is open — it handles its own Escape)
   useEffect(() => {
     if (!activeId) return;
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") handleClose();
+      if (e.key === "Escape" && !lightboxImage) handleClose();
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [activeId, handleClose]);
+  }, [activeId, handleClose, lightboxImage]);
 
   // Check description overflow
   useEffect(() => {
@@ -253,6 +422,18 @@ export function IssueDetailPanel({
             <div className="h-6 w-64 bg-muted/50 rounded animate-pulse" />
             <div className="h-40 bg-muted/50 rounded animate-pulse" />
           </div>
+        ) : issueError ? (
+          <div className="flex flex-col items-center justify-center flex-1 p-6 text-center">
+            <AlertCircle className="w-5 h-5 text-muted-foreground mb-2" />
+            <p className="text-sm text-muted-foreground">Failed to load task</p>
+            <button
+              type="button"
+              onClick={handleClose}
+              className="mt-3 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Close
+            </button>
+          </div>
         ) : issue ? (
           <>
             {/* Header */}
@@ -278,12 +459,50 @@ export function IssueDetailPanel({
                   </span>
                 )}
               </div>
-              <button
-                onClick={handleClose}
-                className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0 ml-2"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-0.5 shrink-0 ml-2">
+                {isAdmin && issue.url && (
+                  <a
+                    href={issue.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="View in Linear"
+                    aria-label="View in Linear"
+                    className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                  >
+                    <LinearGlyph className="w-3.5 h-3.5" />
+                  </a>
+                )}
+                <button
+                  type="button"
+                  onClick={handleOpenNewWindow}
+                  title="Open in new window"
+                  aria-label="Open in new window"
+                  className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCopyLink}
+                  title="Copy task link"
+                  aria-label="Copy task link"
+                  className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                >
+                  {linkCopied ? (
+                    <Check className="w-3.5 h-3.5 text-green-500" />
+                  ) : (
+                    <Link className="w-3.5 h-3.5" />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClose}
+                  aria-label="Close panel"
+                  className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
             {/* Scrollable content */}
@@ -296,6 +515,7 @@ export function IssueDetailPanel({
                   hubId={hubId}
                   issueId={issue.id}
                   isViewOnly={isViewOnly}
+                  issueStateId={issue.state?.id}
                   workflowLabelIds={workflowLabelIds}
                   workflowRules={workflowRules}
                   onLabelsChange={(labels) => {
@@ -320,7 +540,7 @@ export function IssueDetailPanel({
                     )}
                   >
                     <div className="prose prose-sm dark:prose-invert max-w-none prose-headings:text-sm prose-headings:font-semibold prose-p:text-[13px] prose-p:leading-relaxed prose-code:text-xs prose-pre:text-xs">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
                         {issue.description}
                       </ReactMarkdown>
                     </div>
@@ -352,6 +572,7 @@ export function IssueDetailPanel({
                 comments={comments}
                 hubId={hubId}
                 isViewOnly={isViewOnly ?? false}
+                mdComponents={mdComponents}
                 onReply={(parentId, authorName) => setReplyingTo({ parentId, authorName })}
                 onRetrySuccess={(commentId, linearCommentId) => {
                   setComments((prev) => {
@@ -373,39 +594,52 @@ export function IssueDetailPanel({
               )}
             </div>
 
-            {/* Comment composer — hidden for view_only users */}
+            {/* Comment composer — hidden for view_only users, blocked for unconnected admins */}
             {!isViewOnly && issue && (
-              <CommentComposer
-                hubId={hubId}
-                issueLinearId={issue.id}
-                replyingTo={replyingTo}
-                onCancelReply={() => setReplyingTo(null)}
-                onCommentAdded={(comment) => {
-                  if (comment.parentId) {
-                    // Insert reply under its parent thread
-                    setComments((prev) =>
-                      prev.map((c) =>
-                        c.linearId === comment.parentId || c.id === comment.parentId
-                          ? { ...c, children: [...(c.children ?? []), comment] }
-                          : c
-                      )
-                    );
-                  } else {
-                    setComments((prev) => [...prev, comment]);
-                  }
-                }}
-              />
+              adminLinearBlocked ? (
+                <AdminLinearConnectBanner context="comment" />
+              ) : (
+                <CommentComposer
+                  hubId={hubId}
+                  issueLinearId={issue.id}
+                  replyingTo={replyingTo}
+                  onCancelReply={() => setReplyingTo(null)}
+                  onCommentAdded={(comment) => {
+                    if (comment.parentId) {
+                      // Insert reply under its parent thread
+                      setComments((prev) =>
+                        prev.map((c) =>
+                          c.linearId === comment.parentId || c.id === comment.parentId
+                            ? { ...c, children: [...(c.children ?? []), comment] }
+                            : c
+                        )
+                      );
+                    } else {
+                      setComments((prev) => [...prev, comment]);
+                    }
+                  }}
+                />
+              )
             )}
           </>
         ) : null}
       </div>
+
+      {/* Image lightbox */}
+      {lightboxImage && (
+        <ImageLightbox
+          src={lightboxImage.src}
+          alt={lightboxImage.alt}
+          onClose={() => setLightboxImage(null)}
+        />
+      )}
     </>
   );
 }
 
 // -- Sub-components ──────────────────────────────────────────────────────────
 
-function StatusBadge({
+export function StatusBadge({
   state,
 }: {
   state: { name: string; color: string; type: string };
@@ -447,7 +681,7 @@ function StatusIcon({
   }
 }
 
-function PriorityIcon({ priority }: { priority: number }) {
+export function PriorityIcon({ priority }: { priority: number }) {
   const cls = "w-3.5 h-3.5";
   switch (priority) {
     case 1:
@@ -463,7 +697,7 @@ function PriorityIcon({ priority }: { priority: number }) {
   }
 }
 
-function DueDateBadge({ dueDate }: { dueDate: string }) {
+export function DueDateBadge({ dueDate }: { dueDate: string }) {
   const date = new Date(dueDate);
   const now = new Date();
   const isOverdue = date < now;
@@ -493,15 +727,17 @@ function DueDateBadge({ dueDate }: { dueDate: string }) {
   );
 }
 
-function CommentThread({
+export function CommentThread({
   comment,
   onReply,
   hubId,
+  mdComponents,
   onRetrySuccess,
 }: {
   comment: Comment;
   onReply?: (parentId: string, authorName: string) => void;
   hubId: string;
+  mdComponents: Components;
   onRetrySuccess?: (commentId: string, linearCommentId: string) => void;
 }) {
   const replies = comment.children ?? [];
@@ -514,12 +750,13 @@ function CommentThread({
         comment={comment}
         onReply={onReply ? () => onReply(parentLinearId, comment.user.name) : undefined}
         hubId={hubId}
+        mdComponents={mdComponents}
         onRetrySuccess={onRetrySuccess}
       />
       {replies.length > 0 && (
         <div className="ml-4 mt-1 border-l-2 border-border pl-3 space-y-1">
           {replies.map((reply) => (
-            <CommentBubble key={reply.id} comment={reply} compact hubId={hubId} onRetrySuccess={onRetrySuccess} />
+            <CommentBubble key={reply.id} comment={reply} compact hubId={hubId} mdComponents={mdComponents} onRetrySuccess={onRetrySuccess} />
           ))}
         </div>
       )}
@@ -527,17 +764,19 @@ function CommentThread({
   );
 }
 
-function CommentBubble({
+export function CommentBubble({
   comment,
   compact,
   onReply,
   hubId,
+  mdComponents,
   onRetrySuccess,
 }: {
   comment: Comment;
   compact?: boolean;
   onReply?: () => void;
   hubId: string;
+  mdComponents: Components;
   onRetrySuccess?: (commentId: string, linearCommentId: string) => void;
 }) {
   const isHub = comment.isHubComment;
@@ -576,11 +815,6 @@ function CommentBubble({
         <span className="text-xs font-medium">
           {comment.user.name}
         </span>
-        {isHub && (
-          <span className="text-[9px] font-medium px-1 py-0 rounded bg-primary/10 text-primary">
-            Client
-          </span>
-        )}
         {isTeam && !isHub && (
           <span className="text-[9px] font-medium px-1 py-0 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400">
             Team
@@ -613,7 +847,7 @@ function CommentBubble({
         )}
       </div>
       <div className="prose prose-sm dark:prose-invert max-w-none prose-p:text-[13px] prose-p:leading-relaxed prose-p:my-1">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
           {comment.body}
         </ReactMarkdown>
       </div>
@@ -642,12 +876,14 @@ function CollapsibleComments({
   comments,
   hubId,
   isViewOnly,
+  mdComponents,
   onReply,
   onRetrySuccess,
 }: {
   comments: Comment[];
   hubId: string;
   isViewOnly: boolean;
+  mdComponents: Components;
   onReply: (parentId: string, authorName: string) => void;
   onRetrySuccess: (commentId: string, linearCommentId: string) => void;
 }) {
@@ -687,6 +923,7 @@ function CollapsibleComments({
                   key={comment.id}
                   comment={comment}
                   hubId={hubId}
+                  mdComponents={mdComponents}
                   onReply={isViewOnly ? undefined : (parentId, authorName) => onReply(parentId, authorName)}
                   onRetrySuccess={onRetrySuccess}
                 />
@@ -731,7 +968,7 @@ function CollapsibleHistory({ history }: { history: HistoryEntry[] }) {
   );
 }
 
-function HistoryItem({ entry }: { entry: HistoryEntry }) {
+export function HistoryItem({ entry }: { entry: HistoryEntry }) {
   const isWorkflow = entry.type === "workflow";
 
   return (
@@ -896,7 +1133,7 @@ function WorkflowHistoryContent({ entry }: { entry: HistoryEntry }) {
   );
 }
 
-function RelativeTime({ dateStr }: { dateStr: string }) {
+export function RelativeTime({ dateStr }: { dateStr: string }) {
   const date = new Date(dateStr);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();

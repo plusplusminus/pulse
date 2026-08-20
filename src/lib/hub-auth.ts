@@ -167,16 +167,17 @@ export async function withHubAuth(
     return { error: "Hub not found", status: 404 };
   }
 
+  // PPM admin bypass — check before membership so admins who are also
+  // hub members get the "admin" role instead of their membership role
+  const admin = await isPPMAdmin(user.id, user.email);
+  if (admin) {
+    return { user, hubId, role: "admin" };
+  }
+
   // Check membership
   const membership = await getHubMembership(hubId, user.id, user.email);
   if (membership) {
     return { user, hubId, role: membership.role };
-  }
-
-  // PPM admin bypass — admins can access any hub with full write access
-  const admin = await isPPMAdmin(user.id, user.email);
-  if (admin) {
-    return { user, hubId, role: "admin" };
   }
 
   return { error: "Not a member of this hub", status: 403 };

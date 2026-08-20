@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { TeamPicker, ProjectPicker, LabelPicker, InitiativePicker } from "./pickers";
-import { Plus, Trash2, ChevronDown, ChevronRight, Eye } from "lucide-react";
+import { Plus, Trash2, ChevronDown, ChevronRight, Eye, BarChart3 } from "lucide-react";
 import { WorkflowRules } from "./workflow-rules";
 
 interface TeamMapping {
@@ -17,13 +17,16 @@ interface TeamMapping {
   visible_label_ids: string[];
   hidden_label_ids: string[];
   auto_include_projects: boolean;
+  include_unassigned_issues: boolean;
   overview_only_project_ids: string[];
+  task_priority_project_ids: string[];
   is_active: boolean;
 }
 
 type ScopingUpdates = Partial<Pick<TeamMapping,
   "visible_project_ids" | "visible_initiative_ids" | "visible_label_ids" |
-  "hidden_label_ids" | "auto_include_projects" | "overview_only_project_ids"
+  "hidden_label_ids" | "auto_include_projects" | "include_unassigned_issues" |
+  "overview_only_project_ids" | "task_priority_project_ids"
 >>;
 
 interface ScopingEditorProps {
@@ -208,16 +211,20 @@ function MappingCard({
   isPending: boolean;
 }) {
   const [autoInclude, setAutoInclude] = useState(mapping.auto_include_projects);
+  const [includeUnassigned, setIncludeUnassigned] = useState(mapping.include_unassigned_issues);
   const [projectIds, setProjectIds] = useState(mapping.visible_project_ids);
   const [overviewOnlyIds, setOverviewOnlyIds] = useState(mapping.overview_only_project_ids);
+  const [taskPriorityIds, setTaskPriorityIds] = useState(mapping.task_priority_project_ids);
   const [initiativeIds, setInitiativeIds] = useState(mapping.visible_initiative_ids);
   const [labelIds, setLabelIds] = useState(mapping.visible_label_ids);
   const [hiddenLabelIds, setHiddenLabelIds] = useState(mapping.hidden_label_ids);
 
   const hasChanges =
     autoInclude !== mapping.auto_include_projects ||
+    includeUnassigned !== mapping.include_unassigned_issues ||
     JSON.stringify(projectIds) !== JSON.stringify(mapping.visible_project_ids) ||
     JSON.stringify(overviewOnlyIds) !== JSON.stringify(mapping.overview_only_project_ids) ||
+    JSON.stringify(taskPriorityIds) !== JSON.stringify(mapping.task_priority_project_ids) ||
     JSON.stringify(initiativeIds) !== JSON.stringify(mapping.visible_initiative_ids) ||
     JSON.stringify(labelIds) !== JSON.stringify(mapping.visible_label_ids) ||
     JSON.stringify(hiddenLabelIds) !== JSON.stringify(mapping.hidden_label_ids);
@@ -237,7 +244,7 @@ function MappingCard({
           {mapping.linear_team_name ?? mapping.linear_team_id}
         </button>
         <div className="flex items-center gap-2">
-          <ScopingBadges mapping={mapping} autoInclude={autoInclude} overviewOnlyCount={overviewOnlyIds.length} />
+          <ScopingBadges mapping={mapping} autoInclude={autoInclude} includeUnassigned={includeUnassigned} overviewOnlyCount={overviewOnlyIds.length} taskPriorityCount={taskPriorityIds.length} />
           <button
             onClick={onRemove}
             disabled={isPending}
@@ -291,15 +298,61 @@ function MappingCard({
             />
           )}
 
+          {/* Include unassigned issues toggle */}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">Include unassigned tasks</p>
+              <p className="text-xs text-muted-foreground">
+                Show tasks that aren&apos;t assigned to any project (e.g. cycle-only tasks).
+              </p>
+            </div>
+            <button
+              onClick={() => setIncludeUnassigned(!includeUnassigned)}
+              className={cn(
+                "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors",
+                includeUnassigned ? "bg-primary" : "bg-muted"
+              )}
+              role="switch"
+              aria-checked={includeUnassigned}
+              aria-label="Include unassigned tasks"
+            >
+              <span
+                className={cn(
+                  "pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-sm ring-0 transition-transform",
+                  includeUnassigned ? "translate-x-4" : "translate-x-0"
+                )}
+              />
+            </button>
+          </div>
+
           {/* Overview-only projects */}
           <div>
             <ProjectPicker
               teamId={mapping.linear_team_id}
               value={overviewOnlyIds}
-              onChange={setOverviewOnlyIds}
+              onChange={(ids) => {
+                setOverviewOnlyIds(ids);
+                // Remove any newly overview-only projects from task priority
+                setTaskPriorityIds((prev) =>
+                  prev.filter((id) => !ids.includes(id))
+                );
+              }}
               label="Overview-only projects"
               description="These projects will show their description and updates but not individual issues."
               icon={<Eye className="w-3.5 h-3.5 text-muted-foreground" />}
+            />
+          </div>
+
+          {/* Task prioritisation opt-in */}
+          <div>
+            <ProjectPicker
+              teamId={mapping.linear_team_id}
+              value={taskPriorityIds}
+              onChange={setTaskPriorityIds}
+              label="Task prioritisation"
+              description="Clients can rank and RICE-score individual tasks within these projects. Only non-overview-only projects can be selected."
+              icon={<BarChart3 className="w-3.5 h-3.5 text-muted-foreground" />}
+              excludeIds={overviewOnlyIds}
             />
           </div>
 
@@ -314,7 +367,7 @@ function MappingCard({
             teamId={mapping.linear_team_id}
             value={hiddenLabelIds}
             onChange={setHiddenLabelIds}
-            label="Hidden labels"
+            label="Hidden tasks"
             description="Issues with any of these labels will be entirely excluded from the client hub."
           />
           <InitiativePicker
@@ -338,8 +391,10 @@ function MappingCard({
                 onClick={() =>
                   onSave({
                     auto_include_projects: autoInclude,
+                    include_unassigned_issues: includeUnassigned,
                     visible_project_ids: autoInclude ? [] : projectIds,
                     overview_only_project_ids: overviewOnlyIds,
+                    task_priority_project_ids: taskPriorityIds,
                     visible_initiative_ids: initiativeIds,
                     visible_label_ids: labelIds,
                     hidden_label_ids: hiddenLabelIds,
@@ -353,8 +408,10 @@ function MappingCard({
               <button
                 onClick={() => {
                   setAutoInclude(mapping.auto_include_projects);
+                  setIncludeUnassigned(mapping.include_unassigned_issues);
                   setProjectIds(mapping.visible_project_ids);
                   setOverviewOnlyIds(mapping.overview_only_project_ids);
+                  setTaskPriorityIds(mapping.task_priority_project_ids);
                   setInitiativeIds(mapping.visible_initiative_ids);
                   setLabelIds(mapping.visible_label_ids);
                   setHiddenLabelIds(mapping.hidden_label_ids);
@@ -374,11 +431,15 @@ function MappingCard({
 function ScopingBadges({
   mapping,
   autoInclude,
+  includeUnassigned,
   overviewOnlyCount,
+  taskPriorityCount,
 }: {
   mapping: TeamMapping;
   autoInclude: boolean;
+  includeUnassigned: boolean;
   overviewOnlyCount: number;
+  taskPriorityCount: number;
 }) {
   const p = mapping.visible_project_ids.length;
   const l = mapping.visible_label_ids.length;
@@ -390,9 +451,19 @@ function ScopingBadges({
       <span className="text-[10px] text-muted-foreground px-1.5 py-0.5 rounded bg-muted">
         {autoInclude ? "Auto" : p === 0 ? "None" : p} proj
       </span>
+      {includeUnassigned && (
+        <span className="text-[10px] text-amber-500/80 px-1.5 py-0.5 rounded bg-amber-500/10">
+          +unassigned
+        </span>
+      )}
       {overviewOnlyCount > 0 && (
         <span className="text-[10px] text-blue-500/80 px-1.5 py-0.5 rounded bg-blue-500/10">
           {overviewOnlyCount} overview
+        </span>
+      )}
+      {taskPriorityCount > 0 && (
+        <span className="text-[10px] text-violet-500/80 px-1.5 py-0.5 rounded bg-violet-500/10">
+          {taskPriorityCount} task prio
         </span>
       )}
       <span className="text-[10px] text-muted-foreground px-1.5 py-0.5 rounded bg-muted">

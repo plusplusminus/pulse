@@ -7,9 +7,10 @@ import { RefreshCw, Settings } from "lucide-react";
 import { useHub } from "@/contexts/hub-context";
 import { SimpleThemeToggle } from "@/components/theme-toggle";
 import { NotificationBell } from "@/components/hub/notification-bell";
+import { UserMenu } from "@/components/user-menu";
 import { cn } from "@/lib/utils";
 
-function useRelativeTime(timestamp: number) {
+function useRelativeTime(timestamp: number | null) {
   const [, setTick] = useState(0);
 
   useEffect(() => {
@@ -17,30 +18,67 @@ function useRelativeTime(timestamp: number) {
     return () => clearInterval(id);
   }, []);
 
+  if (timestamp === null) return "Syncing…";
   const diff = Math.floor((Date.now() - timestamp) / 1000);
-  if (diff < 30) return "Updated just now";
-  if (diff < 90) return "Updated 1m ago";
+  if (diff < 30) return "Synced just now";
+  if (diff < 90) return "Synced 1m ago";
   const mins = Math.floor(diff / 60);
-  if (mins < 60) return `Updated ${mins}m ago`;
+  if (mins < 60) return `Synced ${mins}m ago`;
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `Updated ${hours}h ago`;
-  return `Updated ${Math.floor(hours / 24)}d ago`;
+  if (hours < 24) return `Synced ${hours}h ago`;
+  return `Synced ${Math.floor(hours / 24)}d ago`;
 }
 
 export function HubTopBar() {
   const { firstName, email, role, isLoading, hubSlug, hubId } = useHub();
   const router = useRouter();
-  const [lastRefreshedAt, setLastRefreshedAt] = useState(Date.now);
+  // Timestamp of the last completed sync run, from the server — not page-mount
+  // time. null until first fetched, so the label doesn't claim freshness it
+  // can't vouch for.
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const relativeTime = useRelativeTime(lastRefreshedAt);
+  const relativeTime = useRelativeTime(lastSyncedAt);
 
-  const handleRefresh = useCallback(() => {
+  const fetchLastSync = useCallback(async () => {
+    if (!hubId) return;
+    try {
+      const res = await fetch(`/api/hub/${hubId}/last-sync`, {
+        cache: "no-store",
+      });
+      if (!res.ok) return;
+      const { lastSyncedAt: ts } = (await res.json()) as {
+        lastSyncedAt: string | null;
+      };
+      setLastSyncedAt(ts ? new Date(ts).getTime() : null);
+    } catch {
+      // Non-fatal: keep showing the last known value.
+    }
+  }, [hubId]);
+
+  useEffect(() => {
+    fetchLastSync();
+    const id = setInterval(fetchLastSync, 30_000);
+    return () => clearInterval(id);
+  }, [fetchLastSync]);
+
+  // Only PPM admins can trigger a sync; everyone else sees a read-only label.
+  const isAdmin = role === "admin";
+
+  const handleRefresh = useCallback(async () => {
+    if (!hubId || refreshing) return;
     setRefreshing(true);
+    try {
+      // Trigger a real Linear->Pulse sync for this hub, then re-render the
+      // server components against the fresh data and update the timestamp.
+      await fetch(`/api/admin/hubs/${hubId}/sync`, { method: "POST" });
+    } catch {
+      // Sync failed (network/server) - still refresh the view so the button
+      // isn't a dead end, and the label keeps its last known value.
+    }
     router.refresh();
-    setLastRefreshedAt(Date.now());
-    // router.refresh() doesn't return a promise, so use a timeout
-    setTimeout(() => setRefreshing(false), 1000);
-  }, [router]);
+    await fetchLastSync();
+    setRefreshing(false);
+  }, [hubId, refreshing, router, fetchLastSync]);
 
   const displayName = firstName ?? email;
 
@@ -49,16 +87,22 @@ export function HubTopBar() {
       className="flex items-center justify-between h-12 px-4 border-b border-border bg-background shrink-0"
     >
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <button
-          onClick={handleRefresh}
-          disabled={refreshing}
-          className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors disabled:opacity-50"
-        >
-          <RefreshCw
-            className={cn("w-3 h-3", refreshing && "animate-spin")}
-          />
-          <span>{relativeTime}</span>
-        </button>
+        {isAdmin ? (
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            title="Sync now"
+            className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={cn("w-3 h-3", refreshing && "animate-spin")} />
+            <span>{relativeTime}</span>
+          </button>
+        ) : (
+          <span className="inline-flex items-center gap-1.5">
+            <RefreshCw className="w-3 h-3" />
+            <span>{relativeTime}</span>
+          </span>
+        )}
       </div>
 
       <div className="flex items-center gap-3">
@@ -86,13 +130,8 @@ export function HubTopBar() {
               </span>
             )}
 
-            {/* User avatar */}
-            <div className="flex items-center gap-2">
-              <UserAvatar name={displayName} />
-              <span className="text-xs text-muted-foreground hidden sm:block">
-                {displayName}
-              </span>
-            </div>
+            {/* User menu with sign out */}
+            <UserMenu displayName={displayName} />
           </div>
         )}
       </div>
@@ -100,16 +139,3 @@ export function HubTopBar() {
   );
 }
 
-function UserAvatar({ name }: { name: string }) {
-  const initial = (name ?? "?").charAt(0).toUpperCase();
-  return (
-    <div
-      className={cn(
-        "w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-medium",
-        "bg-muted text-muted-foreground"
-      )}
-    >
-      {initial}
-    </div>
-  );
-}

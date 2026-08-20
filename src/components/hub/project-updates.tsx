@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { linearImageComponents } from "@/lib/image-proxy";
 import { cn } from "@/lib/utils";
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 
@@ -129,7 +130,7 @@ export function ProjectUpdates({
           </span>
         )}
         {/* Show latest health badge inline when collapsed */}
-        {!expanded && !loading && updates.length > 0 && (
+        {!expanded && !loading && updates.length > 0 && updates[0].health && (
           <HealthBadge health={updates[0].health} />
         )}
       </button>
@@ -153,13 +154,13 @@ export function ProjectUpdates({
                   className="rounded-lg border border-border bg-muted/30 p-4"
                 >
                   <div className="flex items-center gap-2 mb-3">
-                    <HealthBadge health={update.health} />
+                    {update.health && <HealthBadge health={update.health} />}
                     <span className="text-[10px] text-muted-foreground">
                       {formatUpdateDate(update.createdAt)}
                     </span>
                   </div>
                   <div className="prose prose-sm dark:prose-invert max-w-none prose-headings:text-sm prose-headings:font-semibold prose-p:text-[13px] prose-p:leading-relaxed prose-code:text-xs prose-pre:text-xs prose-ul:text-[13px] prose-ol:text-[13px]">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={linearImageComponents}>
                       {update.body}
                     </ReactMarkdown>
                   </div>

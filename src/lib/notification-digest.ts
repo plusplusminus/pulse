@@ -1,6 +1,13 @@
 import { supabaseAdmin } from "./supabase";
 import { sendEmail } from "./email";
 import { DigestNotification, type DigestEvent } from "@/emails/digest-notification";
+import { shouldIncludeInDigest } from "./notification-eligibility";
+import { getSettings } from "./notification-settings";
+import { getTaskStatesForUser, eventIssueLinearId } from "./task-subscriptions";
+import type {
+  NotificationEventType,
+  NotificationPreference,
+} from "./notification-preferences";
 import { createElement } from "react";
 
 type DigestType = "daily" | "weekly";
@@ -87,8 +94,16 @@ export async function processDigests(
   // Step 6: Process each candidate
   for (const candidate of dueCandidates) {
     try {
-      await processOneDigest(candidate, type, lastDigestColumn, lookbackHours, hubMap, emailMap);
-      stats.sent++;
+      const sent = await processOneDigest(
+        candidate,
+        type,
+        lastDigestColumn,
+        lookbackHours,
+        hubMap,
+        emailMap
+      );
+      if (sent) stats.sent++;
+      else stats.skipped++;
     } catch (err) {
       stats.errors++;
       console.error(
@@ -108,31 +123,21 @@ export async function processDigests(
 function isDueNow(candidate: DigestCandidate, type: DigestType): boolean {
   const now = new Date();
 
-  let userHour: number;
-  let userDay: number;
-  try {
-    const formatter = new Intl.DateTimeFormat("en-US", {
-      timeZone: candidate.timezone,
-      hour: "numeric",
-      hour12: false,
-      weekday: "short",
-    });
-    const parts = formatter.formatToParts(now);
-    userHour = parseInt(
-      parts.find((p) => p.type === "hour")?.value ?? "0",
-      10
-    );
-    const dayStr = parts.find((p) => p.type === "weekday")?.value ?? "";
-    userDay = dayStr === "Mon" ? 1 : dayStr === "Tue" ? 2 : dayStr === "Wed" ? 3 :
-      dayStr === "Thu" ? 4 : dayStr === "Fri" ? 5 : dayStr === "Sat" ? 6 : 0;
-  } catch {
-    // Invalid timezone — fall back to UTC
-    userHour = now.getUTCHours();
-    userDay = now.getUTCDay();
-  }
+  // Current hour/day in the recipient's timezone, falling back to the shared
+  // default zone (not UTC) when the stored timezone is missing or invalid.
+  const { hour: userHour, day: userDay } = hourAndDayInTimeZone(
+    now,
+    candidate.timezone
+  );
 
-  // Parse preferred hour from digest_time (e.g., "09:00")
-  const preferredHour = parseInt(candidate.digest_time.split(":")[0], 10);
+  // Parse the preferred hour from digest_time (e.g. "09:00"). Treat anything
+  // missing, non-numeric, or outside 0–23 (e.g. "24:00", "99:00") as malformed
+  // and fall back to the default hour rather than scheduling incorrectly.
+  const parsedHour = parseInt((candidate.digest_time ?? "").split(":")[0], 10);
+  const preferredHour =
+    Number.isInteger(parsedHour) && parsedHour >= 0 && parsedHour <= 23
+      ? parsedHour
+      : DEFAULT_DIGEST_HOUR;
   if (userHour !== preferredHour) return false;
 
   // Weekly digests only on Monday
@@ -152,16 +157,57 @@ function isDueNow(candidate: DigestCandidate, type: DigestType): boolean {
   return true;
 }
 
+// Shared default for digest scheduling when a recipient's stored values are
+// missing or invalid. Kept local to avoid coupling to the preferences module.
+const DEFAULT_TIMEZONE = "Africa/Johannesburg";
+const DEFAULT_DIGEST_HOUR = 9;
+
+/**
+ * Current hour (0–23) and weekday (0=Sun … 6=Sat) in `tz`. Falls back to the
+ * shared default timezone, then UTC, when `tz` is missing or not a valid zone.
+ */
+function hourAndDayInTimeZone(
+  now: Date,
+  tz: string | null | undefined
+): { hour: number; day: number } {
+  const DAY_INDEX: Record<string, number> = {
+    Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+  };
+  for (const zone of [tz, DEFAULT_TIMEZONE]) {
+    if (!zone || !zone.trim()) continue;
+    try {
+      const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: zone,
+        hour: "numeric",
+        hour12: false,
+        weekday: "short",
+      }).formatToParts(now);
+      let hour = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
+      if (hour === 24) hour = 0; // Intl can report midnight as 24
+      const day =
+        DAY_INDEX[parts.find((p) => p.type === "weekday")?.value ?? ""] ?? 0;
+      return { hour, day };
+    } catch {
+      // invalid zone — try the next candidate
+    }
+  }
+  return { hour: now.getUTCHours(), day: now.getUTCDay() };
+}
+
 async function fetchHubInfoBatch(
   hubIds: string[]
 ): Promise<Map<string, HubInfo>> {
   const map = new Map<string, HubInfo>();
   if (hubIds.length === 0) return map;
 
-  const { data } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from("client_hubs")
     .select("id, name, slug")
     .in("id", hubIds);
+
+  if (error) {
+    throw new Error(`fetchHubInfoBatch: client_hubs lookup failed: ${error.message}`);
+  }
 
   for (const row of data || []) {
     map.set(row.id, { name: row.name, slug: row.slug });
@@ -175,19 +221,64 @@ async function fetchUserEmailsBatch(
   const map = new Map<string, string>();
   if (userIds.length === 0) return map;
 
-  // hub_members stores the email for invited users
-  const { data } = await supabaseAdmin
-    .from("hub_members")
-    .select("user_id, email")
-    .in("user_id", userIds)
-    .not("email", "is", null);
+  // Fetch from both hub_members and ppm_admins in parallel
+  const [
+    { data: memberData, error: memberError },
+    { data: adminData, error: adminError },
+  ] = await Promise.all([
+    supabaseAdmin
+      .from("hub_members")
+      .select("user_id, email")
+      .in("user_id", userIds)
+      .not("email", "is", null),
+    supabaseAdmin
+      .from("ppm_admins")
+      .select("user_id, email")
+      .in("user_id", userIds)
+      .not("email", "is", null),
+  ]);
 
-  for (const row of data || []) {
+  if (memberError) {
+    throw new Error(`fetchUserEmailsBatch: hub_members lookup failed: ${memberError.message}`);
+  }
+  if (adminError) {
+    throw new Error(`fetchUserEmailsBatch: ppm_admins lookup failed: ${adminError.message}`);
+  }
+
+  for (const row of memberData || []) {
     if (row.email && row.user_id) {
       map.set(row.user_id, row.email);
     }
   }
+  // PPM admins fill in any user_ids not already found via hub_members
+  for (const row of adminData || []) {
+    if (row.email && row.user_id && !map.has(row.user_id)) {
+      map.set(row.user_id, row.email);
+    }
+  }
   return map;
+}
+
+/**
+ * Reconstruct the recipient's preference for an event type from a digest
+ * candidate. The candidate was built from notification_preferences rows whose
+ * email_mode equals this digest's cadence, so any type present in
+ * candidate.event_types has email_mode === cadence; anything else has no
+ * matching preference (undefined) and is excluded by the resolver.
+ */
+function candidatePreferenceFor(
+  candidate: DigestCandidate,
+  eventType: string,
+  cadence: DigestType
+): NotificationPreference | undefined {
+  if (!candidate.event_types.includes(eventType)) return undefined;
+  return {
+    event_type: eventType as NotificationEventType,
+    email_mode: cadence,
+    in_app_enabled: true,
+    digest_time: candidate.digest_time,
+    timezone: candidate.timezone,
+  };
 }
 
 async function processOneDigest(
@@ -197,12 +288,12 @@ async function processOneDigest(
   lookbackHours: number,
   hubMap: Map<string, HubInfo>,
   emailMap: Map<string, string>
-) {
+): Promise<boolean> {
   const hub = hubMap.get(candidate.hub_id);
-  if (!hub) return;
+  if (!hub) return false;
 
   const userEmail = emailMap.get(candidate.user_id);
-  if (!userEmail) return;
+  if (!userEmail) return false;
 
   // Calculate lookback window
   const since = candidate.last_digest_at
@@ -212,24 +303,80 @@ async function processOneDigest(
   // Fetch events since last digest, filtered to user's preferred event types
   const { data: events, error } = await supabaseAdmin
     .from("notification_events")
-    .select("id, event_type, entity_type, entity_id, actor_name, summary, metadata, created_at")
+    .select("id, event_type, entity_type, entity_id, actor_name, summary, metadata, mentioned_user_ids, created_at")
     .eq("hub_id", candidate.hub_id)
     .in("event_type", candidate.event_types)
     .gt("created_at", since)
     .order("created_at", { ascending: false })
     .limit(100);
 
-  if (error || !events || events.length === 0) return;
+  if (error) {
+    // A real read failure is an error, not a no-op skip — let it propagate so
+    // processDigests counts it under stats.errors and logs it.
+    throw new Error(
+      `digest event query failed (hub=${candidate.hub_id}, user=${candidate.user_id}): ${error.message}`
+    );
+  }
+  if (!events || events.length === 0) return false;
+
+  // PULSE-362/365: the recipient's settings (comment scope + watch mode).
+  const settings = await getSettings(candidate.hub_id, candidate.user_id);
+
+  // PULSE-364: the recipient's per-task overrides for the tasks these events touch.
+  const issueIds = [
+    ...new Set(
+      events
+        .map((ev) =>
+          eventIssueLinearId(
+            ev.entity_type,
+            ev.entity_id,
+            ev.metadata as Record<string, unknown>
+          )
+        )
+        .filter((id): id is string => id !== null)
+    ),
+  ];
+  const taskStates = await getTaskStatesForUser(
+    candidate.hub_id,
+    candidate.user_id,
+    issueIds
+  );
+
+  // The shared resolver (notification-eligibility.ts) is the authority on what
+  // belongs in this digest. It mirrors the event_types prefetch above and adds
+  // the mention-scope (PULSE-362) and per-task (PULSE-364) rules.
+  const eligibleEvents = events.filter((ev) => {
+    const issueId = eventIssueLinearId(
+      ev.entity_type,
+      ev.entity_id,
+      ev.metadata as Record<string, unknown>
+    );
+    return shouldIncludeInDigest(
+      { event_type: ev.event_type },
+      {
+        preference: candidatePreferenceFor(candidate, ev.event_type, type),
+        commentScope: settings.commentScope,
+        isMentioned: (
+          (ev.mentioned_user_ids as string[] | null | undefined) ?? []
+        ).includes(candidate.user_id),
+        taskState: issueId ? taskStates.get(issueId) : undefined,
+        watchMode: settings.watchMode,
+      },
+      type
+    );
+  });
+
+  if (eligibleEvents.length === 0) return false;
 
   // Group events by type for the template
   const grouped: Record<string, DigestEvent[]> = {};
-  for (const ev of events) {
+  for (const ev of eligibleEvents) {
     if (!grouped[ev.event_type]) grouped[ev.event_type] = [];
     const meta = ev.metadata as Record<string, string | undefined>;
     const teamKey = meta?.team_key;
     let deepLinkUrl = `${getBaseUrl()}/hub/${hub.slug}`;
     if (teamKey && ev.entity_type === "issue") {
-      deepLinkUrl = `${getBaseUrl()}/hub/${hub.slug}/${teamKey}/issues/${ev.entity_id}`;
+      deepLinkUrl = `${getBaseUrl()}/hub/${hub.slug}/${teamKey}/task/${ev.entity_id}`;
     } else if (teamKey && ev.entity_type === "project") {
       deepLinkUrl = `${getBaseUrl()}/hub/${hub.slug}/${teamKey}/projects/${ev.entity_id}`;
     }
@@ -264,11 +411,12 @@ async function processOneDigest(
       events: grouped,
       period: type,
       dateRange,
+      timeZone: candidate.timezone,
     }),
   });
 
-  // Record in email queue (reference first event for the FK)
-  const firstEventId = events[0].id;
+  // Record the attempt in the email queue (sent or failed) for observability.
+  const firstEventId = eligibleEvents[0].id;
   await supabaseAdmin.from("notification_email_queue").insert({
     notification_event_id: firstEventId,
     user_id: candidate.user_id,
@@ -281,13 +429,25 @@ async function processOneDigest(
     sent_at: result.success ? new Date().toISOString() : null,
   });
 
-  // Update last digest timestamp
+  if (!result.success) {
+    // Don't advance the digest cursor on a failed send: the events stay within
+    // the next window so the digest retries rather than being silently skipped,
+    // and stats.sent stays accurate.
+    console.error(
+      `processOneDigest: send failed (hub=${candidate.hub_id}, user=${candidate.user_id}): ${result.error ?? "unknown error"}`
+    );
+    return false;
+  }
+
+  // Advance the digest cursor only after a confirmed successful send.
   await supabaseAdmin
     .from("notification_preferences")
     .update({ [lastDigestColumn]: new Date().toISOString() })
     .eq("hub_id", candidate.hub_id)
     .eq("user_id", candidate.user_id)
     .in("event_type", candidate.event_types);
+
+  return true;
 }
 
 function getBaseUrl(): string {

@@ -10,7 +10,7 @@ The **Roadmap** tab gives you a high-level view of project plans and progress.
 
 ## View modes
 
-Switch between two views using the toggle in the toolbar:
+Switch between three views using the toggle in the toolbar:
 
 ### Timeline
 
@@ -31,6 +31,19 @@ A kanban-style board where projects are shown as cards in columns.
 - **Label** — One column per project label
 
 Use the grouping icons next to the view toggle to switch between these.
+
+### Priority
+
+A drag-and-drop ranking view where you order projects by what matters most to your team.
+
+- Drag projects up or down to set your priority order — rank 1 is most important
+- Changes save automatically when you drop a project
+- Your ranking is personal — other users set their own priority independently
+- New projects appear at the bottom of the list with a "new" indicator until you position them
+
+This helps your team communicate which projects are most valuable, so the development team can factor your priorities into their planning.
+
+> **View-only members** can see the ranking but cannot reorder projects.
 
 ## Project cards
 

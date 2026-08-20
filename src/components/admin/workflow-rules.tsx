@@ -28,6 +28,7 @@ interface WorkflowRule {
   trigger_type: WorkflowTriggerType;
   trigger_label_id: string;
   trigger_from_label_id: string | null;
+  condition_state_ids: string[] | null;
   action_type: WorkflowActionType;
   action_config: Record<string, unknown>;
   created_at: string;
@@ -61,6 +62,7 @@ export function WorkflowRules({ hubId, mappingId, teamId, visibleLabelIds }: Wor
   const [triggerLabelId, setTriggerLabelId] = useState("");
   const [triggerFromLabelId, setTriggerFromLabelId] = useState("");
   const [actionType] = useState<WorkflowActionType>("set_status");
+  const [conditionStateIds, setConditionStateIds] = useState<string[]>([]);
   const [targetStateId, setTargetStateId] = useState("");
 
   const fetchRules = useCallback(async () => {
@@ -115,6 +117,7 @@ export function WorkflowRules({ hubId, mappingId, teamId, visibleLabelIds }: Wor
     setTriggerType("label_added");
     setTriggerLabelId("");
     setTriggerFromLabelId("");
+    setConditionStateIds([]);
     setTargetStateId("");
     setEditingRule(null);
     setShowForm(false);
@@ -131,6 +134,7 @@ export function WorkflowRules({ hubId, mappingId, teamId, visibleLabelIds }: Wor
     setTriggerType(rule.trigger_type);
     setTriggerLabelId(rule.trigger_label_id);
     setTriggerFromLabelId(rule.trigger_from_label_id ?? "");
+    setConditionStateIds(rule.condition_state_ids ?? []);
     setTargetStateId((rule.action_config.stateId as string) ?? "");
     setShowForm(true);
     fetchOptions();
@@ -155,6 +159,7 @@ export function WorkflowRules({ hubId, mappingId, teamId, visibleLabelIds }: Wor
         trigger_label_id: triggerLabelId,
         trigger_from_label_id:
           triggerType === "label_changed" ? triggerFromLabelId : null,
+        condition_state_ids: conditionStateIds.length > 0 ? conditionStateIds : null,
         action_type: actionType,
         action_config: { stateId: targetStateId },
       };
@@ -348,6 +353,61 @@ export function WorkflowRules({ hubId, mappingId, teamId, visibleLabelIds }: Wor
             </select>
           </div>
 
+          {/* Status condition (optional) */}
+          <div>
+            <label className="block text-xs text-muted-foreground mb-1">
+              Only when issue is in status
+              <span className="text-muted-foreground/60 ml-1">(optional)</span>
+            </label>
+            <div className="flex flex-wrap gap-1.5 p-2 border border-border rounded-md bg-background min-h-[36px]">
+              {conditionStateIds.length === 0 && (
+                <span className="text-xs text-muted-foreground/50 py-0.5">
+                  Any status
+                </span>
+              )}
+              {conditionStateIds.map((stateId) => {
+                const state = states.find((s) => s.id === stateId);
+                return (
+                  <span
+                    key={stateId}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-accent text-accent-foreground"
+                  >
+                    {state?.name ?? stateId.slice(0, 8) + "..."}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setConditionStateIds((prev) =>
+                          prev.filter((id) => id !== stateId)
+                        )
+                      }
+                      className="hover:text-destructive transition-colors"
+                    >
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+            <select
+              value=""
+              onChange={(e) => {
+                if (e.target.value && !conditionStateIds.includes(e.target.value)) {
+                  setConditionStateIds((prev) => [...prev, e.target.value]);
+                }
+              }}
+              className="w-full mt-1 px-2.5 py-1.5 text-sm border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="">Add status condition...</option>
+              {states
+                .filter((s) => !conditionStateIds.includes(s.id))
+                .map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+            </select>
+          </div>
+
           {/* Action: target state */}
           <div>
             <label className="block text-xs text-muted-foreground mb-1">
@@ -418,18 +478,32 @@ function RuleRow({
       ? getLabelName(rule.trigger_label_id)
       : "...";
 
+    let base: string;
     switch (rule.trigger_type) {
       case "label_added":
-        return `"${label}" added`;
+        base = `"${label}" added`;
+        break;
       case "label_removed":
-        return `"${label}" removed`;
+        base = `"${label}" removed`;
+        break;
       case "label_changed": {
         const from = rule.trigger_from_label_id && optionsLoaded
           ? getLabelName(rule.trigger_from_label_id)
           : "...";
-        return `"${from}" → "${label}"`;
+        base = `"${from}" → "${label}"`;
+        break;
       }
     }
+
+    // Append status condition if present
+    if (rule.condition_state_ids && rule.condition_state_ids.length > 0 && optionsLoaded) {
+      const stateNames = rule.condition_state_ids
+        .map((id) => getStateName(id))
+        .join(", ");
+      base += ` (in ${stateNames})`;
+    }
+
+    return base;
   }
 
   function actionDescription(): string {

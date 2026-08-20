@@ -23,9 +23,11 @@ interface ProjectPickerProps {
   label?: string;
   description?: string;
   icon?: React.ReactNode;
+  /** Project IDs to exclude from the list (e.g. overview-only projects) */
+  excludeIds?: string[];
 }
 
-export function ProjectPicker({ teamId, value, onChange, label, description, icon }: ProjectPickerProps) {
+export function ProjectPicker({ teamId, value, onChange, label, description, icon, excludeIds }: ProjectPickerProps) {
   const { data, loading, error, refetch } = useFetch<SyncedProject[]>(
     teamId ? `/api/admin/linear/teams/${teamId}/projects` : null,
     { enabled: !!teamId }
@@ -70,8 +72,10 @@ export function ProjectPicker({ teamId, value, onChange, label, description, ico
       searchPlaceholder="Filter projects..."
     >
       {(filter) => {
+        const excludeSet = new Set(excludeIds ?? []);
         const filtered = projects.filter((p) =>
-          p.name.toLowerCase().includes(filter.toLowerCase())
+          p.name.toLowerCase().includes(filter.toLowerCase()) &&
+          !excludeSet.has(p.linear_id)
         );
 
         if (filtered.length === 0) {

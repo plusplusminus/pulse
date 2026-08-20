@@ -10,6 +10,8 @@ import {
   Settings,
   UserPlus,
   ExternalLink,
+  ListOrdered,
+  BarChart3,
   CheckCircle2,
   Circle,
   MessageSquare,
@@ -173,6 +175,18 @@ export default async function HubDashboardPage({
           icon={<UserPlus className="w-4 h-4" />}
           label="Manage Members"
           description="Invite and manage users"
+        />
+        <QuickAction
+          href={`/admin/hubs/${hub.id}/rankings`}
+          icon={<ListOrdered className="w-4 h-4" />}
+          label="Client Priority"
+          description="View client rankings"
+        />
+        <QuickAction
+          href={`/admin/hubs/${hub.id}/task-rankings`}
+          icon={<BarChart3 className="w-4 h-4" />}
+          label="Task Priority"
+          description="View task rankings by project"
         />
         <QuickAction
           href={`/admin/hubs/${hub.id}/settings`}

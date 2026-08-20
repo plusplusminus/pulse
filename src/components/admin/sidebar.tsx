@@ -25,6 +25,11 @@ export function AdminSidebar() {
   );
   const tokenConnected = tokenStatus?.configured ?? false;
 
+  const { data: oauthStatus } = useFetch<{ envConfigured: boolean; authorized: boolean }>(
+    "/api/admin/workspace/oauth"
+  );
+  const oauthNeedsSetup = oauthStatus?.envConfigured && !oauthStatus?.authorized;
+
   const { data: syncHealth } = useFetch<{ status: string }>(
     "/api/admin/sync/health"
   );
@@ -112,21 +117,33 @@ export function AdminSidebar() {
         )}
       </div>
 
-      {/* Footer actions */}
-      <div className="border-t border-border py-1.5 px-1.5 space-y-0.5 shrink-0">
+      {/* Actions (CTAs) */}
+      <div className="border-t border-border py-1.5 px-1.5 space-y-1 shrink-0">
+        {!collapsed && (
+          <div className="px-2 pb-0.5">
+            <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
+              Quick Actions
+            </span>
+          </div>
+        )}
         <Link
           href="/admin/hubs/new"
           className={cn(
             "flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm transition-colors",
             pathname === "/admin/hubs/new"
-              ? "bg-accent text-foreground"
-              : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+              ? "bg-primary text-primary-foreground"
+              : "bg-primary/10 text-primary hover:bg-primary/15"
           )}
           title={collapsed ? "Create Hub" : undefined}
+          aria-label="Create Hub"
         >
           <Plus className="w-4 h-4 shrink-0" />
           {!collapsed && <span>Create Hub</span>}
         </Link>
+      </div>
+
+      {/* Footer navigation */}
+      <div className="border-t border-border py-1.5 px-1.5 space-y-0.5 shrink-0">
         <Link
           href="/admin/forms"
           className={cn(
@@ -165,19 +182,6 @@ export function AdminSidebar() {
           {!collapsed && <span>Sync Monitor</span>}
         </Link>
         <Link
-          href="/admin/docs"
-          className={cn(
-            "flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm transition-colors",
-            pathname.startsWith("/admin/docs")
-              ? "bg-accent text-foreground"
-              : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
-          )}
-          title={collapsed ? "Docs" : undefined}
-        >
-          <BookOpen className="w-4 h-4 shrink-0" />
-          {!collapsed && <span>Docs</span>}
-        </Link>
-        <Link
           href="/admin/settings"
           className={cn(
             "flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm transition-colors",
@@ -192,11 +196,26 @@ export function AdminSidebar() {
             <span
               className={cn(
                 "absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full border border-sidebar",
-                tokenConnected ? "bg-green-500" : "bg-red-500"
+                !tokenConnected ? "bg-red-500" :
+                oauthNeedsSetup ? "bg-yellow-500" :
+                "bg-green-500"
               )}
             />
           </div>
           {!collapsed && <span>Settings</span>}
+        </Link>
+        <Link
+          href="/admin/docs"
+          className={cn(
+            "flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm transition-colors",
+            pathname.startsWith("/admin/docs")
+              ? "bg-accent text-foreground"
+              : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+          )}
+          title={collapsed ? "Docs" : undefined}
+        >
+          <BookOpen className="w-4 h-4 shrink-0" />
+          {!collapsed && <span>Docs</span>}
         </Link>
       </div>
     </aside>

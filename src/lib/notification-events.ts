@@ -5,9 +5,19 @@ import {
   isProjectVisibleToHub,
   isProjectOverviewOnlyInHub,
   isInitiativeVisibleToHub,
+  hasHiddenLabelInHub,
+  hubIncludesUnassignedIssues,
   type HubInfo,
 } from "@/lib/hub-visibility";
+import { isClientFacing, stripClientPrefix } from "@/lib/hub-read";
 import { processImmediateEmails } from "@/lib/notification-delivery";
+import {
+  resolveMentions,
+  extractMentionTokens,
+  type MentionableMember,
+} from "@/lib/mentions";
+import { pushCommentToLinear } from "@/lib/linear-push";
+import { reactMentionOnComment } from "@/lib/pulse-reaction";
 
 // -- Types -------------------------------------------------------------------
 
@@ -17,7 +27,8 @@ type NotificationEventType =
   | "project_update"
   | "new_issue"
   | "cycle_update"
-  | "initiative_update";
+  | "initiative_update"
+  | "health_update";
 
 type EntityType = "issue" | "comment" | "project" | "cycle" | "initiative";
 
@@ -30,6 +41,7 @@ type EmitParams = {
   actorName: string | null;
   summary: string;
   metadata?: Record<string, unknown>;
+  mentionedUserIds?: string[];
 };
 
 type WebhookPayload = {
@@ -53,6 +65,7 @@ async function emitNotificationEvent(params: EmitParams): Promise<string | null>
       actor_name: params.actorName,
       summary: params.summary,
       metadata: params.metadata ?? {},
+      mentioned_user_ids: params.mentionedUserIds ?? [],
     })
     .select("id")
     .single();
@@ -84,6 +97,10 @@ function extractTeamId(type: string, data: Record<string, unknown>): string | nu
       return team?.id ?? null;
     }
     case "Project": {
+      // Webhook payloads: data.teamIds (string[]).
+      // Initial-sync / reconcile payloads: data.teams ([{ id, name, key }, ...]).
+      const teamIds = data.teamIds as string[] | undefined;
+      if (Array.isArray(teamIds) && teamIds.length > 0) return teamIds[0];
       const teams = data.teams as Array<{ id: string }> | undefined;
       return teams?.[0]?.id ?? null;
     }
@@ -100,6 +117,8 @@ function extractActorName(data: Record<string, unknown>): string | null {
   // For other entities, the actor info is not reliably available.
   const user = data.user as { name?: string } | undefined;
   if (user?.name) return user.name;
+  const creator = data.creator as { name?: string } | undefined;
+  if (creator?.name) return creator.name;
   const assignee = data.assignee as { name?: string } | undefined;
   if (assignee?.name) return assignee.name;
   return null;
@@ -138,13 +157,35 @@ function extractName(data: Record<string, unknown>): string {
   return (data.name as string) ?? (data.title as string) ?? "unknown";
 }
 
+/**
+ * Resolve a Linear workflow-state UUID to its human name by looking at any
+ * synced issue currently in that state. Best-effort: returns null when the
+ * state can't be found (or on any error) so callers can omit it gracefully.
+ */
+async function resolveStateName(stateId: unknown): Promise<string | null> {
+  if (typeof stateId !== "string" || stateId.trim() === "") return null;
+  try {
+    const { data } = await supabaseAdmin
+      .from("synced_issues")
+      .select("state_name")
+      .eq("data->state->>id", stateId)
+      .limit(1)
+      .maybeSingle();
+    const name = (data as { state_name?: string } | null)?.state_name;
+    return name && name.trim() !== "" ? name : null;
+  } catch (error) {
+    console.error("resolveStateName: lookup failed:", error);
+    return null;
+  }
+}
+
 // -- Summary generation ------------------------------------------------------
 
-function generateIssueSummary(
+async function generateIssueSummary(
   action: string,
   data: Record<string, unknown>,
   updatedFrom?: Record<string, unknown>
-): { eventType: NotificationEventType; summary: string; metadata: Record<string, unknown> } | null {
+): Promise<{ eventType: NotificationEventType; summary: string; metadata: Record<string, unknown> } | null> {
   const identifier = extractIdentifier(data);
   const title = (data.title as string) ?? "";
 
@@ -152,7 +193,7 @@ function generateIssueSummary(
     return {
       eventType: "new_issue",
       summary: `New issue ${identifier}: ${title}`,
-      metadata: { title },
+      metadata: {},
     };
   }
 
@@ -168,19 +209,19 @@ function generateIssueSummary(
   if (!updatedFrom || Object.keys(updatedFrom).length === 0) return null;
 
   // Status change
-  const oldState = updatedFrom.stateId ?? updatedFrom.state;
-  if (oldState !== undefined) {
+  const oldStateId = updatedFrom.stateId ?? updatedFrom.state;
+  if (oldStateId !== undefined) {
     const newStateName = (data.state as { name?: string })?.name ?? "unknown";
-    // updatedFrom contains the old value for changed fields.
-    // For state changes, Linear sends the old stateId but not the old state name directly.
-    // We can check if there's a labelIds or priorityLabel too.
+    // Linear's webhook only sends the old stateId (a UUID), not the old state
+    // name. Resolve it from synced issues so the email shows a readable status
+    // instead of a raw ID; omit the old status entirely if it can't be resolved.
+    const oldStateName = await resolveStateName(oldStateId);
     return {
       eventType: "status_change",
-      summary: `Issue ${identifier} moved to ${newStateName}`,
+      summary: title ? `${identifier}: ${title}` : `Issue ${identifier}`,
       metadata: {
-        new_state: newStateName,
-        old_state_id: oldState,
-        title,
+        ...(oldStateName ? { old_status: oldStateName } : {}),
+        new_status: newStateName,
       },
     };
   }
@@ -216,16 +257,10 @@ function generateIssueSummary(
     };
   }
 
-  // Title change
+  // Title change (rename) — intentionally not notified. Renames are low-signal
+  // for clients (PULSE-357), so no event is emitted for a pure rename.
   if (updatedFrom.title !== undefined) {
-    return {
-      eventType: "status_change",
-      summary: `Issue ${identifier} renamed to "${title}"`,
-      metadata: {
-        old_title: updatedFrom.title,
-        new_title: title,
-      },
-    };
+    return null;
   }
 
   // Assignee change
@@ -244,26 +279,54 @@ function generateIssueSummary(
   return null;
 }
 
-function generateCommentSummary(
+async function resolveCommentAuthor(data: Record<string, unknown>): Promise<string> {
+  // Linear webhook includes user.name for native Linear users
+  const webhookUserName = (data.user as { name?: string })?.name;
+  if (webhookUserName) return webhookUserName;
+
+  // For createAsUser comments (Pulse client users), the webhook user
+  // is the API app — not the actual author. Look up from hub_comments.
+  const commentId = data.id as string | undefined;
+  if (commentId) {
+    const { data: hubComment } = await supabaseAdmin
+      .from("hub_comments")
+      .select("author_name")
+      .eq("linear_comment_id", commentId)
+      .single();
+    if (hubComment?.author_name) return hubComment.author_name;
+  }
+
+  return "Someone";
+}
+
+async function generateCommentSummary(
   action: string,
   data: Record<string, unknown>
-): { eventType: NotificationEventType; summary: string; metadata: Record<string, unknown> } | null {
+): Promise<{ eventType: NotificationEventType; summary: string; metadata: Record<string, unknown>; actorName?: string } | null> {
   if (action === "remove") return null;
 
-  const userName = (data.user as { name?: string })?.name ?? "Someone";
+  const body = (data.body as string) ?? "";
+
+  // Only notify clients about comments with the trigger prefix (heyclient, pulse).
+  // Internal comments must never reach the client notification pipeline.
+  if (!isClientFacing(body)) return null;
+
+  const userName = await resolveCommentAuthor(data);
   const issueIdentifier =
     (data.issue as { identifier?: string })?.identifier ?? "an issue";
-  const body = (data.body as string) ?? "";
-  const excerpt = body.length > 100 ? body.slice(0, 100) + "..." : body;
+  // Include the full comment (no truncation), with the heyclient/pulse trigger
+  // prefix stripped so clients see only the message itself (PULSE-357).
+  const excerpt = stripClientPrefix(body).trim();
 
   if (action === "create") {
     return {
       eventType: "comment",
-      summary: `New comment on ${issueIdentifier} by ${userName}`,
+      summary: `New comment on ${issueIdentifier}`,
+      actorName: userName,
       metadata: {
         excerpt,
-        issue_identifier: issueIdentifier,
-        issue_id: (data.issue as { id?: string })?.id,
+        _issue_id: (data.issue as { id?: string })?.id,
+        _issue_identifier: issueIdentifier,
       },
     };
   }
@@ -271,11 +334,12 @@ function generateCommentSummary(
   // action === "update" — comment edited
   return {
     eventType: "comment",
-    summary: `Comment updated on ${issueIdentifier} by ${userName}`,
+    summary: `Comment updated on ${issueIdentifier}`,
+    actorName: userName,
     metadata: {
       excerpt,
-      issue_identifier: issueIdentifier,
-      issue_id: (data.issue as { id?: string })?.id,
+      _issue_id: (data.issue as { id?: string })?.id,
+      _issue_identifier: issueIdentifier,
     },
   };
 }
@@ -315,14 +379,11 @@ function generateProjectSummary(
     };
   }
 
-  // Health change
-  if (updatedFrom.health !== undefined) {
-    return {
-      eventType: "project_update",
-      summary: `Project ${name} health changed to ${(data.health as string) ?? "unknown"}`,
-      metadata: { name, new_health: data.health, old_health: updatedFrom.health },
-    };
-  }
+  // Health change — intentionally NOT notified (PULSE-363). PULSE-359 hides raw
+  // internal project health from clients (the hub derives health only from
+  // client-facing updates), so emitting on the raw health field would leak
+  // internal state. Client-facing health flows via the ProjectUpdate
+  // (health_update) path instead.
 
   // Name change
   if (updatedFrom.name !== undefined) {
@@ -416,13 +477,8 @@ function generateInitiativeSummary(
     };
   }
 
-  if (updatedFrom.health !== undefined) {
-    return {
-      eventType: "initiative_update",
-      summary: `Initiative ${name} health changed to ${(data.health as string) ?? "unknown"}`,
-      metadata: { name, new_health: data.health, old_health: updatedFrom.health },
-    };
-  }
+  // Initiative health changes are intentionally not notified (PULSE-363),
+  // consistent with project health: raw internal health must not reach clients.
 
   if (updatedFrom.name !== undefined) {
     return {
@@ -435,6 +491,83 @@ function generateInitiativeSummary(
   return null;
 }
 
+// Linear project health values → readable labels.
+const HEALTH_LABELS: Record<string, string> = {
+  onTrack: "On Track",
+  atRisk: "At Risk",
+  offTrack: "Off Track",
+};
+
+/**
+ * Client-facing project health updates (PULSE-363, off PULSE-359's ProjectUpdate
+ * ingestion). Only updates whose body carries the heyclient/pulse trigger notify
+ * — mirroring comments and the PULSE-359 read-time filter, so internal health
+ * updates never reach clients. Broadcast (no per-person mention).
+ */
+async function generateHealthUpdateSummary(
+  action: string,
+  data: Record<string, unknown>,
+  updatedFrom?: Record<string, unknown>
+): Promise<{ eventType: NotificationEventType; summary: string; metadata: Record<string, unknown>; actorName?: string } | null> {
+  if (action === "remove") return null;
+
+  const body = (data.body as string) ?? "";
+  if (!isClientFacing(body)) return null;
+
+  // On edits, only notify when the update's content actually changed (body or
+  // health) — avoids re-notifying on trivial metadata edits. When updatedFrom is
+  // absent we can't tell what changed, so we notify; this also covers an internal
+  // update later edited to add the heyclient/pulse prefix (that's a body change).
+  if (
+    action === "update" &&
+    updatedFrom &&
+    Object.keys(updatedFrom).length > 0 &&
+    updatedFrom.body === undefined &&
+    updatedFrom.health === undefined
+  ) {
+    return null;
+  }
+
+  const projectId =
+    (data.project as { id?: string })?.id ?? (data.projectId as string) ?? "";
+
+  // The webhook payload carries only the project id, so resolve the name (for the
+  // summary) and a team key (for the deep link) from synced data, best-effort.
+  let projectName = "a project";
+  let teamKey: string | undefined;
+  if (projectId) {
+    const { data: rows } = await supabaseAdmin
+      .from("synced_projects")
+      .select("name, data")
+      .eq("linear_id", projectId)
+      .limit(1);
+    const row = rows?.[0] as
+      | { name?: string; data?: Record<string, unknown> }
+      | undefined;
+    if (row?.name) projectName = row.name;
+    const teams = (row?.data as { teams?: unknown } | undefined)?.teams;
+    const teamList = Array.isArray(teams)
+      ? (teams as Array<{ key?: string }>)
+      : ((teams as { nodes?: Array<{ key?: string }> } | undefined)?.nodes ?? []);
+    if (teamList[0]?.key) teamKey = teamList[0].key;
+  }
+
+  const healthLabel = HEALTH_LABELS[(data.health as string) ?? ""];
+  const excerpt = stripClientPrefix(body).trim();
+
+  return {
+    eventType: "health_update",
+    summary: `Project update — ${projectName}`,
+    actorName: (data.user as { name?: string })?.name,
+    metadata: {
+      project: projectName,
+      ...(healthLabel ? { health: healthLabel } : {}),
+      ...(excerpt ? { excerpt } : {}),
+      ...(teamKey ? { team_key: teamKey } : {}),
+    },
+  };
+}
+
 // -- Entity type mapping -----------------------------------------------------
 
 function webhookTypeToEntityType(type: string): EntityType | null {
@@ -444,6 +577,7 @@ function webhookTypeToEntityType(type: string): EntityType | null {
     case "Project": return "project";
     case "Cycle": return "cycle";
     case "Initiative": return "initiative";
+    case "ProjectUpdate": return "project";
     default: return null;
   }
 }
@@ -460,38 +594,124 @@ async function resolveTargetHubs(
     return getHubsForTeam(teamId);
   }
 
-  // Org-level: Initiatives go to all active hubs (filtered by visibility below)
-  if (type === "Initiative") {
+  // Org-level: Initiatives and project health updates go to all active hubs
+  // (filtered by visibility below). ProjectUpdate payloads don't carry a team,
+  // and projects can span teams, so we target by per-hub project visibility.
+  if (type === "Initiative" || type === "ProjectUpdate") {
     return getAllActiveHubs();
   }
 
   return [];
 }
 
+async function resolveIssueLabelIds(
+  type: string,
+  data: Record<string, unknown>
+): Promise<string[]> {
+  if (type === "Issue") {
+    const ids = data.labelIds as string[] | undefined;
+    if (Array.isArray(ids)) return ids;
+    const labels = data.labels as Array<{ id: string }> | undefined;
+    if (Array.isArray(labels)) return labels.map((l) => l.id).filter(Boolean);
+    return [];
+  }
+  if (type === "Comment") {
+    const issueId = (data.issue as { id?: string })?.id;
+    if (!issueId) return [];
+    const { data: row } = await supabaseAdmin
+      .from("synced_issues")
+      .select("data")
+      .eq("linear_id", issueId)
+      .maybeSingle();
+    const issueData = (row?.data as Record<string, unknown> | null) ?? null;
+    if (!issueData) return [];
+    const labels = issueData.labels as Array<{ id: string }> | undefined;
+    if (Array.isArray(labels)) return labels.map((l) => l.id).filter(Boolean);
+    const ids = issueData.labelIds as string[] | undefined;
+    if (Array.isArray(ids)) return ids;
+    return [];
+  }
+  return [];
+}
+
+/**
+ * Resolve the Linear project id of the issue underlying an event. For Issue
+ * events the webhook payload carries the project; for Comment events Linear's
+ * payload often omits the parent issue's project, so we fall back to the synced
+ * issue row. Returns null when the issue genuinely has no project — the caller
+ * treats that as "unassigned" rather than guessing.
+ */
+async function resolveIssueProjectId(
+  type: string,
+  data: Record<string, unknown>
+): Promise<string | null> {
+  if (type === "Issue") {
+    const fromPayload =
+      (data.project as { id?: string } | undefined)?.id ??
+      (data.projectId as string | undefined);
+    if (fromPayload) return fromPayload;
+    return lookupSyncedIssueProjectId(data.id as string | undefined);
+  }
+  if (type === "Comment") {
+    const issue = data.issue as { id?: string; project?: { id?: string } } | undefined;
+    if (issue?.project?.id) return issue.project.id;
+    return lookupSyncedIssueProjectId(issue?.id);
+  }
+  return null;
+}
+
+async function lookupSyncedIssueProjectId(
+  issueLinearId: string | undefined
+): Promise<string | null> {
+  if (!issueLinearId) return null;
+  const { data: row } = await supabaseAdmin
+    .from("synced_issues")
+    .select("project_id")
+    .eq("linear_id", issueLinearId)
+    .maybeSingle();
+  return (row?.project_id as string | null) ?? null;
+}
+
 async function filterHubsByVisibility(
   hubs: HubInfo[],
   type: string,
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
+  teamId: string | null
 ): Promise<HubInfo[]> {
   // For issues and comments, skip notifications when the project is overview-only
+  // or when the issue carries a hidden label for the hub's team mapping.
   if (type === "Issue" || type === "Comment") {
-    const projectId = type === "Issue"
-      ? (data.project as { id?: string })?.id ?? (data.projectId as string)
-      : (data.issue as { project?: { id?: string } })?.project?.id;
+    const projectId = await resolveIssueProjectId(type, data);
 
-    if (projectId) {
-      const results = await Promise.all(
-        hubs.map(async (hub) => {
+    // Resolve the label IDs on the underlying issue. For Issue events the
+    // labelIds are on the webhook payload; for Comment events we must look up
+    // the parent issue from synced_issues since Linear's comment webhook does
+    // not include the parent's labels.
+    const labelIds = await resolveIssueLabelIds(type, data);
+
+    const results = await Promise.all(
+      hubs.map(async (hub) => {
+        if (projectId) {
           const visible = await isProjectVisibleToHub(hub.id, projectId);
           if (!visible) return { hub, include: false };
           const overviewOnly = await isProjectOverviewOnlyInHub(hub.id, projectId);
-          return { hub, include: !overviewOnly };
-        })
-      );
-      return results.filter((r) => r.include).map((r) => r.hub);
-    }
-    // No project — visible to all team-mapped hubs
-    return hubs;
+          if (overviewOnly) return { hub, include: false };
+        } else {
+          // Issue isn't linked to any project. The Tasks tab only surfaces
+          // project-less issues when the hub opts in via include_unassigned_issues,
+          // so activity/notifications must do the same — otherwise an unscoped
+          // issue leaks to every hub on the team (PULSE-370).
+          const includeUnassigned = await hubIncludesUnassignedIssues(hub.id);
+          if (!includeUnassigned) return { hub, include: false };
+        }
+        if (teamId && labelIds.length > 0) {
+          const hidden = await hasHiddenLabelInHub(hub.id, teamId, labelIds);
+          if (hidden) return { hub, include: false };
+        }
+        return { hub, include: true };
+      })
+    );
+    return results.filter((r) => r.include).map((r) => r.hub);
   }
 
   if (type === "Initiative") {
@@ -506,8 +726,67 @@ async function filterHubsByVisibility(
     return results.filter((r) => r.visible).map((r) => r.hub);
   }
 
+  // Project health updates: only hubs that can see the project. Unlike issues/
+  // comments we deliberately do NOT exclude overview-only projects — a health
+  // update is project-overview content (PULSE-359 surfaces derived health in the
+  // overview that overview-only hubs DO see), so suppressing it there would hide
+  // health from exactly the hubs configured to show only the overview.
+  if (type === "ProjectUpdate") {
+    const projectId =
+      (data.project as { id?: string })?.id ?? (data.projectId as string);
+    if (!projectId) return [];
+    const results = await Promise.all(
+      hubs.map(async (hub) => ({
+        hub,
+        visible: await isProjectVisibleToHub(hub.id, projectId),
+      }))
+    );
+    return results.filter((r) => r.visible).map((r) => r.hub);
+  }
+
   // Projects, Cycles — visible to all hubs for that team
   return hubs;
+}
+
+// -- Mention resolution + echo -----------------------------------------------
+
+async function fetchMentionableMembers(hubId: string): Promise<MentionableMember[]> {
+  const { data, error } = await supabaseAdmin
+    .from("hub_members")
+    .select("user_id, email, mention_handle")
+    .eq("hub_id", hubId);
+  if (error) {
+    console.error("fetchMentionableMembers error:", error);
+    return [];
+  }
+  return (data ?? []) as MentionableMember[];
+}
+
+/**
+ * Two independent, fire-and-forget mention signals on the Linear comment:
+ *   - 👤 reaction when ≥1 @mention resolved — "Pulse recognised your @mention"
+ *     (a recognition signal, NOT a delivery guarantee).
+ *   - ⚠️ a top-level internal comment naming any unmatched tokens. It is posted
+ *     top-level (not threaded) on purpose: hub-read surfaces every reply under a
+ *     client-facing comment, so a threaded warning would leak to the client.
+ * Stale ⚠️ comments from an earlier draft are intentionally left as-is.
+ */
+async function postMentionEcho(
+  commentId: string | undefined,
+  issueId: string | undefined,
+  anyResolved: boolean,
+  unresolved: string[]
+): Promise<void> {
+  if (anyResolved && commentId) {
+    void reactMentionOnComment(commentId);
+  }
+  if (unresolved.length > 0 && issueId) {
+    const tokens = unresolved.map((t) => `@${t}`).join(", ");
+    void pushCommentToLinear(
+      issueId,
+      `⚠️ Pulse couldn't match ${tokens} to a hub member — notified everyone instead.`
+    ).catch((err) => console.error("postMentionEcho ⚠️ failed:", err));
+  }
 }
 
 // -- Main entry point --------------------------------------------------------
@@ -529,14 +808,14 @@ export async function emitNotificationEventsForWebhook(
     if (!entityType) return;
 
     // Generate summary based on entity type
-    let result: { eventType: NotificationEventType; summary: string; metadata: Record<string, unknown> } | null = null;
+    let result: { eventType: NotificationEventType; summary: string; metadata: Record<string, unknown>; actorName?: string } | null = null;
 
     switch (type) {
       case "Issue":
-        result = generateIssueSummary(action, data, updatedFrom);
+        result = await generateIssueSummary(action, data, updatedFrom);
         break;
       case "Comment":
-        result = generateCommentSummary(action, data);
+        result = await generateCommentSummary(action, data);
         break;
       case "Project":
         result = generateProjectSummary(action, data, updatedFrom);
@@ -547,15 +826,36 @@ export async function emitNotificationEventsForWebhook(
       case "Initiative":
         result = generateInitiativeSummary(action, data, updatedFrom);
         break;
+      case "ProjectUpdate":
+        result = await generateHealthUpdateSummary(action, data, updatedFrom);
+        break;
     }
 
     // Skip if no meaningful event to emit
     if (!result) return;
 
     const teamId = extractTeamId(type, data);
-    const teamKey = extractTeamKey(type, data);
-    const entityId = (data.id as string) ?? "unknown";
-    const actorName = extractActorName(data);
+    let teamKey = extractTeamKey(type, data);
+    // Project webhook payloads only include teamIds (UUIDs, no key). Resolve
+    // the key from synced_teams so downstream deep-links have the team prefix.
+    if (!teamKey && teamId) {
+      const { data: team } = await supabaseAdmin
+        .from("synced_teams")
+        .select("key")
+        .eq("linear_id", teamId)
+        .maybeSingle();
+      teamKey = team?.key ?? null;
+    }
+    // For health updates the meaningful entity is the project (so deep links
+    // target the project page), not the ProjectUpdate row itself.
+    const entityId =
+      type === "ProjectUpdate"
+        ? ((data.project as { id?: string })?.id ??
+          (data.projectId as string) ??
+          (data.id as string) ??
+          "unknown")
+        : ((data.id as string) ?? "unknown");
+    const actorName = result.actorName ?? extractActorName(data);
 
     // Enrich metadata with team_key for deep linking in UI
     const metadata: Record<string, unknown> = {
@@ -567,8 +867,48 @@ export async function emitNotificationEventsForWebhook(
     const allHubs = await resolveTargetHubs(type, data, teamId);
     if (allHubs.length === 0) return;
 
-    const visibleHubs = await filterHubsByVisibility(allHubs, type, data);
+    const visibleHubs = await filterHubsByVisibility(allHubs, type, data, teamId);
     if (visibleHubs.length === 0) return;
+
+    // For client-facing comments, resolve @mentions against each hub's members
+    // so the delivery layer can honour "only notify me when mentioned". Resolve
+    // once across the union of members, then stamp the per-hub subset below.
+    const mentionByHub = new Map<string, string[]>();
+    let echoAnyResolved = false;
+    let echoUnresolved: string[] = [];
+    let hasMentionTokens = false;
+    if (type === "Comment") {
+      const body = (data.body as string) ?? "";
+      if (extractMentionTokens(body).length > 0) {
+        hasMentionTokens = true;
+        // Resolve mentions PER hub — members (and therefore name collisions)
+        // differ between hubs, and fail-open must be decided against the hub the
+        // notification is scoped to, not a global union.
+        const perHub = await Promise.all(
+          visibleHubs.map(async (h) => ({
+            hub: h,
+            members: await fetchMentionableMembers(h.id),
+          }))
+        );
+        const unresolvedTokens = new Set<string>();
+        for (const { hub, members } of perHub) {
+          const res = resolveMentions(body, members);
+          if (res.mentionedUserIds.length > 0) echoAnyResolved = true;
+          if (res.unresolved.length > 0) {
+            // Fail-open: an unmatched token broadcasts to every member of this
+            // hub so a 'mentions_only' recipient is never silently skipped.
+            mentionByHub.set(
+              hub.id,
+              members.map((m) => m.user_id)
+            );
+            res.unresolved.forEach((t) => unresolvedTokens.add(t));
+          } else {
+            mentionByHub.set(hub.id, res.mentionedUserIds);
+          }
+        }
+        echoUnresolved = [...unresolvedTokens];
+      }
+    }
 
     // Emit one event per hub
     const eventIds = await Promise.all(
@@ -582,6 +922,7 @@ export async function emitNotificationEventsForWebhook(
           actorName,
           summary: result!.summary,
           metadata,
+          mentionedUserIds: mentionByHub.get(hub.id) ?? [],
         })
       )
     );
@@ -592,6 +933,14 @@ export async function emitNotificationEventsForWebhook(
       if (eventId) {
         void processImmediateEmails(visibleHubs[i].id, eventId, result!.eventType);
       }
+    }
+
+    // Post a one-off echo on the Linear issue confirming who the @mention
+    // reached (or warning when a token didn't match). Internal-only.
+    if (hasMentionTokens) {
+      const commentId = data.id as string | undefined;
+      const issueId = (data.issue as { id?: string })?.id;
+      void postMentionEcho(commentId, issueId, echoAnyResolved, echoUnresolved);
     }
   } catch (error) {
     console.error("emitNotificationEventsForWebhook: unexpected error:", error);

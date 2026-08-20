@@ -24,6 +24,16 @@ export const POSTHOG_EVENTS = {
   // Hub — Voting
   vote_cast: 'vote_cast',
 
+  // Hub — Priority Ranking (Projects)
+  ranking_viewed: 'ranking_viewed',
+  ranking_updated: 'ranking_updated',
+  rice_score_updated: 'rice_score_updated',
+
+  // Hub — Priority Ranking (Tasks)
+  task_ranking_viewed: 'task_ranking_viewed',
+  task_ranking_updated: 'task_ranking_updated',
+  task_rice_score_updated: 'task_rice_score_updated',
+
   // Hub — Navigation
   tab_switched: 'tab_switched',
 

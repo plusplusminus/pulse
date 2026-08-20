@@ -26,7 +26,9 @@ export default async function HubSettingsPage({
     visible_label_ids: string[];
     hidden_label_ids: string[];
     auto_include_projects: boolean;
+    include_unassigned_issues: boolean;
     overview_only_project_ids: string[];
+    task_priority_project_ids: string[];
     is_active: boolean;
   }>;
 
@@ -38,7 +40,6 @@ export default async function HubSettingsPage({
           name: hub.name,
           slug: hub.slug,
           is_active: hub.is_active,
-          request_forms_enabled: hub.request_forms_enabled ?? false,
         }}
         mappings={mappings}
       />

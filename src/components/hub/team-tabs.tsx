@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { captureEvent } from "@/lib/posthog-client";
@@ -8,19 +9,22 @@ import {
   Target,
   Flag,
   Calendar,
-  CircleDot,
   IterationCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { CycleCardPills } from "./cycle-card-pills";
 import { ProjectIssueList } from "./project-issue-list";
 import { ActivityFeed } from "./activity-feed";
+import { IssueDetailPanel } from "./issue-detail-panel";
+import { useCanInteract } from "@/hooks/use-can-interact";
 import { RoadmapView } from "./roadmap-view";
+import { EpicsView } from "./epics-view";
 
 type Tab = "issues" | "projects" | "roadmap" | "cycles" | "initiatives" | "milestones" | "activity";
 
 const TABS: { key: Tab; label: string }[] = [
-  { key: "issues", label: "Issues" },
-  { key: "projects", label: "Projects" },
+  { key: "issues", label: "Tasks" },
+  { key: "projects", label: "Epics" },
   { key: "roadmap", label: "Roadmap" },
   { key: "cycles", label: "Cycles" },
   { key: "initiatives", label: "Initiatives" },
@@ -73,6 +77,8 @@ type CycleDetail = {
   isCurrent: boolean;
   isUpcoming: boolean;
   stats?: { total: number; completed: number };
+  documents: Array<{ id: string; title: string; content?: string; slugId: string; icon?: string; color?: string; updatedAt: string }>;
+  links: Array<{ id: string; label: string; url: string; createdAt: string }>;
 };
 
 type Issue = {
@@ -97,6 +103,7 @@ export function TeamTabs({
   cycles,
   cycleDetails,
   projects,
+  overviewOnlyProjectIds = [],
   initiatives,
   milestones,
   hubSlug,
@@ -110,6 +117,7 @@ export function TeamTabs({
   cycles?: Array<{ id: string; name: string; number: number }>;
   cycleDetails?: CycleDetail[];
   projects: Project[];
+  overviewOnlyProjectIds?: string[];
   initiatives: Initiative[];
   milestones: Milestone[];
   hubSlug: string;
@@ -120,6 +128,12 @@ export function TeamTabs({
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
+
+  const overviewOnlySet = useMemo(() => new Set(overviewOnlyProjectIds), [overviewOnlyProjectIds]);
+  const visibleProjects = useMemo(
+    () => projects.filter((p) => !overviewOnlySet.has(p.id)),
+    [projects, overviewOnlySet]
+  );
 
   const requestedTab = (searchParams.get("tab") as Tab) || "issues";
   const activeTab = requestedTab === "issues" && issues.length === 0 ? "projects" : requestedTab;
@@ -146,6 +160,8 @@ export function TeamTabs({
       params.delete("rs");
       params.delete("rp");
       params.delete("rl");
+      // Clear epics-specific params when leaving epics tab
+      params.delete("epicsView");
     }
     const qs = params.toString();
     router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
@@ -159,7 +175,7 @@ export function TeamTabs({
           if (tab.key === "issues") return issues.length > 0;
           if (tab.key === "activity") return true;
           if (tab.key === "projects") return projects.length > 0;
-          if (tab.key === "roadmap") return projects.length > 0;
+          if (tab.key === "roadmap") return visibleProjects.length > 0;
           if (tab.key === "cycles") return (cycleDetails?.length ?? 0) > 0;
           if (tab.key === "initiatives") return initiatives.length > 0;
           if (tab.key === "milestones") return milestones.length > 0;
@@ -172,7 +188,7 @@ export function TeamTabs({
               : tab.key === "projects"
                 ? projects.length
                 : tab.key === "roadmap"
-                  ? projects.length
+                  ? visibleProjects.length
                   : tab.key === "cycles"
                     ? (cycleDetails?.length ?? 0)
                     : tab.key === "initiatives"
@@ -221,7 +237,7 @@ export function TeamTabs({
           states={states}
           labels={labels}
           cycles={cycles}
-          projects={projects.map((p) => ({
+          projects={visibleProjects.map((p) => ({
             id: p.id,
             name: p.name,
             color: p.color,
@@ -234,31 +250,17 @@ export function TeamTabs({
       )}
 
       {activeTab === "projects" && (
-        <div className="p-6 max-w-4xl overflow-y-auto">
-          {projects.length === 0 ? (
-            <EmptySection message="No projects visible for this team" />
-          ) : (
-            <div className="space-y-2">
-              {projects.map((project) => (
-                <ProjectCard
-                  key={project.id}
-                  project={project}
-                  href={`/hub/${hubSlug}/${teamKey}/projects/${project.id}`}
-                />
-              ))}
-            </div>
-          )}
-        </div>
+        <EpicsView projects={projects} hubSlug={hubSlug} teamKey={teamKey} />
       )}
 
       {activeTab === "roadmap" && (
-        <RoadmapView projects={projects} />
+        <RoadmapView projects={visibleProjects} />
       )}
 
       {activeTab === "cycles" && (
         <div className="p-6 max-w-4xl overflow-y-auto">
           {!cycleDetails || cycleDetails.length === 0 ? (
-            <EmptySection message="This team doesn't use cycles" />
+            <EmptySection message="This project doesn't use cycles" />
           ) : (
             <CyclesTabContent
               cycles={cycleDetails}
@@ -272,7 +274,7 @@ export function TeamTabs({
       {activeTab === "initiatives" && (
         <div className="p-6 max-w-4xl overflow-y-auto">
           {initiatives.length === 0 ? (
-            <EmptySection message="No initiatives linked to this team" />
+            <EmptySection message="No initiatives linked to this project" />
           ) : (
             <div className="space-y-2">
               {initiatives.map((init) => (
@@ -286,7 +288,7 @@ export function TeamTabs({
       {activeTab === "milestones" && (
         <div className="p-6 max-w-4xl overflow-y-auto">
           {milestones.length === 0 ? (
-            <EmptySection message="No milestones set on visible projects" />
+            <EmptySection message="No milestones set on visible epics" />
           ) : (
             <div className="space-y-1.5">
               {milestones.map((m, i) => (
@@ -298,11 +300,53 @@ export function TeamTabs({
       )}
 
       {activeTab === "activity" && (
-        <div className="p-6 max-w-4xl overflow-y-auto">
-          <ActivityFeed hubId={hubId} hubSlug={hubSlug} teamId={teamId} />
-        </div>
+        <>
+          {/* Top padding lives on the inner wrapper, not the scroll container —
+              sticky day headings stick at the scrollport's content-box top, so
+              container padding would leave a see-through gap below the tab bar
+              (PULSE-310). */}
+          <div className="px-6 pb-6 max-w-4xl overflow-y-auto">
+            <div className="pt-6">
+              <ActivityFeed hubId={hubId} hubSlug={hubSlug} teamId={teamId} />
+            </div>
+          </div>
+          <ActivityIssueDetail hubId={hubId} />
+        </>
       )}
     </div>
+  );
+}
+
+// Mounted only while the Activity tab is active. Reads `?issue=` from the URL
+// and renders the issue panel in place, so clicking an activity item keeps the
+// Activity tab active instead of bouncing the user to the Tasks tab.
+function ActivityIssueDetail({ hubId }: { hubId: string }) {
+  const canInteract = useCanInteract();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  // Pass the URL issue id explicitly as the `issueId` prop (rather than letting
+  // the panel fall back to reading it from the URL). The panel's internal
+  // `closing` state is only reset by a useEffect that watches the `issueId`
+  // prop flipping truthy — without this, clicking a second activity item after
+  // closing the first would leave the panel stuck closed.
+  const urlIssueId = searchParams.get("issue");
+
+  const handleClose = () => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("issue");
+    const qs = params.toString();
+    router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+  };
+
+  return (
+    <IssueDetailPanel
+      issueId={urlIssueId}
+      hubId={hubId}
+      isViewOnly={!canInteract}
+      onClose={handleClose}
+    />
   );
 }
 
@@ -313,87 +357,6 @@ function EmptySection({ message }: { message: string }) {
     <div className="border border-border rounded-lg p-6 bg-card text-center">
       <p className="text-xs text-muted-foreground">{message}</p>
     </div>
-  );
-}
-
-function ProjectCard({
-  project,
-  href,
-}: {
-  project: {
-    id: string;
-    name: string;
-    color?: string;
-    progress: number;
-    status: { name: string; color: string; type: string };
-    targetDate?: string;
-  };
-  href: string;
-}) {
-  const progressPct = Math.round(project.progress * 100);
-
-  return (
-    <Link
-      href={href}
-      className="flex items-center gap-3 border border-border rounded-lg px-4 py-3 bg-card hover:bg-accent/50 transition-colors group"
-    >
-      <div
-        className="w-2.5 h-2.5 rounded-full shrink-0"
-        style={{
-          backgroundColor:
-            project.color ||
-            project.status.color ||
-            "var(--muted-foreground)",
-        }}
-      />
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium group-hover:text-primary transition-colors truncate">
-          {project.name}
-        </p>
-        <StatusBadge status={project.status} />
-      </div>
-      <div className="flex items-center gap-2 shrink-0">
-        <div className="w-20 h-1.5 rounded-full bg-muted overflow-hidden">
-          <div
-            className="h-full rounded-full transition-all"
-            style={{
-              width: `${progressPct}%`,
-              backgroundColor:
-                project.color ||
-                project.status.color ||
-                "var(--primary)",
-            }}
-          />
-        </div>
-        <span className="text-[10px] tabular-nums text-muted-foreground w-7 text-right">
-          {progressPct}%
-        </span>
-      </div>
-      {project.targetDate && (
-        <div className="flex items-center gap-1 text-muted-foreground shrink-0">
-          <Calendar className="w-3 h-3" />
-          <span className="text-[10px] tabular-nums">
-            {formatDate(project.targetDate)}
-          </span>
-        </div>
-      )}
-    </Link>
-  );
-}
-
-function StatusBadge({
-  status,
-}: {
-  status: { name: string; color: string; type: string };
-}) {
-  return (
-    <span className="inline-flex items-center gap-1 mt-0.5">
-      <CircleDot
-        className="w-3 h-3"
-        style={{ color: status.color || "var(--muted-foreground)" }}
-      />
-      <span className="text-[10px] text-muted-foreground">{status.name}</span>
-    </span>
   );
 }
 
@@ -417,7 +380,7 @@ function InitiativeCard({
       <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
         <span>
           {initiative.projects.length}{" "}
-          {initiative.projects.length === 1 ? "project" : "projects"}
+          {initiative.projects.length === 1 ? "epic" : "epics"}
         </span>
         {initiative.targetDate && (
           <span className="flex items-center gap-1">
@@ -524,70 +487,81 @@ function CycleCard({
       ? `${formatDate(cycle.startsAt)} – ${formatDate(cycle.endsAt)}`
       : null;
 
+  const hasPills = cycle.documents.length > 0 || cycle.links.length > 0;
+
   return (
-    <Link
-      href={href}
+    <div
       className={cn(
-        "flex items-center gap-3 border rounded-lg px-4 py-3 bg-card hover:bg-accent/50 transition-colors group",
+        "border rounded-lg bg-card transition-colors",
         cycle.isCurrent
           ? "border-l-2 border-l-primary/60 border-t-border border-r-border border-b-border bg-primary/[0.02]"
           : "border-border"
       )}
     >
-      <IterationCw
-        className={cn(
-          "w-3.5 h-3.5 shrink-0",
-          cycle.isCurrent ? "text-primary/70" : "text-muted-foreground"
-        )}
-      />
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <p className="text-sm font-medium group-hover:text-primary transition-colors truncate">
-            {cycleName}
-          </p>
-          {cycle.isCurrent && (
-            <span className="text-[10px] font-medium text-primary/80 px-1.5 py-0.5 rounded bg-primary/10 shrink-0">
-              Current
-            </span>
+      <Link
+        href={href}
+        className="flex items-center gap-3 px-4 py-3 hover:bg-accent/50 transition-colors rounded-lg group"
+      >
+        <IterationCw
+          className={cn(
+            "w-3.5 h-3.5 shrink-0",
+            cycle.isCurrent ? "text-primary/70" : "text-muted-foreground"
           )}
-          {cycle.isUpcoming && (
-            <span className="text-[10px] font-medium text-muted-foreground px-1.5 py-0.5 rounded bg-muted shrink-0">
-              Upcoming
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-3 mt-0.5">
-          {dateRange && (
-            <span className="text-[10px] text-muted-foreground">
-              {dateRange}
-            </span>
-          )}
-          {total > 0 && (
-            <span className="text-[10px] text-muted-foreground tabular-nums">
-              {completed} / {total} issues
-            </span>
-          )}
-        </div>
-      </div>
-      {total > 0 && (
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="w-20 h-1.5 rounded-full bg-muted overflow-hidden">
-            <div
-              className="h-full rounded-full transition-all"
-              style={{
-                width: `${progressPct}%`,
-                backgroundColor: cycle.isCurrent
-                  ? "var(--primary)"
-                  : "var(--muted-foreground)",
-              }}
-            />
+        />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-medium group-hover:text-primary transition-colors truncate">
+              {cycleName}
+            </p>
+            {cycle.isCurrent && (
+              <span className="text-[10px] font-medium text-primary/80 px-1.5 py-0.5 rounded bg-primary/10 shrink-0">
+                Current
+              </span>
+            )}
+            {cycle.isUpcoming && (
+              <span className="text-[10px] font-medium text-muted-foreground px-1.5 py-0.5 rounded bg-muted shrink-0">
+                Upcoming
+              </span>
+            )}
           </div>
-          <span className="text-[10px] tabular-nums text-muted-foreground w-7 text-right">
-            {progressPct}%
-          </span>
+          <div className="flex items-center gap-3 mt-0.5">
+            {dateRange && (
+              <span className="text-[10px] text-muted-foreground">
+                {dateRange}
+              </span>
+            )}
+            {total > 0 && (
+              <span className="text-[10px] text-muted-foreground tabular-nums">
+                {completed} / {total} tasks completed
+              </span>
+            )}
+          </div>
+        </div>
+        {total > 0 && (
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="w-20 h-1.5 rounded-full bg-muted overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all"
+                style={{
+                  width: `${progressPct}%`,
+                  backgroundColor: cycle.isCurrent
+                    ? "var(--primary)"
+                    : "var(--muted-foreground)",
+                }}
+              />
+            </div>
+            <span className="text-[10px] tabular-nums text-muted-foreground w-7 text-right">
+              {progressPct}%
+            </span>
+          </div>
+        )}
+      </Link>
+      {hasPills && (
+        <div className="px-4 pb-3">
+          <CycleCardPills documents={cycle.documents} links={cycle.links} />
         </div>
       )}
-    </Link>
+    </div>
   );
 }
 

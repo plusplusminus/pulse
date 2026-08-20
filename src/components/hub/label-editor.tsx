@@ -10,6 +10,7 @@ type Label = { id: string; name: string; color: string };
 type WorkflowRule = {
   labelId: string;
   triggerType: string;
+  conditionStateIds?: string[] | null;
   description: string;
 };
 
@@ -27,6 +28,7 @@ export function LabelEditor({
   hubId,
   issueId,
   isViewOnly,
+  issueStateId,
   workflowLabelIds = [],
   workflowRules = [],
   onLabelsChange,
@@ -37,6 +39,7 @@ export function LabelEditor({
   hubId: string;
   issueId: string;
   isViewOnly?: boolean;
+  issueStateId?: string;
   workflowLabelIds?: string[];
   workflowRules?: WorkflowRule[];
   onLabelsChange: (labels: Label[]) => void;
@@ -47,11 +50,20 @@ export function LabelEditor({
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const workflowLabelSet = new Set(workflowLabelIds);
+  // Filter workflow rules by current issue status — only show hints for rules
+  // that would actually fire given the issue's current state
+  const activeRules = workflowRules.filter((rule) => {
+    if (rule.conditionStateIds == null) return true;
+    if (rule.conditionStateIds.length === 0) return false;
+    return issueStateId ? rule.conditionStateIds.includes(issueStateId) : false;
+  });
+
+  const activeWorkflowLabelIds = [...new Set(activeRules.map((r) => r.labelId))];
+  const workflowLabelSet = new Set(activeWorkflowLabelIds);
 
   // Build a map of labelId -> description for tooltips
   const ruleDescriptionMap = new Map<string, string>();
-  for (const rule of workflowRules) {
+  for (const rule of activeRules) {
     // If multiple rules target the same label, join them
     const existing = ruleDescriptionMap.get(rule.labelId);
     if (existing) {

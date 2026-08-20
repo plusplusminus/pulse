@@ -95,6 +95,25 @@ export async function isProjectOverviewOnlyInHub(
 }
 
 /**
+ * Whether the hub opts in to showing issues that aren't linked to any project.
+ * Mirrors `shouldIncludeUnassigned` on the read side (hub-read.ts) so the
+ * notification fan-out and the Tasks tab agree on project-less issues.
+ */
+export async function hubIncludesUnassignedIssues(
+  hubId: string
+): Promise<boolean> {
+  const { data, error } = await supabaseAdmin
+    .from("hub_team_mappings")
+    .select("include_unassigned_issues")
+    .eq("hub_id", hubId)
+    .eq("is_active", true);
+
+  if (error || !data || data.length === 0) return false;
+
+  return data.some((mapping) => mapping.include_unassigned_issues === true);
+}
+
+/**
  * Check if an initiative is visible to a specific hub.
  */
 export async function isInitiativeVisibleToHub(
@@ -116,4 +135,29 @@ export async function isInitiativeVisibleToHub(
   }
 
   return false;
+}
+
+/**
+ * Returns true if an issue carrying any of the given label IDs should be hidden
+ * from the hub, based on the team's `hidden_label_ids` config.
+ */
+export async function hasHiddenLabelInHub(
+  hubId: string,
+  teamId: string,
+  labelIds: string[]
+): Promise<boolean> {
+  if (!labelIds || labelIds.length === 0) return false;
+
+  const { data, error } = await supabaseAdmin
+    .from("hub_team_mappings")
+    .select("hidden_label_ids")
+    .eq("hub_id", hubId)
+    .eq("linear_team_id", teamId)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (error || !data) return false;
+  const hidden = (data.hidden_label_ids as string[] | null) ?? [];
+  if (hidden.length === 0) return false;
+  return labelIds.some((id) => hidden.includes(id));
 }

@@ -1,3 +1,4 @@
+import * as Sentry from "@sentry/nextjs";
 import { supabaseAdmin } from "./supabase";
 
 // -- Types -------------------------------------------------------------------
@@ -42,7 +43,18 @@ export type SyncRunErrorDetail = {
  */
 export async function logSyncEvent(input: SyncEventInput): Promise<void> {
   try {
-    await supabaseAdmin.from("sync_events").insert({
+    Sentry.addBreadcrumb({
+      category: "sync",
+      message: `${input.eventType}.${input.action} → ${input.status}`,
+      level: input.status === "error" ? "error" : "info",
+      data: {
+        entityId: input.entityId,
+        teamId: input.teamId,
+        processingTimeMs: input.processingTimeMs,
+      },
+    });
+
+    const { error } = await supabaseAdmin.from("sync_events").insert({
       event_type: input.eventType,
       action: input.action,
       entity_id: input.entityId,
@@ -52,7 +64,11 @@ export async function logSyncEvent(input: SyncEventInput): Promise<void> {
       processing_time_ms: input.processingTimeMs ?? null,
       payload_summary: input.payloadSummary ?? null,
     });
+    if (error) {
+      console.warn("sync-logger: failed to log event", error);
+    }
   } catch (e) {
+    // Transient network errors (ECONNRESET etc.) — don't escalate to Sentry
     console.warn("sync-logger: failed to log event", e);
   }
 }
@@ -108,7 +124,24 @@ export async function completeSyncRun(opts: {
 
   try {
     const now = Date.now();
-    await supabaseAdmin
+    const durationMs = now - opts.startedAt;
+
+    if (opts.status === "failed") {
+      Sentry.captureMessage("Sync run failed", {
+        level: "error",
+        tags: { area: "sync", "sync.run_id": opts.runId },
+        contexts: {
+          sync_run: {
+            runId: opts.runId,
+            durationMs,
+            errorsCount: opts.errorsCount,
+            errorDetails: opts.errorDetails,
+          },
+        },
+      });
+    }
+
+    const { error } = await supabaseAdmin
       .from("sync_runs")
       .update({
         status: opts.status,
@@ -116,10 +149,15 @@ export async function completeSyncRun(opts: {
         entities_processed: opts.entitiesProcessed ?? {},
         errors_count: opts.errorsCount ?? 0,
         error_details: opts.errorDetails ?? null,
-        duration_ms: now - opts.startedAt,
+        duration_ms: durationMs,
       })
       .eq("id", opts.runId);
+    if (error) {
+      Sentry.captureException(error, { tags: { area: "sync-logger" } });
+      console.warn("sync-logger: failed to complete run", error);
+    }
   } catch (e) {
+    Sentry.captureException(e, { tags: { area: "sync-logger" } });
     console.warn("sync-logger: failed to complete run", e);
   }
 }

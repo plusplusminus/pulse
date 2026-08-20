@@ -29,14 +29,35 @@ type Issue = {
   project?: { id: string; name: string; color?: string };
 };
 
-const STATUS_ORDER: Record<string, number> = {
-  triage: 0,
-  backlog: 1,
-  unstarted: 2,
-  started: 3,
-  completed: 4,
-  cancelled: 5,
+// Status name ordering for columns. Explicit names take priority;
+// anything not listed falls back to type-based ordering.
+const STATUS_NAME_ORDER: Record<string, number> = {
+  "In Progress": 1,
+  "Today": 2,
+  "Blocked": 3,
+  "Todo": 4,
+  "In Review": 5,
+  "Staging Review": 6,
+  "Prod Review": 7,
+  "Awaiting Feedback": 8,
+  "Backlog": 9,
+  "Done": 10,
+  "Cancelled": 11,
+  "Duplicate": 12,
 };
+
+const STATUS_TYPE_ORDER: Record<string, number> = {
+  started: 20,
+  unstarted: 30,
+  backlog: 40,
+  triage: 50,
+  completed: 60,
+  cancelled: 70,
+};
+
+function statusSortOrder(name: string, type?: string): number {
+  return STATUS_NAME_ORDER[name] ?? STATUS_TYPE_ORDER[type ?? ""] ?? 99;
+}
 
 type GroupBy = "status" | "label";
 type Column = {
@@ -96,9 +117,7 @@ export function HubKanban({
     );
 
     columns = Object.entries(grouped).sort(([, a], [, b]) => {
-      const oa = STATUS_ORDER[a.statusType ?? ""] ?? 99;
-      const ob = STATUS_ORDER[b.statusType ?? ""] ?? 99;
-      return oa - ob;
+      return statusSortOrder(a.label, a.statusType) - statusSortOrder(b.label, b.statusType);
     });
   }
 
@@ -111,11 +130,11 @@ export function HubKanban({
   }
 
   return (
-    <div className="flex gap-1 overflow-x-auto pb-4 px-1">
+    <div className="flex gap-1 pb-4 px-1">
       {columns.map(([key, column]) => (
         <div key={key} className="flex-shrink-0 w-80 sm:w-[356px]">
           {/* Column header */}
-          <div className="flex items-center gap-2 p-3 mb-2">
+          <div className="flex items-center gap-2 px-3 pt-3 pb-2 sticky top-0 z-10 bg-background border-b border-border">
             {column.type === "status" ? (
               <StatusIcon type={column.statusType ?? ""} color={column.color} />
             ) : (

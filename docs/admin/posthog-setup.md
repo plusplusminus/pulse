@@ -1,11 +1,11 @@
 # PostHog Setup Guide
 
-Step-by-step guide to configure PostHog for Linear Gratis analytics.
+Step-by-step guide to configure PostHog for Pulse analytics.
 
 ## 1. Create the Project
 
 - Go to [app.posthog.com](https://app.posthog.com) and create a new project
-- Name it **Linear Gratis** (or **PPM Client Hub**)
+- Name it **Pulse**
 - Select **US** region (matches the `https://us.i.posthog.com` host)
 - Copy the **Project API Key** and set it as `NEXT_PUBLIC_POSTHOG_KEY` in your Vercel environment variables
 
@@ -85,7 +85,7 @@ Create a new dashboard at **Dashboards > New dashboard** named "Product Overview
 | Active Hubs | Trends | `$pageview` > unique `hub` groups > last 30 days |
 | Admin vs Client Split | Trends | `$pageview` > unique users > breakdown by `userType` |
 | Top Pages | Trends | `$pageview` > total count > breakdown by `$current_url` |
-| Feature Usage | Trends | Multiple series: `form_submitted`, `comment_created`, `vote_cast`, `issue_viewed` > total count |
+| Feature Usage | Trends | Multiple series: `form_submitted`, `comment_created`, `vote_cast`, `ranking_updated`, `issue_viewed` > total count |
 
 ### Client Engagement Dashboard
 
@@ -95,6 +95,7 @@ Create a new dashboard at **Dashboards > New dashboard** named "Product Overview
 | Comments Created | Trends | `comment_created` > total > last 30 days |
 | Issues Viewed | Trends | `issue_viewed` > unique users > last 30 days |
 | Votes Cast | Trends | `vote_cast` > total > last 30 days |
+| Rankings Updated | Trends | `ranking_updated` > total > last 30 days |
 | Hub Activity Ranking | Trends | `$pageview` > unique users > breakdown by `hub` group |
 | Notification Engagement | Funnel | `notification_clicked` > any action within 5 min |
 
@@ -116,7 +117,7 @@ Actions group related events for cleaner dashboard building.
 
 | Action | Events Included |
 |--------|----------------|
-| Client Engagement | `comment_created`, `form_submitted`, `vote_cast` |
+| Client Engagement | `comment_created`, `form_submitted`, `vote_cast`, `ranking_updated` |
 | Admin Management | `hub_settings_updated`, `member_invited`, `sync_triggered` |
 | Content Viewed | `issue_viewed`, `project_viewed`, `roadmap_viewed` |
 
@@ -163,6 +164,8 @@ All custom events tracked by the application:
 | `notification_clicked` | Client | Notification item clicked |
 | `notification_preferences_updated` | Client | Notification preferences saved |
 | `vote_cast` | Client | Vote button clicked |
+| `ranking_viewed` | Client | Priority ranking tab opened |
+| `ranking_updated` | Client | Project ranking saved after drag |
 | `tab_switched` | Client | Hub or team tab changed |
 | `hub_settings_updated` | Client | Hub settings form saved |
 | `hub_created` | Client | New hub created via wizard |

@@ -354,12 +354,13 @@ function getEventHref(
         return `/hub/${hubSlug}/${teamKey}?issue=${event.entity_id}`;
       }
       return null;
-    case "comment":
-      // Comments link to the parent issue
-      if (meta.issue_id && teamKey) {
-        return `/hub/${hubSlug}/${teamKey}?issue=${meta.issue_id}`;
+    case "comment": {
+      const commentIssueId = meta._issue_id ?? meta.issue_id;
+      if (commentIssueId && teamKey) {
+        return `/hub/${hubSlug}/${teamKey}?issue=${commentIssueId}`;
       }
       return null;
+    }
     case "project":
       if (teamKey) {
         return `/hub/${hubSlug}/${teamKey}/projects/${event.entity_id}`;

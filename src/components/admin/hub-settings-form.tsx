@@ -22,7 +22,9 @@ interface TeamMapping {
   visible_label_ids: string[];
   hidden_label_ids: string[];
   auto_include_projects: boolean;
+  include_unassigned_issues: boolean;
   overview_only_project_ids: string[];
+  task_priority_project_ids: string[];
   is_active: boolean;
 }
 
@@ -32,7 +34,6 @@ interface HubSettingsFormProps {
     name: string;
     slug: string;
     is_active: boolean;
-    request_forms_enabled: boolean;
   };
   mappings: TeamMapping[];
 }
@@ -48,15 +49,11 @@ export function HubSettingsForm({ hub, mappings }: HubSettingsFormProps) {
 
   // General state
   const [name, setName] = useState(hub.name);
-  const [requestFormsEnabled, setRequestFormsEnabled] = useState(hub.request_forms_enabled);
   const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
-    setDirty(
-      name !== hub.name ||
-      requestFormsEnabled !== hub.request_forms_enabled
-    );
-  }, [name, hub.name, requestFormsEnabled, hub.request_forms_enabled]);
+    setDirty(name.trim() !== hub.name);
+  }, [name, hub.name]);
 
   // Warn on navigation with unsaved changes
   useEffect(() => {
@@ -77,7 +74,6 @@ export function HubSettingsForm({ hub, mappings }: HubSettingsFormProps) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             name: name.trim(),
-            request_forms_enabled: requestFormsEnabled,
           }),
         });
         if (!res.ok) {
@@ -92,7 +88,7 @@ export function HubSettingsForm({ hub, mappings }: HubSettingsFormProps) {
         toast.error(e instanceof Error ? e.message : "Failed to save");
       }
     });
-  }, [hub.id, name, requestFormsEnabled, router]);
+  }, [hub.id, name, router]);
 
   const deactivateHub = useCallback(() => {
     if (!confirm(`Are you sure you want to ${hub.is_active ? "deactivate" : "reactivate"} "${hub.name}"?`)) {
@@ -163,33 +159,6 @@ export function HubSettingsForm({ hub, mappings }: HubSettingsFormProps) {
               onChange={(e) => setName(e.target.value)}
               className="w-full px-3 py-2 text-sm border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
             />
-          </div>
-
-          {/* Request forms toggle */}
-          <div className="flex items-center justify-between rounded-lg border border-border p-4">
-            <div>
-              <p className="text-sm font-medium">Customer Request Forms</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Allow hub members to submit requests via Linear&apos;s customer needs.
-              </p>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={requestFormsEnabled}
-              onClick={() => setRequestFormsEnabled(!requestFormsEnabled)}
-              className={cn(
-                "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors",
-                requestFormsEnabled ? "bg-primary" : "bg-muted"
-              )}
-            >
-              <span
-                className={cn(
-                  "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform",
-                  requestFormsEnabled ? "translate-x-4" : "translate-x-0"
-                )}
-              />
-            </button>
           </div>
 
           <div className="flex items-center gap-3">

@@ -171,12 +171,13 @@ Available tabs on each hub's settings page:
 
 | Tab | Controls |
 |-----|----------|
-| General | Hub name, request forms toggle, deactivate/reactivate |
+| General | Hub name |
 | Teams & Scoping | Project visibility, label visibility, workflow rules per team |
 | Forms | Enable/disable global forms, label overrides, confirmation messages |
+| Danger Zone | Deactivate/reactivate hub |
 
-![Hub settings General tab with name field and request forms toggle](screenshots/settings-general.png)
-*General settings — hub name and request forms toggle.*
+![Hub settings General tab with name field](screenshots/settings-general.png)
+*General settings — hub name.*
 
 ### Deactivating a Hub
 
@@ -204,8 +205,31 @@ Automate Linear issue status changes based on label activity. Configured per tea
 
 Currently supports **Set Status** — automatically moves the issue to a target Linear state when the trigger fires.
 
-### Example
+### Status Conditions
+
+Rules can optionally be restricted to only fire when the issue is in a specific status. This lets the same label trigger different actions depending on where the issue is in the workflow.
+
+When creating or editing a rule, the **"Only when issue is in status"** field lets you select one or more statuses. If no statuses are selected, the rule fires unconditionally (any status). If one or more are selected, the rule only fires when the issue's current status matches one of them.
+
+### Examples
+
+**Simple rule (no status condition):**
 
 > When label "Approved" is added → Set status to "In Progress"
 
-Rules only operate on labels in the team's visible labels list. All rule executions are logged for auditability.
+This fires whenever "Approved" is added, regardless of the issue's current status.
+
+**Status-aware rules (two separate rules, same label):**
+
+- When label "Client Approved" is added **and issue is in "Staging Review"** → Set status to "Ready for Release"
+- When label "Client Approved" is added **and issue is in "Prod Review"** → Set status to "Done"
+
+When a client adds "Client Approved" to an issue in Staging Review, it moves to Ready for Release. The same label on an issue in Prod Review moves it to Done.
+
+### How It Works
+
+- Rules only operate on labels in the team's visible labels list
+- When a client adds or removes a label, all matching rules are evaluated
+- Status conditions use OR logic — if multiple statuses are selected, any match will fire the rule
+- Workflow hints in the client hub only show for rules that match the issue's current status
+- All rule executions are logged for auditability (visible in the issue activity timeline)

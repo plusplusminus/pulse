@@ -51,7 +51,6 @@ export async function PATCH(
     const body = (await request.json()) as {
       name?: string;
       is_active?: boolean;
-      request_forms_enabled?: boolean;
     };
 
     const updates: Record<string, unknown> = {};
@@ -72,15 +71,6 @@ export async function PATCH(
         );
       }
       updates.is_active = body.is_active;
-    }
-    if (body.request_forms_enabled !== undefined) {
-      if (typeof body.request_forms_enabled !== "boolean") {
-        return NextResponse.json(
-          { error: "request_forms_enabled must be a boolean" },
-          { status: 400 }
-        );
-      }
-      updates.request_forms_enabled = body.request_forms_enabled;
     }
 
     if (Object.keys(updates).length === 0) {

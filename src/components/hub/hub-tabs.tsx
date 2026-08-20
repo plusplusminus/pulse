@@ -100,9 +100,9 @@ export function HubTabs({
           {teams.length === 0 ? (
             <div className="border border-border rounded-lg p-10 bg-card text-center">
               <Layers className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
-              <p className="text-sm font-medium mb-1">No teams configured</p>
+              <p className="text-sm font-medium mb-1">No projects configured</p>
               <p className="text-xs text-muted-foreground">
-                No teams have been added to this hub yet. Contact your project
+                No projects have been added to this hub yet. Contact your project
                 manager.
               </p>
             </div>
@@ -166,14 +166,14 @@ function TeamCard({
         <div className="flex items-center gap-2 text-muted-foreground">
           <FolderKanban className="w-3.5 h-3.5 shrink-0" />
           <span className="text-xs">
-            {projectCount} {projectCount === 1 ? "project" : "projects"}
+            {projectCount} {projectCount === 1 ? "epic" : "epics"}
           </span>
         </div>
         <div className="flex items-center gap-2 text-muted-foreground">
           <CircleDot className="w-3.5 h-3.5 shrink-0" />
           <span className="text-xs">
             {openIssueCount} open{" "}
-            {openIssueCount === 1 ? "issue" : "issues"}
+            {openIssueCount === 1 ? "task" : "tasks"}
           </span>
         </div>
         {lastActivity && (

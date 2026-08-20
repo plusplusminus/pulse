@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document explains how linear.gratis syncs data from Linear and the rationale behind the architecture. It serves as a reference for all sync-related development.
+This document explains how Pulse syncs data from Linear and the rationale behind the architecture. It serves as a reference for all sync-related development.
 
 ## Problem: Why We Moved Away From Pull-On-Demand
 

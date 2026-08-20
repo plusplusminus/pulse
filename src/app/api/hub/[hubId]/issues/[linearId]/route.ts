@@ -48,6 +48,7 @@ export async function GET(
     let workflowRules: Array<{
       labelId: string;
       triggerType: string;
+      conditionStateIds: string[] | null;
       description: string;
     }> = [];
     try {
@@ -62,11 +63,12 @@ export async function GET(
       if (mapping) {
         const { data: rules } = await supabaseAdmin
           .from("hub_workflow_rules")
-          .select("trigger_label_id, trigger_type, action_type, action_config")
+          .select("trigger_label_id, trigger_type, action_type, action_config, condition_state_ids")
           .eq("mapping_id", mapping.id);
 
         if (rules && rules.length > 0) {
           workflowRules = rules.map((r) => {
+            const conditionStateIds = (r.condition_state_ids as string[] | null) ?? null;
             let description: string;
             switch (r.trigger_type) {
               case "label_added":
@@ -84,6 +86,7 @@ export async function GET(
             return {
               labelId: r.trigger_label_id,
               triggerType: r.trigger_type,
+              conditionStateIds,
               description,
             };
           });
@@ -165,6 +168,9 @@ export async function POST(
     const currentLabels = (issueData.labels as Array<{ id: string }>) ?? [];
     const currentLabelIds = currentLabels.map((l) => l.id);
 
+    // Extract current state for status-aware workflow evaluation
+    const issueState = issueData.state as { id: string; name: string } | undefined;
+
     let newLabelIds: string[];
     if (action === "add") {
       if (currentLabelIds.includes(labelId)) {
@@ -217,7 +223,7 @@ export async function POST(
 
         if (rules && rules.length > 0) {
           const typedRules = rules as HubWorkflowRule[];
-          const context = buildLabelChangeContext(currentLabelIds, newLabelIds);
+          const context = buildLabelChangeContext(currentLabelIds, newLabelIds, issueState);
           const actions = evaluateWorkflowRules(context, typedRules);
 
           if (actions.length > 0) {
@@ -254,7 +260,8 @@ export async function POST(
               linearId,
               workflowResults,
               auth.user.id,
-              typedRules
+              typedRules,
+              issueState
             ).catch((logErr) =>
               console.error("[hub-workflows] Failed to log execution:", logErr)
             );

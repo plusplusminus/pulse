@@ -2,6 +2,7 @@
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { linearImageComponents } from "@/lib/image-proxy";
 
 export function HubDocRenderer({ content }: { content: string }) {
   return (
@@ -22,7 +23,7 @@ export function HubDocRenderer({ content }: { content: string }) {
       prose-img:rounded-lg prose-img:border prose-img:border-border prose-img:shadow-sm prose-img:my-4
       prose-em:text-xs prose-em:text-muted-foreground/70
     ">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={linearImageComponents}>{content}</ReactMarkdown>
     </article>
   );
 }

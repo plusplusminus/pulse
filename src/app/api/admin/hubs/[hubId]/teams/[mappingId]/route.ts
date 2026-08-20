@@ -21,6 +21,8 @@ export async function PATCH(request: Request, { params }: RouteParams) {
       hidden_label_ids?: string[];
       auto_include_projects?: boolean;
       overview_only_project_ids?: string[];
+      task_priority_project_ids?: string[];
+      include_unassigned_issues?: boolean;
       is_active?: boolean;
     };
 
@@ -44,8 +46,54 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     if (body.hidden_label_ids !== undefined) {
       updates.hidden_label_ids = body.hidden_label_ids;
     }
+    // Mutual exclusion: overview-only and task-priority cannot overlap.
+    // Load current mapping once if either field needs cross-validation.
+    const needsCrossValidation =
+      (body.overview_only_project_ids !== undefined && body.task_priority_project_ids === undefined) ||
+      (body.task_priority_project_ids !== undefined && body.overview_only_project_ids === undefined);
+
+    type MappingFields = { overview_only_project_ids: string[]; task_priority_project_ids: string[] };
+    let existingMapping: MappingFields | null = null;
+    if (needsCrossValidation) {
+      const { data, error: fetchError } = await supabaseAdmin
+        .from("hub_team_mappings")
+        .select("overview_only_project_ids, task_priority_project_ids")
+        .eq("id", mappingId)
+        .eq("hub_id", hubId)
+        .single();
+      if (fetchError || !data) {
+        return NextResponse.json(
+          { error: "Team mapping not found" },
+          { status: 404 }
+        );
+      }
+      existingMapping = {
+        overview_only_project_ids: (data.overview_only_project_ids ?? []) as string[],
+        task_priority_project_ids: (data.task_priority_project_ids ?? []) as string[],
+      };
+    }
+
     if (body.overview_only_project_ids !== undefined) {
       updates.overview_only_project_ids = body.overview_only_project_ids;
+      // Auto-clean task priority when overview-only changes (only if not explicitly set)
+      if (body.task_priority_project_ids === undefined) {
+        const currentTaskPriorityIds = existingMapping!.task_priority_project_ids ?? [];
+        const overviewSet = new Set(body.overview_only_project_ids);
+        const filtered = currentTaskPriorityIds.filter((id) => !overviewSet.has(id));
+        if (filtered.length !== currentTaskPriorityIds.length) {
+          updates.task_priority_project_ids = filtered;
+        }
+      }
+    }
+    if (body.task_priority_project_ids !== undefined) {
+      const effectiveOverview = new Set(
+        body.overview_only_project_ids ?? existingMapping!.overview_only_project_ids ?? []
+      );
+      updates.task_priority_project_ids =
+        body.task_priority_project_ids.filter((id) => !effectiveOverview.has(id));
+    }
+    if (body.include_unassigned_issues !== undefined) {
+      updates.include_unassigned_issues = body.include_unassigned_issues;
     }
     if (body.is_active !== undefined) {
       updates.is_active = body.is_active;

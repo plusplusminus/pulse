@@ -1,8 +1,21 @@
 {
+  "redirects": [
+    {
+      "source": "/:path(.*)",
+      "has": [
+        {
+          "type": "host",
+          "value": "clienthub.plusplusminus.co.za"
+        }
+      ],
+      "destination": "https://pulse.plusplusminus.co.za/:path",
+      "permanent": true
+    }
+  ],
   "crons": [
     {
       "path": "/api/sync/reconcile",
-      "schedule": "*/5 * * * *"
+      "schedule": "*/30 * * * *"
     },
     {
       "path": "/api/cron/process-email-queue",
@@ -11,6 +24,10 @@
     {
       "path": "/api/cron/send-digests",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/retry-pushes",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

@@ -62,15 +62,35 @@ type GroupBy = "status" | "label";
 type SortField = "priority" | "dueDate" | "createdAt";
 type SortDir = "asc" | "desc";
 
-// Status type ordering for grouping
-const STATUS_ORDER: Record<string, number> = {
-  triage: 0,
-  backlog: 1,
-  unstarted: 2,
-  started: 3,
-  completed: 4,
-  cancelled: 5,
+// Status name ordering for grouping. Explicit names take priority;
+// anything not listed falls back to type-based ordering.
+const STATUS_NAME_ORDER: Record<string, number> = {
+  "In Progress": 1,
+  "Today": 2,
+  "Blocked": 3,
+  "Todo": 4,
+  "In Review": 5,
+  "Staging Review": 6,
+  "Prod Review": 7,
+  "Awaiting Feedback": 8,
+  "Backlog": 9,
+  "Done": 10,
+  "Cancelled": 11,
+  "Duplicate": 12,
 };
+
+const STATUS_TYPE_ORDER: Record<string, number> = {
+  started: 20,
+  unstarted: 30,
+  backlog: 40,
+  triage: 50,
+  completed: 60,
+  cancelled: 70,
+};
+
+function statusSortOrder(name: string, type?: string): number {
+  return STATUS_NAME_ORDER[name] ?? STATUS_TYPE_ORDER[type ?? ""] ?? 99;
+}
 
 export function ProjectIssueList({
   issues: initialIssues,
@@ -80,19 +100,21 @@ export function ProjectIssueList({
   hubId,
   projectId,
   projects,
+  isCycleView,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   teamId,
 }: {
   issues: Issue[];
   states: Array<{ id: string; name: string; color: string; type: string }>;
   labels: Array<{ id: string; name: string; color: string }>;
-  cycles?: Array<{ id: string; name: string; number: number }>;
+  cycles?: Array<{ id: string; name: string; number: number; startsAt?: string | null; endsAt?: string | null }>;
   hubSlug: string;
   teamKey: string;
   teamId: string;
   projectId?: string;
   hubId: string;
   projects?: ProjectInfo[];
+  isCycleView?: boolean;
 }) {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -100,6 +122,19 @@ export function ProjectIssueList({
   const isViewOnly = !canInteract;
 
   const [issues, setIssues] = useState(initialIssues);
+  const [prevInitialIssues, setPrevInitialIssues] = useState(initialIssues);
+  // Reconcile with fresh server data during render (React's recommended
+  // prop->state sync, no double-render flicker). `useState` only seeds on
+  // mount, and `router.refresh()` (the topbar refresh button + internal
+  // navigation) preserves client state, so without this the list would keep
+  // showing the snapshot from when the tab was first opened even after a sync.
+  // The server is the source of truth, so a new `initialIssues` reference
+  // overwrites any optimistic edits (re-applied on the next server round-trip).
+  if (initialIssues !== prevInitialIssues) {
+    setPrevInitialIssues(initialIssues);
+    setIssues(initialIssues);
+  }
+
   // Parse filters from URL
   const [filters, setFilters] = useState<FilterState>(() => ({
     search: searchParams.get("q") ?? "",
@@ -289,9 +324,7 @@ export function ProjectIssueList({
     }
 
     return Array.from(map.entries()).sort(([, a], [, b]) => {
-      const oa = STATUS_ORDER[a.statusType ?? ""] ?? 1;
-      const ob = STATUS_ORDER[b.statusType ?? ""] ?? 1;
-      return oa - ob;
+      return statusSortOrder(a.label, a.statusType) - statusSortOrder(b.label, b.statusType);
     });
   }, [sorted, groupBy]);
 
@@ -332,7 +365,7 @@ export function ProjectIssueList({
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <input
             type="text"
-            placeholder="Search issues..."
+            placeholder="Search tasks..."
             value={filters.search}
             onChange={(e) => updateFilters({ ...filters, search: e.target.value })}
             className="pl-7 pr-2 py-1 w-40 rounded-md border border-border bg-background text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -377,6 +410,7 @@ export function ProjectIssueList({
           <div className="flex items-center border border-border rounded-md overflow-hidden">
             <button
               onClick={() => changeGroupBy("status")}
+              aria-pressed={groupBy === "status"}
               className={cn(
                 "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
                 groupBy === "status"
@@ -389,6 +423,7 @@ export function ProjectIssueList({
             </button>
             <button
               onClick={() => changeGroupBy("label")}
+              aria-pressed={groupBy === "label"}
               className={cn(
                 "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
                 groupBy === "label"
@@ -406,6 +441,7 @@ export function ProjectIssueList({
         <div className="flex items-center border border-border rounded-md overflow-hidden">
           <button
             onClick={() => changeView("list")}
+            aria-pressed={viewMode === "list"}
             className={cn(
               "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
               viewMode === "list"
@@ -418,6 +454,7 @@ export function ProjectIssueList({
           </button>
           <button
             onClick={() => changeView("kanban")}
+            aria-pressed={viewMode === "kanban"}
             className={cn(
               "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
               viewMode === "kanban"
@@ -484,7 +521,7 @@ export function ProjectIssueList({
               items={projects.map((p) => ({ id: p.id, name: p.name, color: p.color }))}
               selected={filters.projectIds}
               onChange={(next) => updateFilters({ ...filters, projectIds: next })}
-              label="Project"
+              label="Epic"
               icon={<FolderKanban className="w-3 h-3" />}
             />
           )}
@@ -503,7 +540,11 @@ export function ProjectIssueList({
           {/* Cycle filter */}
           {cycles && cycles.length > 0 && (
             <CheckboxFilterDropdown
-              items={cycles.map((c) => ({ id: c.id, name: c.name || `Cycle ${c.number}` }))}
+              items={cycles.map((c) => ({
+                id: c.id,
+                name: c.name || `Cycle ${c.number}`,
+                description: formatCycleDateRange(c.startsAt, c.endsAt),
+              }))}
               selected={filters.cycleIds}
               onChange={(next) => updateFilters({ ...filters, cycleIds: next })}
               label="Cycle"
@@ -515,7 +556,7 @@ export function ProjectIssueList({
 
       {/* Content area */}
       {viewMode === "kanban" ? (
-        <div className="flex-1 overflow-x-auto overflow-y-auto p-4">
+        <div className="flex-1 overflow-x-auto overflow-y-auto px-4 pb-4">
           <HubKanban issues={sorted} groupBy={groupBy} onIssueClick={setSelectedIssueId} />
         </div>
       ) : (
@@ -524,10 +565,12 @@ export function ProjectIssueList({
             <div className="p-10 text-center">
               <p className="text-sm text-muted-foreground">
                 {hasActiveFilters
-                  ? "No issues match the current filters"
-                  : projectId
-                    ? "No issues in this project"
-                    : "No issues in this team"}
+                  ? "No tasks match the current filters"
+                  : isCycleView
+                    ? "No tasks in this cycle"
+                    : projectId
+                      ? "No tasks in this epic"
+                      : "No tasks in this project"}
               </p>
             </div>
           ) : (
@@ -620,7 +663,7 @@ function IssueRow({
       )}
     >
       <StatusIcon type={issue.state.type} color={issue.state.color} />
-      <span className="text-[11px] font-mono text-muted-foreground shrink-0 w-16">
+      <span className="text-[11px] font-mono text-muted-foreground shrink-0 w-24 whitespace-nowrap">
         {issue.identifier}
       </span>
       <span className="text-sm truncate flex-1 min-w-0">{issue.title}</span>
@@ -727,4 +770,14 @@ function priorityLabel(p: number): string {
 function formatShortDate(dateStr: string): string {
   const d = new Date(dateStr);
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function formatCycleDateRange(
+  startsAt?: string | null,
+  endsAt?: string | null
+): string | undefined {
+  if (!startsAt || !endsAt) return undefined;
+  const fmt = (s: string) =>
+    new Date(s).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return `${fmt(startsAt)} – ${fmt(endsAt)}`;
 }

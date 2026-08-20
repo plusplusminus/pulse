@@ -26,19 +26,6 @@ export type Profile = {
   updated_at: string
 }
 
-export type CustomerRequestForm = {
-  id: string
-  user_id: string
-  name: string
-  slug: string
-  project_id: string
-  project_name: string
-  form_title: string
-  description?: string
-  is_active: boolean
-  created_at: string
-  updated_at: string
-}
 
 export type PublicView = {
   id: string
@@ -239,7 +226,9 @@ export type HubTeamMapping = {
   visible_label_ids: string[]
   hidden_label_ids: string[]
   auto_include_projects: boolean
+  include_unassigned_issues: boolean
   overview_only_project_ids: string[]
+  task_priority_project_ids: string[]
   is_active: boolean
   created_at: string
   updated_at: string
@@ -292,6 +281,7 @@ export type HubWorkflowRule = {
   trigger_type: WorkflowTriggerType
   trigger_label_id: string
   trigger_from_label_id: string | null
+  condition_state_ids: string[] | null
   action_type: WorkflowActionType
   action_config: Record<string, unknown>
   created_at: string
@@ -389,7 +379,14 @@ export type FormSubmission = {
   sync_error: string | null
   sync_attempted_at: string | null
   attachment_paths: string[]
+  attachment_metadata: AttachmentMetadata[]
   created_at: string
   updated_at: string
+}
+
+export type AttachmentMetadata = {
+  path: string
+  fileName: string
+  contentType: string
 }
 

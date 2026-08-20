@@ -4,7 +4,7 @@
  */
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "linear-gratis",
+  "name": "pulse",
   "main": ".open-next/worker.js",
   "compatibility_date": "2025-09-17",
   "compatibility_flags": ["nodejs_compat"],
@@ -18,8 +18,8 @@
   },
   "routes": [
     {
-      "pattern": "linear.gratis",
-      "zone_name": "linear.gratis",
+      "pattern": "pulse.plusplusminus.co.za",
+      "zone_name": "plusplusminus.co.za",
       "custom_domain": true,
     },
   ],

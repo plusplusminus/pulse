@@ -4,7 +4,10 @@ import { isPPMAdmin } from "@/lib/ppm-admin";
 import { AdminShell } from "@/components/admin/admin-shell";
 
 export const metadata = {
-  title: "Admin — PPM Client Hub",
+  title: {
+    default: "Admin",
+    template: "%s — Admin | Pulse",
+  },
 };
 
 export default async function AdminLayout({

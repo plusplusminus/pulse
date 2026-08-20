@@ -73,8 +73,8 @@ export default async function AdminDocPage({
           prose-p:text-muted-foreground prose-p:leading-relaxed prose-p:text-sm
           prose-li:text-muted-foreground prose-li:text-sm
           prose-strong:text-foreground prose-strong:font-semibold
-          prose-code:text-xs prose-code:bg-muted prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:font-mono prose-code:before:content-none prose-code:after:content-none
-          prose-pre:bg-muted prose-pre:border prose-pre:border-border prose-pre:rounded-lg
+          prose-code:text-xs prose-code:text-foreground prose-code:bg-muted prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:font-mono prose-code:before:content-none prose-code:after:content-none
+          prose-pre:bg-muted/50 prose-pre:text-foreground prose-pre:border prose-pre:border-border prose-pre:rounded-lg prose-pre:text-xs
           prose-table:text-xs
           prose-th:text-foreground prose-th:font-semibold prose-th:border-border prose-th:px-3 prose-th:py-2
           prose-td:text-muted-foreground prose-td:border-border prose-td:px-3 prose-td:py-2

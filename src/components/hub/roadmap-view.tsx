@@ -5,6 +5,9 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import {
   GanttChart,
   LayoutGrid,
+  List,
+  ListOrdered,
+  Calculator,
   CircleDot,
   SignalHigh,
   Tag,
@@ -17,6 +20,9 @@ import { POSTHOG_EVENTS } from "@/lib/posthog-events";
 import { CheckboxFilterDropdown } from "./filter-dropdown";
 import { RoadmapTimeline } from "./roadmap-timeline";
 import { RoadmapBoard } from "./roadmap-board";
+import { RoadmapList } from "./roadmap-list";
+import { RankingView } from "./ranking-view";
+import { RiceScoringView } from "./rice-scoring-view";
 
 type Project = {
   id: string;
@@ -37,8 +43,9 @@ type Project = {
   }>;
 };
 
-type RoadmapViewMode = "timeline" | "board";
+type RoadmapViewMode = "list" | "timeline" | "board" | "priority";
 type BoardGroupBy = "status" | "priority" | "label";
+type PriorityMode = "rank" | "rice";
 
 const PRIORITY_LABELS: Record<number, string> = {
   1: "Urgent",
@@ -56,8 +63,8 @@ export function RoadmapView({ projects }: { projects: Project[] }) {
   const [viewMode, setViewMode] = useState<RoadmapViewMode>(
     () => {
       const v = searchParams.get("roadmapView");
-      if (v === "timeline" || v === "board") return v;
-      return "timeline";
+      if (v === "list" || v === "timeline" || v === "board" || v === "priority") return v;
+      return "list";
     }
   );
 
@@ -66,6 +73,14 @@ export function RoadmapView({ projects }: { projects: Project[] }) {
       const g = searchParams.get("roadmapGroup");
       if (g === "status" || g === "priority" || g === "label") return g;
       return "status";
+    }
+  );
+
+  const [priorityMode, setPriorityMode] = useState<PriorityMode>(
+    () => {
+      const m = searchParams.get("priorityMode");
+      if (m === "rank" || m === "rice") return m;
+      return "rank";
     }
   );
 
@@ -91,14 +106,16 @@ export function RoadmapView({ projects }: { projects: Project[] }) {
     rs: string[],
     rp: string[],
     rl: string[],
+    pm?: PriorityMode,
   ) {
     const params = new URLSearchParams(searchParams.toString());
     // Preserve tab
     const newParams = new URLSearchParams();
     const tab = params.get("tab");
     if (tab) newParams.set("tab", tab);
-    if (view !== "timeline") newParams.set("roadmapView", view);
+    if (view !== "list") newParams.set("roadmapView", view);
     if (view === "board" && group !== "status") newParams.set("roadmapGroup", group);
+    if (view === "priority" && pm && pm !== "rank") newParams.set("priorityMode", pm);
     if (rs.length > 0) newParams.set("rs", rs.join(","));
     if (rp.length > 0) newParams.set("rp", rp.join(","));
     if (rl.length > 0) newParams.set("rl", rl.join(","));
@@ -108,27 +125,32 @@ export function RoadmapView({ projects }: { projects: Project[] }) {
 
   function changeView(v: RoadmapViewMode) {
     setViewMode(v);
-    updateUrl(v, boardGroupBy, statusFilter, priorityFilter, labelFilter);
+    updateUrl(v, boardGroupBy, statusFilter, priorityFilter, labelFilter, priorityMode);
   }
 
   function changeGroupBy(g: BoardGroupBy) {
     setBoardGroupBy(g);
-    updateUrl(viewMode, g, statusFilter, priorityFilter, labelFilter);
+    updateUrl(viewMode, g, statusFilter, priorityFilter, labelFilter, priorityMode);
+  }
+
+  function changePriorityMode(m: PriorityMode) {
+    setPriorityMode(m);
+    updateUrl(viewMode, boardGroupBy, statusFilter, priorityFilter, labelFilter, m);
   }
 
   function changeStatusFilter(next: string[]) {
     setStatusFilter(next);
-    updateUrl(viewMode, boardGroupBy, next, priorityFilter, labelFilter);
+    updateUrl(viewMode, boardGroupBy, next, priorityFilter, labelFilter, priorityMode);
   }
 
   function changePriorityFilter(next: string[]) {
     setPriorityFilter(next);
-    updateUrl(viewMode, boardGroupBy, statusFilter, next, labelFilter);
+    updateUrl(viewMode, boardGroupBy, statusFilter, next, labelFilter, priorityMode);
   }
 
   function changeLabelFilter(next: string[]) {
     setLabelFilter(next);
-    updateUrl(viewMode, boardGroupBy, statusFilter, priorityFilter, next);
+    updateUrl(viewMode, boardGroupBy, statusFilter, priorityFilter, next, priorityMode);
   }
 
   // Derive available filter options from projects
@@ -171,7 +193,7 @@ export function RoadmapView({ projects }: { projects: Project[] }) {
   return (
     <div className="flex flex-col flex-1 min-h-0">
       {/* Toolbar */}
-      <div className="px-6 py-2 border-b border-border flex items-center gap-2 shrink-0">
+      <div className="px-3 sm:px-6 py-2 border-b border-border flex items-center gap-2 shrink-0">
         {/* Filter toggle */}
         <button
           onClick={() => setShowFilters(!showFilters)}
@@ -210,7 +232,23 @@ export function RoadmapView({ projects }: { projects: Project[] }) {
         {/* View toggle */}
         <div className="flex items-center border border-border rounded-md overflow-hidden">
           <button
+            onClick={() => changeView("list")}
+            aria-label="List view"
+            aria-pressed={viewMode === "list"}
+            className={cn(
+              "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
+              viewMode === "list"
+                ? "bg-accent text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <List className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">List</span>
+          </button>
+          <button
             onClick={() => changeView("timeline")}
+            aria-label="Timeline view"
+            aria-pressed={viewMode === "timeline"}
             className={cn(
               "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
               viewMode === "timeline"
@@ -219,10 +257,12 @@ export function RoadmapView({ projects }: { projects: Project[] }) {
             )}
           >
             <GanttChart className="w-3.5 h-3.5" />
-            Timeline
+            <span className="hidden sm:inline">Timeline</span>
           </button>
           <button
             onClick={() => changeView("board")}
+            aria-label="Board view"
+            aria-pressed={viewMode === "board"}
             className={cn(
               "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
               viewMode === "board"
@@ -231,7 +271,21 @@ export function RoadmapView({ projects }: { projects: Project[] }) {
             )}
           >
             <LayoutGrid className="w-3.5 h-3.5" />
-            Board
+            <span className="hidden sm:inline">Board</span>
+          </button>
+          <button
+            onClick={() => changeView("priority")}
+            aria-label="Priority view"
+            aria-pressed={viewMode === "priority"}
+            className={cn(
+              "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
+              viewMode === "priority"
+                ? "bg-accent text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <ListOrdered className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Priority</span>
           </button>
         </div>
 
@@ -240,6 +294,7 @@ export function RoadmapView({ projects }: { projects: Project[] }) {
           <div className="flex items-center border border-border rounded-md overflow-hidden">
             <button
               onClick={() => changeGroupBy("status")}
+              aria-pressed={boardGroupBy === "status"}
               className={cn(
                 "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
                 boardGroupBy === "status"
@@ -252,6 +307,7 @@ export function RoadmapView({ projects }: { projects: Project[] }) {
             </button>
             <button
               onClick={() => changeGroupBy("priority")}
+              aria-pressed={boardGroupBy === "priority"}
               className={cn(
                 "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
                 boardGroupBy === "priority"
@@ -265,6 +321,7 @@ export function RoadmapView({ projects }: { projects: Project[] }) {
             {labelOptions.length > 0 && (
               <button
                 onClick={() => changeGroupBy("label")}
+                aria-pressed={boardGroupBy === "label"}
                 className={cn(
                   "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
                   boardGroupBy === "label"
@@ -278,11 +335,45 @@ export function RoadmapView({ projects }: { projects: Project[] }) {
             )}
           </div>
         )}
+
+        {/* Priority mode toggle */}
+        {viewMode === "priority" && (
+          <div className="flex items-center border border-border rounded-md overflow-hidden">
+            <button
+              onClick={() => changePriorityMode("rank")}
+              aria-pressed={priorityMode === "rank"}
+              className={cn(
+                "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
+                priorityMode === "rank"
+                  ? "bg-accent text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              title="Drag & drop ranking"
+            >
+              <ListOrdered className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Rank</span>
+            </button>
+            <button
+              onClick={() => changePriorityMode("rice")}
+              aria-pressed={priorityMode === "rice"}
+              className={cn(
+                "flex items-center gap-1 px-2 py-1 text-xs transition-colors",
+                priorityMode === "rice"
+                  ? "bg-accent text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              title="RICE scoring"
+            >
+              <Calculator className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">RICE</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Filter chips */}
       {showFilters && (
-        <div className="px-6 py-2 border-b border-border flex flex-wrap gap-3 shrink-0">
+        <div className="px-3 sm:px-6 py-2 border-b border-border flex flex-wrap gap-3 shrink-0">
           <CheckboxFilterDropdown
             items={statusOptions}
             selected={statusFilter}
@@ -320,6 +411,16 @@ export function RoadmapView({ projects }: { projects: Project[] }) {
               : "No projects to display"}
           </p>
         </div>
+      ) : viewMode === "list" ? (
+        <div className="flex-1 overflow-x-auto overflow-y-auto p-4">
+          <RoadmapList projects={filtered} />
+        </div>
+      ) : viewMode === "priority" ? (
+        priorityMode === "rice" ? (
+          <RiceScoringView projects={filtered} />
+        ) : (
+          <RankingView projects={filtered} />
+        )
       ) : viewMode === "timeline" ? (
         <div className="flex-1 overflow-auto p-6">
           <RoadmapTimeline projects={filtered} />

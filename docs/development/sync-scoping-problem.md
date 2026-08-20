@@ -23,7 +23,7 @@ When a user enables sync, the system automatically picks the **first team** retu
 
 4. **Org-wide entities are disconnected** — We sync all 74 teams and 94 initiatives, but only 49 issues from one team. Initiatives reference projects across the org, but we only have 3 projects from one team. The data is inconsistent.
 
-5. **No multi-tenant model** — If linear-gratis serves multiple organizations, each user gets one sync subscription. There's no concept of "sync these specific teams" or "sync the whole org."
+5. **No multi-tenant model** — If Pulse serves multiple organizations, each user gets one sync subscription. There's no concept of "sync these specific teams" or "sync the whole org."
 
 ## Questions To Answer
 

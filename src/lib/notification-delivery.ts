@@ -1,6 +1,9 @@
 import { createElement } from "react";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getPreferencesForUser } from "@/lib/notification-preferences";
+import { shouldSendImmediateEmail } from "@/lib/notification-eligibility";
+import { getSettingsForHub, type NotificationSettings } from "@/lib/notification-settings";
+import { getTaskStatesForIssue, eventIssueLinearId } from "@/lib/task-subscriptions";
 import { sendEmail } from "@/lib/email";
 import { ImmediateNotification } from "@/emails/immediate-notification";
 
@@ -8,6 +11,25 @@ function getAppUrl(): string {
   if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL;
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
   return "http://localhost:3000";
+}
+
+// Internal PPM recipients get an extra "View in Linear" link in their emails
+// (PULSE-372). Clients on any other domain never see it.
+const PPM_EMAIL_DOMAIN = "plusplusminus.co.za";
+
+function isPpmDomainEmail(email: string): boolean {
+  return email.toLowerCase().endsWith(`@${PPM_EMAIL_DOMAIN}`);
+}
+
+/** Fetch the canonical Linear issue URL from the synced issue's payload. */
+async function fetchLinearIssueUrl(issueLinearId: string): Promise<string | null> {
+  const { data } = await supabaseAdmin
+    .from("synced_issues")
+    .select("data")
+    .eq("linear_id", issueLinearId)
+    .maybeSingle();
+  const url = (data?.data as { url?: string } | null)?.url;
+  return url ?? null;
 }
 
 // -- Types -------------------------------------------------------------------
@@ -22,6 +44,7 @@ type NotificationEvent = {
   actor_name: string | null;
   summary: string;
   metadata: Record<string, unknown>;
+  mentioned_user_ids: string[] | null;
   created_at: string;
 };
 
@@ -38,12 +61,27 @@ type HubInfo = {
 
 // -- Deep link construction --------------------------------------------------
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function buildDeepLinkUrl(hubSlug: string, _entityType: string, _entityId: string): string {
-  // Deep links go to the hub's main page — entity-specific routing
-  // would need team key which we don't always have in the event.
-  // Hub landing is the safest default.
-  return `${getAppUrl()}/hub/${hubSlug}`;
+function buildDeepLinkUrl(
+  hubSlug: string,
+  entityType: string,
+  entityId: string,
+  metadata?: Record<string, unknown>
+): string {
+  const base = `${getAppUrl()}/hub/${hubSlug}`;
+  const teamKey = metadata?.team_key as string | undefined;
+
+  // Issue or comment — link to the task page if we have team_key
+  if ((entityType === "issue" || entityType === "comment") && teamKey) {
+    const issueId = (metadata?._issue_id as string) ?? entityId;
+    return `${base}/${teamKey}/task/${issueId}`;
+  }
+
+  // Project (incl. health updates) — link to the project page
+  if (entityType === "project" && teamKey) {
+    return `${base}/${teamKey}/projects/${entityId}`;
+  }
+
+  return base;
 }
 
 // -- Fetch helpers -----------------------------------------------------------
@@ -82,6 +120,26 @@ async function fetchHubMembers(hubId: string): Promise<HubMember[]> {
   }
 
   return (data ?? []) as HubMember[];
+}
+
+/**
+ * Fetch PPM admins as pseudo-members eligible for notifications on any hub.
+ */
+async function fetchPpmAdmins(): Promise<HubMember[]> {
+  const { data, error } = await supabaseAdmin
+    .from("ppm_admins")
+    .select("user_id, email");
+
+  if (error) {
+    console.error("fetchPpmAdmins error:", error);
+    return [];
+  }
+
+  return (data ?? []).map((a) => ({
+    user_id: a.user_id,
+    email: a.email,
+    role: "admin",
+  }));
 }
 
 // -- Queue management --------------------------------------------------------
@@ -143,9 +201,11 @@ async function sendNotificationEmail(params: {
   email: string;
   event: NotificationEvent;
   hub: HubInfo;
+  /** Canonical Linear issue URL for this event, or null if not applicable. */
+  linearUrl?: string | null;
 }): Promise<{ success: boolean; messageId?: string; error?: string }> {
-  const { email, event, hub } = params;
-  const deepLinkUrl = buildDeepLinkUrl(hub.slug, event.entity_type, event.entity_id);
+  const { email, event, hub, linearUrl } = params;
+  const deepLinkUrl = buildDeepLinkUrl(hub.slug, event.entity_type, event.entity_id, event.metadata);
 
   const element = createElement(ImmediateNotification, {
     hubName: hub.name,
@@ -159,6 +219,8 @@ async function sendNotificationEmail(params: {
       metadata: event.metadata as Record<string, string>,
     },
     deepLinkUrl,
+    // Internal recipients only — the "View in Linear" link never reaches clients.
+    linearUrl: linearUrl && isPpmDomainEmail(email) ? linearUrl : undefined,
   });
 
   return sendEmail({
@@ -183,10 +245,11 @@ export async function processImmediateEmails(
   eventType: string
 ): Promise<void> {
   try {
-    const [event, hub, members] = await Promise.all([
+    const [event, hub, members, admins] = await Promise.all([
       fetchNotificationEvent(eventId),
       fetchHubInfo(hubId),
       fetchHubMembers(hubId),
+      fetchPpmAdmins(),
     ]);
 
     if (!event || !hub) {
@@ -194,23 +257,67 @@ export async function processImmediateEmails(
       return;
     }
 
+    // Merge hub members + PPM admins, dedupe by user_id
+    const seen = new Set<string>();
+    const allRecipients = [...members, ...admins].filter((m) => {
+      if (!m.user_id || seen.has(m.user_id)) return false;
+      seen.add(m.user_id);
+      return true;
+    });
+
     // Filter to members with both user_id and email
-    const eligibleMembers = members.filter(
+    const eligibleMembers = allRecipients.filter(
       (m): m is HubMember & { user_id: string; email: string } =>
         m.user_id !== null && m.email !== null
     );
 
     if (eligibleMembers.length === 0) return;
 
+    // Per-user settings (comment scope + watch mode) for the shared resolver.
+    // Watch mode (PULSE-365) gates every event type, so fetch for all events.
+    const mentionedIds = new Set<string>(event.mentioned_user_ids ?? []);
+    const settingsByUser: Map<string, NotificationSettings> =
+      await getSettingsForHub(hubId);
+
+    // Per-task subscription overrides for this event's task (PULSE-364).
+    const taskIssueId = eventIssueLinearId(
+      event.entity_type,
+      event.entity_id,
+      event.metadata
+    );
+    const taskStates = taskIssueId
+      ? await getTaskStatesForIssue(hubId, taskIssueId)
+      : new Map<string, "subscribed" | "muted">();
+
+    // Resolve the Linear issue URL once for any task-related event (new task,
+    // comment, status change, …). It's only rendered for internal (PPM-domain)
+    // recipients (PULSE-372). Non-issue events (projects, cycles, initiatives)
+    // have no taskIssueId and so carry no link.
+    const linearUrl = taskIssueId ? await fetchLinearIssueUrl(taskIssueId) : null;
+
     // Check preferences and send in parallel
     await Promise.all(
       eligibleMembers.map(async (member) => {
         try {
           const prefs = await getPreferencesForUser(hubId, member.user_id);
-          const pref = prefs.find((p) => p.event_type === eventType);
+          const preference = prefs.find((p) => p.event_type === eventType);
 
-          // Only send if email_mode is 'immediate'
-          if (!pref || pref.email_mode !== "immediate") return;
+          // Delivery decision lives in the shared resolver (notification-eligibility.ts).
+          if (
+            !shouldSendImmediateEmail(
+              { event_type: eventType },
+              {
+                preference,
+                commentScope:
+                  settingsByUser.get(member.user_id)?.commentScope ?? "all",
+                isMentioned: mentionedIds.has(member.user_id),
+                taskState: taskStates.get(member.user_id),
+                watchMode:
+                  settingsByUser.get(member.user_id)?.watchMode ?? "all",
+              }
+            )
+          )
+            return;
 
           // Insert queue row
           const queueId = await insertQueueRow({
@@ -227,6 +334,7 @@ export async function processImmediateEmails(
             email: member.email,
             event,
             hub,
+            linearUrl,
           });
 
           if (result.success && result.messageId) {

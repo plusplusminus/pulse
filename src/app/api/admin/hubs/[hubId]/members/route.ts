@@ -31,7 +31,8 @@ export async function POST(
     }
 
     const email = body.email.trim().toLowerCase();
-    const role = body.role === "view_only" ? "view_only" : "default";
+    const explicitRole = body.role === "view_only" || body.role === "default" ? body.role : undefined;
+    const role: HubMemberRole = explicitRole ?? "default";
 
     // Verify hub exists and has a WorkOS org
     const { data: hub } = await supabaseAdmin
@@ -51,7 +52,7 @@ export async function POST(
       );
     }
 
-    // Check if already a member by email (idempotent)
+    // Check if already a member by email
     const { data: existing } = await supabaseAdmin
       .from("hub_members")
       .select("*")
@@ -59,13 +60,25 @@ export async function POST(
       .eq("email", email)
       .single();
 
-    if (existing) {
+    // If member already exists and has logged in, nothing to do
+    if (existing?.user_id) {
       return NextResponse.json(existing);
     }
 
-    // Send WorkOS invitation
+    // Send (or re-send) WorkOS invitation
     let invitationId: string | null = null;
     try {
+      // Revoke any previous pending invitation before re-sending
+      if (existing?.workos_invitation_id) {
+        try {
+          await workos.userManagement.revokeInvitation(
+            existing.workos_invitation_id
+          );
+        } catch {
+          // Non-fatal — invitation may have already expired
+        }
+      }
+
       const invitation = await workos.userManagement.sendInvitation({
         email,
         organizationId: hub.workos_org_id,
@@ -81,7 +94,29 @@ export async function POST(
       );
     }
 
-    // Create hub_members row (user_id null until they accept)
+    // Update existing member row or create a new one
+    if (existing) {
+      const { data: updated, error } = await supabaseAdmin
+        .from("hub_members")
+        .update({
+          workos_invitation_id: invitationId,
+          ...(explicitRole ? { role: explicitRole } : {}),
+        })
+        .eq("id", existing.id)
+        .select()
+        .single();
+
+      if (error) {
+        console.error("POST /api/admin/hubs/[hubId]/members update error:", error);
+        return NextResponse.json(
+          { error: "Failed to update member record" },
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.json(updated);
+    }
+
     const { data: member, error } = await supabaseAdmin
       .from("hub_members")
       .insert({

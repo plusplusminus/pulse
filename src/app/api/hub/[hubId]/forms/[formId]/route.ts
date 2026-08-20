@@ -43,11 +43,13 @@ export async function GET(
         id: f.id,
         field_key: f.field_key,
         field_type: f.field_type,
+        linear_field: f.linear_field,
         label: f.label,
         description: f.description,
         placeholder: f.placeholder,
         is_required: f.is_required,
         options: f.options,
+        default_value: f.default_value,
         display_order: f.display_order,
       })),
     });

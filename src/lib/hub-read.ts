@@ -1,5 +1,6 @@
 import { supabaseAdmin, type HubTeamMapping, type HubMemberRole } from "./supabase";
 import { getWorkspaceToken } from "./workspace";
+import { isIssueProjectVisible } from "./hub-visibility-rules";
 import type { LinearIssue, RoadmapIssue } from "./linear";
 
 const WORKSPACE_USER_ID = "workspace";
@@ -67,8 +68,11 @@ type ProjectData = {
   lead?: { id?: string; name?: string };
   labels?: Array<{ id: string; name: string; color: string }>;
   teams?: Array<{ id: string; name: string; key: string }>;
+  teamIds?: string[];
   initiatives?: Array<{ id: string; name: string }>;
   milestones?: Array<{ id: string; name: string; targetDate?: string }>;
+  links?: Array<{ id: string; label: string; url: string; createdAt: string }>;
+  documents?: Array<{ id: string; title: string; content?: string; slugId: string; icon?: string; color?: string; updatedAt: string }>;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -106,6 +110,8 @@ type CycleData = {
   completedScopeHistory?: number[];
   scopeHistory?: number[];
   team?: { id?: string; name?: string; key?: string };
+  links?: Array<{ id: string; label: string; url: string; createdAt: string }>;
+  documents?: Array<{ id: string; title: string; content?: string; slugId: string; icon?: string; color?: string; updatedAt: string }>;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -156,17 +162,17 @@ export function mapRowToLinearIssue(row: {
   };
 }
 
-const CLIENT_FACING_PREFIX = /^@heyclient[\s\n]?/i;
+const CLIENT_FACING_PREFIX = /^@?(?:heyclient|pulse)[\s\n]?/i;
 
 /**
- * Check if a comment body is client-facing (starts with @heyclient).
+ * Check if a comment body is client-facing (starts with heyclient).
  */
 export function isClientFacing(body: string): boolean {
   return CLIENT_FACING_PREFIX.test(body.trimStart());
 }
 
 /**
- * Strip the @heyclient prefix from a comment body.
+ * Strip the heyclient prefix from a comment body.
  * Removes the prefix plus one optional trailing space or newline.
  */
 export function stripClientPrefix(body: string): string {
@@ -176,6 +182,41 @@ export function stripClientPrefix(body: string): string {
   // If stripping leaves an empty body, return empty
   if (!stripped.trim()) return "";
   return leadingWhitespace + stripped;
+}
+
+// -- Project update trigger (looser than comments) ---------------------------
+//
+// Project health updates are structured — PMs usually lead with a bold title
+// line and put the trigger on the next line — so the pulse/heyclient trigger is
+// matched at the start of ANY line, not just the very first character. Comments
+// keep the stricter first-character rule above. The lookahead requires a whole
+// word so "pulseaudio" and the like don't match.
+const CLIENT_FACING_UPDATE_LINE = /^@?(?:heyclient|pulse)(?=\s|$)/i;
+
+/** Whether a project update is client-facing: any line starts with the trigger. */
+export function isClientFacingUpdate(body: string): boolean {
+  return body
+    .split("\n")
+    .some((line) => CLIENT_FACING_UPDATE_LINE.test(line.trimStart()));
+}
+
+/**
+ * Strip the pulse/heyclient trigger from the first line that carries it,
+ * preserving the rest of the update (e.g. a leading title line). Returns "" if
+ * nothing but the trigger remains.
+ */
+export function stripUpdateClientPrefix(body: string): string {
+  const lines = body.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trimStart();
+    if (CLIENT_FACING_UPDATE_LINE.test(trimmed)) {
+      const leading = lines[i].slice(0, lines[i].length - trimmed.length);
+      // Remove the trigger word plus one optional following space/tab.
+      lines[i] = leading + trimmed.replace(/^@?(?:heyclient|pulse)[ \t]?/i, "");
+      break;
+    }
+  }
+  return lines.join("\n").trim();
 }
 
 export function mapRowToComment(row: {
@@ -242,6 +283,8 @@ export function mapRowToProject(row: {
     priorityLabel: d.priorityLabel ?? priorityToLabel(d.priority ?? 0),
     progress: d.progress ?? 0,
     health: d.health ?? undefined,
+    healthUpdatedAt:
+      (d as { healthUpdatedAt?: string }).healthUpdatedAt ?? undefined,
     startDate: d.startDate ?? undefined,
     targetDate: d.targetDate ?? undefined,
     status: d.status
@@ -251,9 +294,15 @@ export function mapRowToProject(row: {
       ? { id: d.lead.id ?? "", name: d.lead.name ?? "" }
       : undefined,
     labels: Array.isArray(d.labels) ? d.labels : [],
-    teams: Array.isArray(d.teams) ? d.teams : [],
+    teams: Array.isArray(d.teams)
+      ? d.teams
+      : Array.isArray(d.teamIds)
+        ? d.teamIds.map((id) => ({ id, name: "", key: "" }))
+        : [],
     initiatives: Array.isArray(d.initiatives) ? d.initiatives : [],
     milestones: Array.isArray(d.milestones) ? d.milestones : [],
+    links: Array.isArray(d.links) ? d.links : [],
+    documents: Array.isArray(d.documents) ? d.documents : [],
     createdAt: d.createdAt ?? row.created_at,
     updatedAt: d.updatedAt ?? row.updated_at,
   };
@@ -417,6 +466,13 @@ function mergeProjectVisibility(
   }
 
   return mergeVisibility(mappings, "visible_project_ids");
+}
+
+/**
+ * Returns true if any mapping opts in to showing project-less issues.
+ */
+function shouldIncludeUnassigned(mappings: HubTeamMapping[]): boolean {
+  return mappings.some((m) => m.include_unassigned_issues);
 }
 
 /**
@@ -602,10 +658,17 @@ export async function fetchHubIssueDetail(
 
   if (!row || !teamIds.includes(row.team_id)) return null;
 
+  const d = row.data as Record<string, unknown>;
+
+  // Enforce project scoping so a direct ?issue= link can't open an issue whose
+  // project isn't visible to the hub (or an unscoped issue when the hub doesn't
+  // include unassigned issues) — matching the Tasks tab (PULSE-370).
+  const projectId = (d.project as { id?: string } | undefined)?.id ?? null;
+  if (!isIssueProjectVisible(mappings, projectId)) return null;
+
   const issue = mapRowToLinearIssue(
     row as { linear_id: string; data: Record<string, unknown>; created_at: string; updated_at: string }
   );
-  const d = row.data as Record<string, unknown>;
 
   const detailed = stripAssignee({
     ...issue,
@@ -626,6 +689,67 @@ export async function fetchHubIssueDetail(
   };
 }
 
+type IssueScopedEvent = {
+  entity_type: string;
+  entity_id: string;
+  metadata: Record<string, unknown> | null;
+};
+
+/**
+ * Drop activity/notification events whose underlying issue isn't currently
+ * visible to the hub. Emit-time scoping (notification-events.ts) prevents new
+ * leaks, but this re-checks live visibility at read time so events emitted
+ * before that guard — or for an issue later moved into a hidden project —
+ * stop showing (PULSE-370). Non-issue events (projects, cycles, initiatives)
+ * pass through untouched.
+ */
+export async function filterEventsByIssueVisibility<T extends IssueScopedEvent>(
+  hubId: string,
+  events: T[]
+): Promise<T[]> {
+  const mappings = await getHubMappings(hubId);
+  if (mappings.length === 0) return [];
+  const teamIds = new Set(mappings.map((m) => m.linear_team_id));
+
+  // Map each issue/comment event to the Linear id of its underlying issue.
+  // Issue events store it in entity_id; comment events store the comment id in
+  // entity_id and the parent issue id in metadata._issue_id.
+  const issueIdByEvent = new Map<T, string | null>();
+  for (const e of events) {
+    if (e.entity_type === "issue") {
+      issueIdByEvent.set(e, e.entity_id);
+    } else if (e.entity_type === "comment") {
+      const issueId = (e.metadata?._issue_id as string | undefined) ?? null;
+      issueIdByEvent.set(e, issueId);
+    }
+  }
+
+  const issueIds = [...new Set([...issueIdByEvent.values()].filter((v): v is string => !!v))];
+  const visibility = new Map<string, boolean>();
+  if (issueIds.length > 0) {
+    const { data: rows } = await supabaseAdmin
+      .from("synced_issues")
+      .select("linear_id, team_id, project_id")
+      .eq("user_id", WORKSPACE_USER_ID)
+      .in("linear_id", issueIds);
+    for (const r of rows ?? []) {
+      const visible =
+        teamIds.has(r.team_id as string) &&
+        isIssueProjectVisible(mappings, (r.project_id as string | null) ?? null);
+      visibility.set(r.linear_id as string, visible);
+    }
+  }
+
+  return events.filter((e) => {
+    if (e.entity_type !== "issue" && e.entity_type !== "comment") return true;
+    const issueId = issueIdByEvent.get(e);
+    // Unresolvable issue (missing id or not in synced_issues) → can't confirm
+    // visibility, so drop it rather than risk leaking.
+    if (!issueId) return false;
+    return visibility.get(issueId) === true;
+  });
+}
+
 /**
  * Fetch roadmap issues scoped to a hub, supporting multiple project IDs.
  */
@@ -643,19 +767,46 @@ export async function fetchHubRoadmapIssues(
     ? projectIds.filter((id) => allowedProjectIds.includes(id))
     : projectIds;
 
-  if (filteredProjectIds.length === 0) return [];
+  const includeUnassigned = shouldIncludeUnassigned(mappings);
+  if (filteredProjectIds.length === 0 && !includeUnassigned) return [];
 
-  const { data, error } = await supabaseAdmin
-    .from("synced_issues")
-    .select("linear_id, data, created_at, updated_at, team_id")
-    .eq("user_id", WORKSPACE_USER_ID)
-    .in("project_id", filteredProjectIds)
-    .order("updated_at", { ascending: false });
+  // Query 1: Issues belonging to specified projects
+  const projectQuery = filteredProjectIds.length > 0
+    ? supabaseAdmin
+        .from("synced_issues")
+        .select("linear_id, data, created_at, updated_at, team_id")
+        .eq("user_id", WORKSPACE_USER_ID)
+        .in("project_id", filteredProjectIds)
+        .order("updated_at", { ascending: false })
+    : null;
 
-  if (error) {
-    console.error("fetchHubRoadmapIssues error:", error);
-    throw error;
+  // Query 2: Issues with no project (when include_unassigned_issues is on)
+  const teamIds = mappings.map((m) => m.linear_team_id);
+  const unassignedQuery = includeUnassigned
+    ? supabaseAdmin
+        .from("synced_issues")
+        .select("linear_id, data, created_at, updated_at, team_id")
+        .eq("user_id", WORKSPACE_USER_ID)
+        .in("team_id", teamIds)
+        .is("project_id", null)
+        .order("updated_at", { ascending: false })
+    : null;
+
+  const [projectResult, unassignedResult] = await Promise.all([
+    projectQuery ?? Promise.resolve({ data: null, error: null }),
+    unassignedQuery ?? Promise.resolve({ data: null, error: null }),
+  ]);
+
+  if (projectResult.error) {
+    console.error("fetchHubRoadmapIssues error:", projectResult.error);
+    throw projectResult.error;
   }
+  if (unassignedResult.error) {
+    console.error("fetchHubRoadmapIssues unassigned error:", unassignedResult.error);
+    throw unassignedResult.error;
+  }
+
+  const data = [...(projectResult.data || []), ...(unassignedResult.data || [])];
 
   return (data || []).reduce<RoadmapIssue[]>((acc, row) => {
     const r = row as { linear_id: string; data: Record<string, unknown>; created_at: string; updated_at: string; team_id: string };
@@ -701,11 +852,24 @@ export async function fetchHubCycleIssues(
     throw error;
   }
 
+  const overviewOnlyIds = getOverviewOnlyProjectIds(mappings);
+  const allowedProjectIds = mergeProjectVisibility(mappings);
+  const includeUnassigned = shouldIncludeUnassigned(mappings);
+
   return (data || []).reduce<RoadmapIssue[]>((acc, row) => {
     const r = row as { linear_id: string; data: Record<string, unknown>; created_at: string; updated_at: string; team_id: string };
     const d = r.data;
     const cycle = d.cycle as Record<string, unknown> | undefined;
     if (!cycle || cycle.id !== cycleLinearId) return acc;
+    const projectId = (d.project as Record<string, unknown> | undefined)?.id as string | undefined;
+    // Enforce project visibility: project-less issues require opt-in,
+    // project issues must be in the allowed set and not overview-only.
+    if (!projectId) {
+      if (!includeUnassigned) return acc;
+    } else {
+      if (allowedProjectIds && !allowedProjectIds.includes(projectId)) return acc;
+      if (overviewOnlyIds.has(projectId)) return acc;
+    }
     const issue = stripAssignee({
       ...mapRowToLinearIssue(r),
       dueDate: (d.dueDate as string) ?? undefined,
@@ -756,7 +920,7 @@ export async function fetchHubComments(
       .order("created_at", { ascending: true }),
     supabaseAdmin
       .from("hub_comments")
-      .select("id, linear_comment_id, parent_comment_id, author_name, author_email, body, push_status, push_error, created_at, updated_at")
+      .select("id, linear_comment_id, parent_comment_id, user_id, author_name, author_email, body, push_status, push_error, created_at, updated_at")
       .eq("hub_id", hubId)
       .eq("issue_linear_id", issueLinearId)
       .order("created_at", { ascending: true }),
@@ -769,8 +933,8 @@ export async function fetchHubComments(
     return mapped;
   });
 
-  // Filter synced comments: only show @heyclient comments and their thread replies.
-  // Step 1: Identify client-facing root comments (those with @heyclient prefix)
+  // Filter synced comments: only show heyclient comments and their thread replies.
+  // Step 1: Identify client-facing root comments (those with heyclient prefix)
   const visibleLinearIds = new Set<string>();
   for (const c of allLinearComments) {
     if (isClientFacing(c.body)) {
@@ -797,7 +961,7 @@ export async function fetchHubComments(
     .map((c) => {
       if (isClientFacing(c.body)) {
         const stripped = stripClientPrefix(c.body);
-        // Hide comments that are just "@heyclient" with no actual content
+        // Hide comments that are just "heyclient" with no actual content
         if (!stripped) return null;
         return { ...c, body: stripped, isTeamComment: true };
       }
@@ -816,12 +980,25 @@ export async function fetchHubComments(
     push_status: row.push_status as string | undefined,
     push_error: row.push_error as string | undefined,
     user: {
-      id: "",
+      id: row.user_id as string,
       name: row.author_name,
     },
     isHubComment: true,
     isTeamComment: false,
   }));
+
+  // Deduplicate: when a hub comment has been pushed to Linear and synced back,
+  // the synced_comments version would show a duplicate. Remove synced comments
+  // whose linear_id matches a hub comment's linear_comment_id.
+  const pushedHubLinearIds = new Set(
+    hubComments
+      .filter((c) => c.linearId && c.push_status === "pushed")
+      .map((c) => c.linearId!)
+  );
+
+  const deduplicatedLinearComments = linearComments.filter(
+    (c) => !pushedHubLinearIds.has(c.linearId)
+  );
 
   // Merge and sort by createdAt
   type FlatComment = {
@@ -837,7 +1014,7 @@ export async function fetchHubComments(
     push_status?: string;
     push_error?: string;
   };
-  const all: FlatComment[] = [...linearComments, ...hubComments].sort(
+  const all: FlatComment[] = [...deduplicatedLinearComments, ...hubComments].sort(
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
   );
 
@@ -949,11 +1126,14 @@ export async function fetchHubTeamStats(hubId: string) {
     if (allowedProjectIds && !allowedProjectIds.includes(proj.linear_id)) continue;
     const d = proj.data as Record<string, unknown>;
     const projTeams = d.teams as Array<{ id: string }> | undefined;
-    if (Array.isArray(projTeams)) {
-      for (const pt of projTeams) {
-        const teamStat = stats.get(pt.id);
-        if (teamStat) teamStat.projectCount++;
-      }
+    const projTeamIds = Array.isArray(projTeams)
+      ? projTeams.map((t) => t.id)
+      : Array.isArray(d.teamIds)
+        ? (d.teamIds as string[])
+        : [];
+    for (const tid of projTeamIds) {
+      const teamStat = stats.get(tid);
+      if (teamStat) teamStat.projectCount++;
     }
   }
 
@@ -1002,7 +1182,7 @@ export async function fetchHubProjects(
   }
 
   // Post-filter: only projects that belong to at least one hub team
-  return (data || [])
+  const projects = (data || [])
     .map((row) =>
       mapRowToProject(
         row as { linear_id: string; data: Record<string, unknown>; created_at: string; updated_at: string }
@@ -1014,6 +1194,149 @@ export async function fetchHubProjects(
       // Otherwise (null = auto-include) ensure the project has at least one team in the hub
       return project.teams.some((t) => teamIds.includes(t.id));
     });
+
+  // Override raw project health with the latest *client-facing* update's health
+  // so clients only ever see opted-in (pulse/heyclient) status — never the raw
+  // internal health. Projects with no client-facing update get no badge.
+  const derivedHealth = await deriveClientFacingHealth(projects.map((p) => p.id));
+  for (const project of projects) {
+    const derived = derivedHealth.get(project.id);
+    project.health = derived?.health ?? undefined;
+    project.healthUpdatedAt = derived?.at ?? undefined;
+  }
+
+  return projects;
+}
+
+/**
+ * Cheap single-project visibility check for a hub — avoids loading every hub
+ * project (and deriving health for all of them) just to validate one id.
+ * Mirrors the visibility rules in fetchHubProjects.
+ */
+export async function isProjectVisibleInHub(
+  hubId: string,
+  projectId: string
+): Promise<boolean> {
+  const mappings = await getHubMappings(hubId);
+  if (mappings.length === 0) return false;
+
+  const allowedProjectIds = mergeProjectVisibility(mappings);
+
+  // Explicit empty array = nothing visible.
+  if (Array.isArray(allowedProjectIds) && allowedProjectIds.length === 0) {
+    return false;
+  }
+
+  // Scoped to a specific set — id must be in it (no DB read needed).
+  if (allowedProjectIds) return allowedProjectIds.includes(projectId);
+
+  // Auto-include (null): the project must belong to at least one hub team.
+  const teamIds = mappings.map((m) => m.linear_team_id);
+  const { data } = await supabaseAdmin
+    .from("synced_projects")
+    .select("data")
+    .eq("user_id", WORKSPACE_USER_ID)
+    .eq("linear_id", projectId)
+    .maybeSingle();
+  if (!data?.data) return false;
+  const d = data.data as { teams?: Array<{ id: string }>; teamIds?: string[] };
+  const projectTeamIds = Array.isArray(d.teams)
+    ? d.teams.map((t) => t.id)
+    : Array.isArray(d.teamIds)
+      ? d.teamIds
+      : [];
+  return projectTeamIds.some((id) => teamIds.includes(id));
+}
+
+export type HubProjectUpdate = {
+  id: string;
+  projectId: string;
+  body: string;
+  health: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/**
+ * For each given project, the health + date of its most recent *client-facing*
+ * health update (pulse/heyclient prefixed). Used to override raw project.health
+ * so clients only see opted-in status. Projects with no client-facing update are
+ * absent from the map (caller leaves health undefined → badge hidden).
+ * Best-effort: on query error returns an empty map (no derived health).
+ */
+export async function deriveClientFacingHealth(
+  projectIds: string[]
+): Promise<Map<string, { health: string | null; at: string }>> {
+  const result = new Map<string, { health: string | null; at: string }>();
+  if (projectIds.length === 0) return result;
+
+  const { data, error } = await supabaseAdmin
+    .from("synced_project_updates")
+    .select("project_id, health, data, created_at")
+    .eq("user_id", WORKSPACE_USER_ID)
+    .in("project_id", projectIds)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("deriveClientFacingHealth error:", error);
+    return result;
+  }
+
+  // Rows are newest-first; the first client-facing update per project wins.
+  for (const row of data || []) {
+    const pid = row.project_id as string | null;
+    if (!pid || result.has(pid)) continue;
+    const body = ((row.data as { body?: string } | null)?.body ?? "").toString();
+    if (!isClientFacingUpdate(body)) continue;
+    result.set(pid, {
+      health: (row.health as string | null) ?? null,
+      at: row.created_at as string,
+    });
+  }
+
+  return result;
+}
+
+/**
+ * Fetch the client-facing project health updates for the given project IDs.
+ * Reads synced_project_updates, keeps only pulse/heyclient-prefixed updates,
+ * strips the prefix, newest first. Callers are responsible for passing only
+ * hub-visible project IDs (visibility is enforced upstream).
+ */
+export async function fetchProjectUpdatesForProjectIds(
+  projectIds: string[]
+): Promise<HubProjectUpdate[]> {
+  if (projectIds.length === 0) return [];
+
+  const { data, error } = await supabaseAdmin
+    .from("synced_project_updates")
+    .select("linear_id, project_id, health, data, created_at, updated_at")
+    .eq("user_id", WORKSPACE_USER_ID)
+    .in("project_id", projectIds)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("fetchProjectUpdatesForProjectIds error:", error);
+    throw error;
+  }
+
+  const updates: HubProjectUpdate[] = [];
+  for (const row of data || []) {
+    const body = ((row.data as { body?: string } | null)?.body ?? "").toString();
+    if (!isClientFacingUpdate(body)) continue;
+    const stripped = stripUpdateClientPrefix(body);
+    if (!stripped) continue; // bare "pulse"/"heyclient" with no content → hide
+    updates.push({
+      id: row.linear_id as string,
+      projectId: row.project_id as string,
+      body: stripped,
+      health: (row.health as string | null) ?? null,
+      createdAt: row.created_at as string,
+      updatedAt: row.updated_at as string,
+    });
+  }
+
+  return updates;
 }
 
 /**
@@ -1153,6 +1476,8 @@ export function mapRowToCycle(row: {
     completedScopeHistory: d.completedScopeHistory ?? [],
     scopeHistory: d.scopeHistory ?? [],
     team: d.team ?? undefined,
+    links: Array.isArray(d.links) ? d.links : [],
+    documents: Array.isArray(d.documents) ? d.documents : [],
     createdAt: d.createdAt ?? row.created_at,
     updatedAt: d.updatedAt ?? row.updated_at,
   };
@@ -1198,10 +1523,17 @@ export async function fetchHubCycleStats(
 ): Promise<Record<string, { total: number; completed: number }>> {
   if (cycleLinearIds.length === 0) return {};
 
+  const mappings = await getHubMappings(hubId);
+  if (mappings.length === 0) return {};
+
+  const teamIds = mappings.map((m) => m.linear_team_id);
+  const overviewOnlyIds = getOverviewOnlyProjectIds(mappings);
+
   const { data, error } = await supabaseAdmin
     .from("synced_issues")
     .select("data")
     .eq("user_id", WORKSPACE_USER_ID)
+    .in("team_id", teamIds)
     .not("data->cycle", "is", null);
 
   if (error) {
@@ -1220,6 +1552,9 @@ export async function fetchHubCycleStats(
     const d = row.data as Record<string, unknown>;
     const cycle = d.cycle as { id?: string } | undefined;
     if (!cycle?.id || !stats[cycle.id]) continue;
+
+    const projectId = (d.project as Record<string, unknown> | undefined)?.id as string | undefined;
+    if (projectId && overviewOnlyIds.has(projectId)) continue;
 
     stats[cycle.id].total++;
     const stateType = (d.state as Record<string, unknown> | undefined)?.type as string | undefined;
@@ -1307,7 +1642,12 @@ export async function fetchHubMetadata(
 
   const statesMap = new Map<string, { id: string; name: string; color: string; type: string }>();
   const labelsMap = new Map<string, { id: string; name: string; color: string }>();
-  const cyclesMap = new Map<string, { id: string; name: string; number: number }>();
+  const cyclesMap = new Map<string, { id: string; name: string; number: number; startsAt: string | null; endsAt: string | null }>();
+
+  // For scoping cycle extraction to only visible issues
+  const metaAllowedProjectIds = mergeProjectVisibility(mappings);
+  const metaOverviewOnlyIds = getOverviewOnlyProjectIds(mappings);
+  const metaIncludeUnassigned = shouldIncludeUnassigned(mappings);
 
   for (const row of data) {
     const d = row.data as Record<string, unknown>;
@@ -1345,15 +1685,42 @@ export async function fetchHubMetadata(
         labelsMap.set(label.id, label);
       }
     }
+    // Only include cycles from issues that are actually visible (respects project scoping)
     const cycle = d.cycle as { id?: string; name?: string; number?: number } | undefined;
     if (cycle?.id) {
-      cyclesMap.set(cycle.id, {
-        id: cycle.id,
-        name: cycle.name ?? "",
-        number: cycle.number ?? 0,
-      });
+      const pid = (d.project as Record<string, unknown> | undefined)?.id as string | undefined;
+      const projectVisible = pid
+        ? (!metaAllowedProjectIds || metaAllowedProjectIds.includes(pid)) && !metaOverviewOnlyIds.has(pid)
+        : metaIncludeUnassigned;
+      if (projectVisible && !cyclesMap.has(cycle.id)) {
+        cyclesMap.set(cycle.id, {
+          id: cycle.id,
+          name: cycle.name ?? "",
+          number: cycle.number ?? 0,
+          startsAt: null,
+          endsAt: null,
+        });
+      }
     }
     // No assignees — intentionally omitted for client hub view
+  }
+
+  // Enrich cycles with date ranges from synced_cycles
+  const cycleIds = Array.from(cyclesMap.keys());
+  if (cycleIds.length > 0) {
+    const { data: cycleRows } = await supabaseAdmin
+      .from("synced_cycles")
+      .select("linear_id, data")
+      .in("linear_id", cycleIds);
+
+    for (const row of cycleRows ?? []) {
+      const d = row.data as Record<string, unknown>;
+      const entry = cyclesMap.get(row.linear_id as string);
+      if (entry) {
+        entry.startsAt = (d.startsAt as string) ?? null;
+        entry.endsAt = (d.endsAt as string) ?? null;
+      }
+    }
   }
 
   return {

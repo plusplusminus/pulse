@@ -75,6 +75,7 @@ export async function POST(
       trigger_type?: string;
       trigger_label_id?: string;
       trigger_from_label_id?: string;
+      condition_state_ids?: string[] | null;
       action_type?: string;
       action_config?: Record<string, unknown>;
     };
@@ -122,6 +123,16 @@ export async function POST(
       );
     }
 
+    // Validate condition_state_ids if provided
+    if (body.condition_state_ids !== undefined && body.condition_state_ids !== null) {
+      if (!Array.isArray(body.condition_state_ids) || body.condition_state_ids.some((id) => typeof id !== "string" || !id)) {
+        return NextResponse.json(
+          { error: "condition_state_ids must be null or an array of non-empty strings" },
+          { status: 400 }
+        );
+      }
+    }
+
     const { data: rule, error } = await supabaseAdmin
       .from("hub_workflow_rules")
       .insert({
@@ -129,6 +140,7 @@ export async function POST(
         trigger_type: body.trigger_type as WorkflowTriggerType,
         trigger_label_id: body.trigger_label_id,
         trigger_from_label_id: body.trigger_from_label_id ?? null,
+        condition_state_ids: body.condition_state_ids ?? null,
         action_type: body.action_type as WorkflowActionType,
         action_config: body.action_config ?? {},
       })
@@ -169,6 +181,7 @@ export async function PUT(
       trigger_type?: string;
       trigger_label_id?: string;
       trigger_from_label_id?: string | null;
+      condition_state_ids?: string[] | null;
       action_type?: string;
       action_config?: Record<string, unknown>;
     };
@@ -216,11 +229,23 @@ export async function PUT(
       );
     }
 
+    // Validate condition_state_ids if provided
+    if (body.condition_state_ids !== undefined && body.condition_state_ids !== null) {
+      if (!Array.isArray(body.condition_state_ids) || body.condition_state_ids.some((id) => typeof id !== "string" || !id)) {
+        return NextResponse.json(
+          { error: "condition_state_ids must be null or an array of non-empty strings" },
+          { status: 400 }
+        );
+      }
+    }
+
     const updates: Record<string, unknown> = {};
     if (body.trigger_type) updates.trigger_type = body.trigger_type;
     if (body.trigger_label_id) updates.trigger_label_id = body.trigger_label_id;
     if (body.trigger_from_label_id !== undefined)
       updates.trigger_from_label_id = body.trigger_from_label_id;
+    if (body.condition_state_ids !== undefined)
+      updates.condition_state_ids = body.condition_state_ids;
     if (body.action_type) updates.action_type = body.action_type;
     if (body.action_config) updates.action_config = body.action_config;
 

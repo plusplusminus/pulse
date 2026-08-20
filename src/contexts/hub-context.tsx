@@ -29,7 +29,8 @@ export type HubContextValue = {
   role: HubMemberRole;
   isViewOnly: boolean;
   isLoading: boolean;
-  requestFormsEnabled: boolean;
+  /** True if admin has connected their Linear account. Only set for admin role. */
+  linearConnected?: boolean;
 };
 
 const HubContext = createContext<HubContextValue | null>(null);
@@ -60,7 +61,7 @@ export function HubProvider({
     role: HubMemberRole;
     isViewOnly: boolean;
     isLoading: boolean;
-    requestFormsEnabled: boolean;
+    linearConnected?: boolean;
   }>({
     userId: "",
     email: "",
@@ -69,7 +70,6 @@ export function HubProvider({
     role: "default",
     isViewOnly: false,
     isLoading: true,
-    requestFormsEnabled: false,
   });
 
   useEffect(() => {
@@ -84,7 +84,7 @@ export function HubProvider({
           lastName: string | null;
           role: HubMemberRole;
           isViewOnly: boolean;
-          requestFormsEnabled: boolean;
+          linearConnected?: boolean;
         };
         setAuthState({
           userId: data.userId,
@@ -94,7 +94,7 @@ export function HubProvider({
           role: data.role,
           isViewOnly: data.isViewOnly,
           isLoading: false,
-          requestFormsEnabled: data.requestFormsEnabled ?? false,
+          linearConnected: data.linearConnected,
         });
       } catch {
         setAuthState((prev) => ({ ...prev, isLoading: false }));

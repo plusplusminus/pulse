@@ -27,19 +27,19 @@ const EVENT_TYPE_META: Record<string, { label: string; description: string }> =
   {
     comment: {
       label: "Comments",
-      description: "When someone comments on an issue",
+      description: "When someone comments on a task",
     },
     status_change: {
       label: "Status Changes",
-      description: "When an issue's status changes",
+      description: "When a task's status changes",
     },
     project_update: {
-      label: "Project Updates",
-      description: "When a project's status or details change",
+      label: "Epic Updates",
+      description: "When an epic's status or details change",
     },
     new_issue: {
-      label: "New Issues",
-      description: "When new issues are created",
+      label: "New Tasks",
+      description: "When new tasks are created",
     },
     cycle_update: {
       label: "Cycle Updates",
@@ -48,6 +48,10 @@ const EVENT_TYPE_META: Record<string, { label: string; description: string }> =
     initiative_update: {
       label: "Initiative Updates",
       description: "When initiatives are updated",
+    },
+    health_update: {
+      label: "Project Health Updates",
+      description: "When your PM posts a project update for you",
     },
   };
 
@@ -67,6 +71,58 @@ const DIGEST_HOURS = Array.from({ length: 24 }, (_, i) => {
   };
 });
 
+type PresetId = "everything" | "comments_only" | "custom";
+
+const PRESETS: {
+  id: Exclude<PresetId, "custom">;
+  label: string;
+  description: string;
+}[] = [
+  {
+    id: "everything",
+    label: "Everything",
+    description: "Email me about every type of update.",
+  },
+  {
+    id: "comments_only",
+    label: "Comments only",
+    description:
+      "Only email me about comments — mutes automated status, task and project updates.",
+  },
+];
+
+const CUSTOM_DESCRIPTION = "Custom — fine-tune each update type below.";
+
+const COMMENT_SCOPE_OPTIONS: { id: "all" | "mentions_only"; label: string }[] = [
+  { id: "all", label: "All comments" },
+  { id: "mentions_only", label: "Only when mentioned" },
+];
+
+const WATCH_MODE_OPTIONS: { id: "all" | "subscribed_only"; label: string }[] = [
+  { id: "all", label: "All activity" },
+  { id: "subscribed_only", label: "Only tasks I follow" },
+];
+
+/** Derive which preset (if any) the current preferences match. */
+function detectPreset(
+  prefs: Preference[],
+  commentScope: "all" | "mentions_only"
+): PresetId {
+  if (prefs.length === 0) return "custom";
+  // "Everything": every type emails AND comments aren't mention-filtered.
+  if (commentScope === "all" && prefs.every((p) => p.email_mode !== "off"))
+    return "everything";
+  // "Comments only": the comment stream emails, every other type is off.
+  const commentsOn = prefs.some(
+    (p) => p.event_type === "comment" && p.email_mode !== "off"
+  );
+  const restOff = prefs
+    .filter((p) => p.event_type !== "comment")
+    .every((p) => p.email_mode === "off");
+  if (commentsOn && restOff) return "comments_only";
+  return "custom";
+}
+
 export function NotificationPreferencesForm() {
   const { hubId } = useHub();
   const [preferences, setPreferences] = useState<Preference[]>([]);
@@ -77,11 +133,37 @@ export function NotificationPreferencesForm() {
     message: string;
   } | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [commentScope, setCommentScope] = useState<"all" | "mentions_only">(
+    "all"
+  );
+  const [watchMode, setWatchMode] = useState<"all" | "subscribed_only">("all");
 
   // Shared digest settings (derived from first pref that has daily/weekly)
   const hasDigest = preferences.some(
     (p) => p.email_mode === "daily" || p.email_mode === "weekly"
   );
+
+  // Active quick-setup preset, derived from the current preferences.
+  const activePreset = detectPreset(preferences, commentScope);
+
+  function applyPreset(id: Exclude<PresetId, "custom">) {
+    setPreferences((prev) =>
+      prev.map((p) => ({
+        ...p,
+        email_mode:
+          id === "everything"
+            ? "daily"
+            : p.event_type === "comment"
+            ? "immediate"
+            : "off",
+      }))
+    );
+    // "Everything" means no comment filtering; "Comments only" leaves the
+    // all/mentions choice to the scope control below.
+    if (id === "everything") setCommentScope("all");
+    setDirty(true);
+    setFeedback(null);
+  }
 
   const fetchPreferences = useCallback(async () => {
     try {
@@ -89,8 +171,20 @@ export function NotificationPreferencesForm() {
         `/api/hub/${hubId}/notifications/preferences`
       );
       if (!res.ok) throw new Error("Failed to load preferences");
-      const data = (await res.json()) as { preferences: Preference[] };
+      const data = (await res.json()) as {
+        preferences: Preference[];
+        settings?: {
+          comment_scope?: "all" | "mentions_only";
+          watch_mode?: "all" | "subscribed_only";
+        };
+      };
       setPreferences(data.preferences);
+      if (data.settings?.comment_scope) {
+        setCommentScope(data.settings.comment_scope);
+      }
+      if (data.settings?.watch_mode) {
+        setWatchMode(data.settings.watch_mode);
+      }
     } catch {
       setFeedback({
         type: "error",
@@ -136,15 +230,30 @@ export function NotificationPreferencesForm() {
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ preferences }),
+          body: JSON.stringify({
+            preferences,
+            settings: { comment_scope: commentScope, watch_mode: watchMode },
+          }),
         }
       );
       if (!res.ok) {
         const err = (await res.json()) as { error?: string };
         throw new Error(err.error ?? "Failed to save");
       }
-      const data = (await res.json()) as { preferences: Preference[] };
+      const data = (await res.json()) as {
+        preferences: Preference[];
+        settings?: {
+          comment_scope?: "all" | "mentions_only";
+          watch_mode?: "all" | "subscribed_only";
+        };
+      };
       setPreferences(data.preferences);
+      if (data.settings?.comment_scope) {
+        setCommentScope(data.settings.comment_scope);
+      }
+      if (data.settings?.watch_mode) {
+        setWatchMode(data.settings.watch_mode);
+      }
       setDirty(false);
       captureEvent(POSTHOG_EVENTS.notification_preferences_updated, { hubId });
       setFeedback({ type: "success", message: "Preferences saved" });
@@ -176,6 +285,70 @@ export function NotificationPreferencesForm() {
 
   return (
     <div className="space-y-6">
+      {/* Quick-setup presets */}
+      <div className="space-y-2">
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          Quick setup
+        </p>
+        <div className="inline-flex rounded-lg border border-border bg-muted/30 p-0.5">
+          {PRESETS.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              onClick={() => applyPreset(preset.id)}
+              aria-pressed={activePreset === preset.id}
+              className={cn(
+                "px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
+                activePreset === preset.id
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {activePreset === "custom"
+            ? CUSTOM_DESCRIPTION
+            : PRESETS.find((p) => p.id === activePreset)?.description}
+        </p>
+      </div>
+
+      {/* Watch scope (PULSE-365) */}
+      <div className="space-y-2">
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          Which tasks
+        </p>
+        <div className="inline-flex rounded-lg border border-border bg-muted/30 p-0.5">
+          {WATCH_MODE_OPTIONS.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => {
+                setWatchMode(opt.id);
+                setDirty(true);
+                setFeedback(null);
+              }}
+              aria-pressed={watchMode === opt.id}
+              className={cn(
+                "px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
+                watchMode === opt.id
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {watchMode === "subscribed_only"
+            ? "Only notify me about tasks I follow, plus comments that @mention me. Following or commenting on a task adds it automatically."
+            : "Notify me about all activity, except tasks I've muted."}
+        </p>
+      </div>
+
       {/* Preferences table */}
       <div className="border border-border rounded-lg overflow-hidden">
         {/* Header */}
@@ -196,72 +369,116 @@ export function NotificationPreferencesForm() {
           const meta = EVENT_TYPE_META[pref.event_type];
           if (!meta) return null;
 
+          const showScope =
+            pref.event_type === "comment" && pref.email_mode !== "off";
+
           return (
             <div
               key={pref.event_type}
-              className="grid grid-cols-[1fr_80px_140px] sm:grid-cols-[1fr_80px_160px] gap-4 px-4 py-3 border-b border-border last:border-b-0 items-center"
+              className="border-b border-border last:border-b-0"
             >
-              {/* Event info */}
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-foreground">
-                  {meta.label}
-                </p>
-                <p className="text-xs text-muted-foreground mt-0.5 hidden sm:block">
-                  {meta.description}
-                </p>
-              </div>
+              <div className="grid grid-cols-[1fr_80px_140px] sm:grid-cols-[1fr_80px_160px] gap-4 px-4 py-3 items-center">
+                {/* Event info */}
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground">
+                    {meta.label}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5 hidden sm:block">
+                    {meta.description}
+                  </p>
+                </div>
 
-              {/* In-app toggle */}
-              <div className="flex justify-center">
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={pref.in_app_enabled}
-                  onClick={() =>
-                    updatePref(
-                      pref.event_type,
-                      "in_app_enabled",
-                      !pref.in_app_enabled
-                    )
-                  }
-                  className={cn(
-                    "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors",
-                    pref.in_app_enabled
-                      ? "bg-primary"
-                      : "bg-muted-foreground/30"
-                  )}
-                >
-                  <span
+                {/* In-app toggle */}
+                <div className="flex justify-center">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={pref.in_app_enabled}
+                    onClick={() =>
+                      updatePref(
+                        pref.event_type,
+                        "in_app_enabled",
+                        !pref.in_app_enabled
+                      )
+                    }
                     className={cn(
-                      "pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
+                      "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors",
                       pref.in_app_enabled
-                        ? "translate-x-4"
-                        : "translate-x-0"
+                        ? "bg-primary"
+                        : "bg-muted-foreground/30"
                     )}
-                  />
-                </button>
+                  >
+                    <span
+                      className={cn(
+                        "pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
+                        pref.in_app_enabled
+                          ? "translate-x-4"
+                          : "translate-x-0"
+                      )}
+                    />
+                  </button>
+                </div>
+
+                {/* Email mode select */}
+                <div>
+                  <Select
+                    value={pref.email_mode}
+                    onValueChange={(val) =>
+                      updatePref(pref.event_type, "email_mode", val)
+                    }
+                  >
+                    <SelectTrigger size="sm" className="w-full text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(EMAIL_MODE_LABELS).map(([value, label]) => (
+                        <SelectItem key={value} value={value}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
-              {/* Email mode select */}
-              <div>
-                <Select
-                  value={pref.email_mode}
-                  onValueChange={(val) =>
-                    updatePref(pref.event_type, "email_mode", val)
-                  }
-                >
-                  <SelectTrigger size="sm" className="w-full text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(EMAIL_MODE_LABELS).map(([value, label]) => (
-                      <SelectItem key={value} value={value}>
-                        {label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {/* Comment mention-scope (PULSE-362) */}
+              {showScope && (
+                <div className="px-4 pb-3 -mt-0.5 space-y-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      Email me about:
+                    </span>
+                    <div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5">
+                      {COMMENT_SCOPE_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          aria-pressed={commentScope === opt.id}
+                          onClick={() => {
+                            setCommentScope(opt.id);
+                            setDirty(true);
+                            setFeedback(null);
+                          }}
+                          className={cn(
+                            "px-2.5 py-1 text-xs font-medium rounded-[5px] transition-colors",
+                            commentScope === opt.id
+                              ? "bg-background text-foreground shadow-sm"
+                              : "text-muted-foreground hover:text-foreground"
+                          )}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {commentScope === "mentions_only" && (
+                    <p className="text-xs text-muted-foreground">
+                      You&apos;ll be emailed only when a team member @mentions you
+                      in a comment.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           );
         })}

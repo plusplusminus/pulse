@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { SimpleThemeToggle } from "@/components/theme-toggle";
+import { UserMenu } from "@/components/user-menu";
 import { ArrowLeft } from "lucide-react";
 
 interface AdminTopBarProps {
@@ -25,9 +26,7 @@ export function AdminTopBar({ user }: AdminTopBarProps) {
 
       <div className="flex items-center gap-3">
         <SimpleThemeToggle />
-        <span className="text-xs text-muted-foreground">
-          {user.firstName ?? user.email}
-        </span>
+        <UserMenu displayName={user.firstName ?? user.email} />
       </div>
     </header>
   );

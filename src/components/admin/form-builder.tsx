@@ -3,12 +3,28 @@
 import { useState, useTransition, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { cn } from "@/lib/utils";
 import { captureEvent } from "@/lib/posthog-client";
 import { POSTHOG_EVENTS } from "@/lib/posthog-events";
 import { useFetch } from "@/hooks/use-fetch";
 import {
-  ChevronUp,
   ChevronDown,
   X,
   Plus,
@@ -243,16 +259,34 @@ export function FormBuilder({ form, hubId, hubTeams }: FormBuilderProps) {
     }
   }, [targetTeamId, form?.target_team_id]);
 
-  // Field operations — move by ID to avoid index mismatch with filtered lists
-  const moveFieldById = useCallback((id: string, direction: -1 | 1) => {
+  // Drag-and-drop sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleFieldDragEnd = useCallback((event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
     setFields((prev) => {
-      const next = [...prev];
-      const index = next.findIndex((f) => f.id === id);
-      if (index === -1) return prev;
-      const target = index + direction;
-      if (target < 0 || target >= next.length) return prev;
-      [next[index], next[target]] = [next[target], next[index]];
-      return next.map((f, i) => ({ ...f, display_order: i }));
+      const visibleIds = prev.filter((f) => f.linear_field !== "priority").map((f) => f.id);
+      const oldIndex = visibleIds.indexOf(active.id as string);
+      const newIndex = visibleIds.indexOf(over.id as string);
+      if (oldIndex === -1 || newIndex === -1) return prev;
+
+      const reorderedVisible = arrayMove(
+        prev.filter((f) => f.linear_field !== "priority"),
+        oldIndex,
+        newIndex
+      );
+      const priorityFields = prev.filter((f) => f.linear_field === "priority");
+      return [...reorderedVisible, ...priorityFields].map((f, i) => ({
+        ...f,
+        display_order: i,
+      }));
     });
   }, []);
 
@@ -682,7 +716,6 @@ export function FormBuilder({ form, hubId, hubTeams }: FormBuilderProps) {
                         is_hidden: false,
                         linear_field: "priority",
                         options: [
-                          { value: "1", label: "Urgent" },
                           { value: "2", label: "High" },
                           { value: "3", label: "Medium" },
                           { value: "4", label: "Low" },
@@ -701,6 +734,30 @@ export function FormBuilder({ form, hubId, hubTeams }: FormBuilderProps) {
                 }}
               />
             </div>
+            {fields.some((f) => f.linear_field === "priority") && (
+              <div className="flex items-center justify-between pl-4 border-l-2 border-border ml-1">
+                <div>
+                  <span className="text-sm font-medium">Require priority</span>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Submitters must select a priority level
+                  </p>
+                </div>
+                <ToggleSwitch
+                  label=""
+                  aria-label="Require priority selection"
+                  checked={fields.find((f) => f.linear_field === "priority")?.is_required ?? false}
+                  onChange={(required) => {
+                    setFields((prev) =>
+                      prev.map((f) =>
+                        f.linear_field === "priority"
+                          ? { ...f, is_required: required }
+                          : f
+                      )
+                    );
+                  }}
+                />
+              </div>
+            )}
           </div>
         </section>
 
@@ -718,278 +775,37 @@ export function FormBuilder({ form, hubId, hubTeams }: FormBuilderProps) {
             })()}
           </div>
 
-          <div>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleFieldDragEnd}
+          >
             {(() => {
               const visibleFields = fields.filter((f) => f.linear_field !== "priority");
-              return visibleFields.map((field, index) => {
-              const badge = FIELD_TYPE_BADGE[field.field_type] ?? FIELD_TYPE_BADGE.text;
-              const isExpanded = expandedField === field.id;
-              const hasOptions =
-                field.field_type === "select" ||
-                field.field_type === "radio" ||
-                field.field_type === "checkbox";
-
               return (
-                <div
-                  key={field.id}
-                  className={cn(
-                    "border-b border-border last:border-b-0",
-                    isExpanded && "bg-muted/20"
-                  )}
+                <SortableContext
+                  items={visibleFields.map((f) => f.id)}
+                  strategy={verticalListSortingStrategy}
                 >
-                  {/* Field row */}
-                  <div
-                    className="flex items-center gap-2 px-4 py-2.5 cursor-pointer hover:bg-accent/30 transition-colors"
-                    onClick={() =>
-                      setExpandedField(isExpanded ? null : field.id)
-                    }
-                  >
-                    <GripVertical className="w-3.5 h-3.5 text-muted-foreground/50 shrink-0" />
-
-                    {/* Type badge */}
-                    <span
-                      className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0"
-                      style={{ backgroundColor: badge.bg, color: badge.text }}
-                    >
-                      {field.field_type}
-                    </span>
-
-                    {/* Label */}
-                    <span className="text-sm flex-1 truncate">
-                      {field.label || (
-                        <span className="text-muted-foreground italic">
-                          Untitled
-                        </span>
-                      )}
-                    </span>
-
-                    {/* Linear mapping indicator */}
-                    {field.linear_field && (
-                      <span className="text-[10px] text-muted-foreground px-1.5 py-0.5 rounded bg-muted">
-                        {field.linear_field}
-                      </span>
-                    )}
-
-                    {/* Required indicator */}
-                    {field.is_required && (
-                      <span className="text-[10px] text-destructive font-medium">
-                        Required
-                      </span>
-                    )}
-
-                    {/* Hidden indicator */}
-                    {field.is_hidden && (
-                      <span className="text-[10px] text-muted-foreground">
-                        Hidden
-                      </span>
-                    )}
-
-                    {/* Actions */}
-                    <div className="flex items-center gap-0.5 shrink-0">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          moveFieldById(field.id, -1);
-                        }}
-                        disabled={index === 0}
-                        className={cn(
-                          "p-1 rounded transition-colors",
-                          index === 0
-                            ? "text-muted-foreground/30"
-                            : "text-muted-foreground hover:text-foreground"
-                        )}
-                        title="Move up"
-                      >
-                        <ChevronUp className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          moveFieldById(field.id, 1);
-                        }}
-                        disabled={index === visibleFields.length - 1}
-                        className={cn(
-                          "p-1 rounded transition-colors",
-                          index === visibleFields.length - 1
-                            ? "text-muted-foreground/30"
-                            : "text-muted-foreground hover:text-foreground"
-                        )}
-                        title="Move down"
-                      >
-                        <ChevronDown className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeField(field.id);
-                        }}
-                        disabled={!field.is_removable}
-                        className={cn(
-                          "p-1 rounded transition-colors",
-                          !field.is_removable
-                            ? "text-muted-foreground/30 cursor-not-allowed"
-                            : "text-muted-foreground hover:text-destructive"
-                        )}
-                        title={
-                          field.is_removable
-                            ? "Remove field"
-                            : "This field cannot be removed"
+                  <div>
+                    {visibleFields.map((field) => (
+                      <SortableFieldRow
+                        key={field.id}
+                        field={field}
+                        isExpanded={expandedField === field.id}
+                        onToggleExpand={() =>
+                          setExpandedField(expandedField === field.id ? null : field.id)
                         }
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+                        onUpdate={updateField}
+                        onRemove={removeField}
+                        inputClass={inputClass}
+                      />
+                    ))}
                   </div>
-
-                  {/* Expanded field detail */}
-                  {isExpanded && (
-                    <div className="px-4 pb-4 pt-1 space-y-3 border-t border-border/50">
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-xs font-medium mb-1">
-                            Label
-                          </label>
-                          <input
-                            type="text"
-                            value={field.label}
-                            onChange={(e) =>
-                              updateField(field.id, {
-                                label: e.target.value,
-                                field_key:
-                                  field.field_key || makeFieldKey(e.target.value),
-                              })
-                            }
-                            className={inputClass}
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium mb-1">
-                            Type
-                          </label>
-                          <select
-                            value={field.field_type}
-                            onChange={(e) =>
-                              updateField(field.id, {
-                                field_type: e.target.value as FormFieldType,
-                              })
-                            }
-                            className={inputClass}
-                          >
-                            {FIELD_TYPES.map((ft) => (
-                              <option key={ft.value} value={ft.value}>
-                                {ft.label}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-medium mb-1">
-                          Placeholder
-                        </label>
-                        <input
-                          type="text"
-                          value={field.placeholder}
-                          onChange={(e) =>
-                            updateField(field.id, { placeholder: e.target.value })
-                          }
-                          className={inputClass}
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-medium mb-1">
-                          Description
-                        </label>
-                        <input
-                          type="text"
-                          value={field.description}
-                          onChange={(e) =>
-                            updateField(field.id, { description: e.target.value })
-                          }
-                          placeholder="Help text shown below the field"
-                          className={inputClass}
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-medium mb-1">
-                          Default Value
-                        </label>
-                        <input
-                          type="text"
-                          value={field.default_value}
-                          onChange={(e) =>
-                            updateField(field.id, {
-                              default_value: e.target.value,
-                            })
-                          }
-                          className={inputClass}
-                        />
-                      </div>
-
-                      {/* Options editor for select/radio/checkbox */}
-                      {hasOptions && (
-                        <OptionsEditor
-                          options={field.options}
-                          onChange={(options) =>
-                            updateField(field.id, { options })
-                          }
-                        />
-                      )}
-
-                      {/* Toggles row */}
-                      <div className="flex items-center gap-6 pt-1">
-                        <ToggleSwitch
-                          label="Required"
-                          checked={field.is_required}
-                          onChange={(v) =>
-                            updateField(field.id, { is_required: v })
-                          }
-                        />
-                        {field.linear_field && (
-                          <ToggleSwitch
-                            label="Hidden"
-                            checked={field.is_hidden}
-                            onChange={(v) =>
-                              updateField(field.id, { is_hidden: v })
-                            }
-                          />
-                        )}
-                      </div>
-
-                      {/* Linear field mapping */}
-                      <div>
-                        <label className="block text-xs font-medium mb-1">
-                          Linear Field Mapping
-                        </label>
-                        <select
-                          value={field.linear_field ?? ""}
-                          onChange={(e) =>
-                            updateField(field.id, {
-                              linear_field:
-                                (e.target.value as LinearFieldMapping) || null,
-                            })
-                          }
-                          className={inputClass}
-                        >
-                          <option value="">None</option>
-                          <option value="title">Title</option>
-                          <option value="description">Description</option>
-                          <option value="priority">Priority</option>
-                          <option value="label_ids">Labels</option>
-                          <option value="project_id">Project</option>
-                          <option value="cycle_id">Cycle</option>
-                        </select>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                </SortableContext>
               );
-            });
             })()}
-          </div>
+          </DndContext>
 
           {/* Add field */}
           <div className="px-4 py-3">
@@ -1061,6 +877,277 @@ export function FormBuilder({ form, hubId, hubTeams }: FormBuilderProps) {
           </div>
         </section>
       </div>
+    </div>
+  );
+}
+
+function SortableFieldRow({
+  field,
+  isExpanded,
+  onToggleExpand,
+  onUpdate,
+  onRemove,
+  inputClass,
+}: {
+  field: FieldDraft;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
+  onUpdate: (id: string, patch: Partial<FieldDraft>) => void;
+  onRemove: (id: string) => void;
+  inputClass: string;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: field.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  const badge = FIELD_TYPE_BADGE[field.field_type] ?? FIELD_TYPE_BADGE.text;
+  const hasOptions =
+    field.field_type === "select" ||
+    field.field_type === "radio" ||
+    field.field_type === "checkbox";
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "border-b border-border last:border-b-0",
+        isExpanded && "bg-muted/20",
+        isDragging && "relative z-10 shadow-md opacity-90 bg-card"
+      )}
+    >
+      {/* Field row */}
+      <div
+        className="flex items-center gap-2 px-4 py-2.5 cursor-pointer hover:bg-accent/30 transition-colors"
+        onClick={onToggleExpand}
+      >
+        <button
+          aria-label="Drag to reorder"
+          className="cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-muted-foreground shrink-0 touch-none"
+          {...attributes}
+          {...listeners}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <GripVertical className="w-3.5 h-3.5" />
+        </button>
+
+        {/* Type badge */}
+        <span
+          className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0"
+          style={{ backgroundColor: badge.bg, color: badge.text }}
+        >
+          {field.field_type}
+        </span>
+
+        {/* Label */}
+        <span className="text-sm flex-1 truncate">
+          {field.label || (
+            <span className="text-muted-foreground italic">
+              Untitled
+            </span>
+          )}
+        </span>
+
+        {/* Linear mapping indicator */}
+        {field.linear_field && (
+          <span className="text-[10px] text-muted-foreground px-1.5 py-0.5 rounded bg-muted">
+            {field.linear_field}
+          </span>
+        )}
+
+        {/* Required indicator */}
+        {field.is_required && (
+          <span className="text-[10px] text-destructive font-medium">
+            Required
+          </span>
+        )}
+
+        {/* Hidden indicator */}
+        {field.is_hidden && (
+          <span className="text-[10px] text-muted-foreground">
+            Hidden
+          </span>
+        )}
+
+        {/* Remove action */}
+        <div className="flex items-center shrink-0">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove(field.id);
+            }}
+            disabled={!field.is_removable}
+            className={cn(
+              "p-1 rounded transition-colors",
+              !field.is_removable
+                ? "text-muted-foreground/30 cursor-not-allowed"
+                : "text-muted-foreground hover:text-destructive"
+            )}
+            title={
+              field.is_removable
+                ? "Remove field"
+                : "This field cannot be removed"
+            }
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {/* Expanded field detail */}
+      {isExpanded && (
+        <div className="px-4 pb-4 pt-1 space-y-3 border-t border-border/50">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium mb-1">
+                Label
+              </label>
+              <input
+                type="text"
+                value={field.label}
+                onChange={(e) =>
+                  onUpdate(field.id, {
+                    label: e.target.value,
+                    field_key:
+                      field.field_key || makeFieldKey(e.target.value),
+                  })
+                }
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-1">
+                Type
+              </label>
+              <select
+                value={field.field_type}
+                onChange={(e) =>
+                  onUpdate(field.id, {
+                    field_type: e.target.value as FormFieldType,
+                  })
+                }
+                className={inputClass}
+              >
+                {FIELD_TYPES.map((ft) => (
+                  <option key={ft.value} value={ft.value}>
+                    {ft.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium mb-1">
+              Placeholder
+            </label>
+            <input
+              type="text"
+              value={field.placeholder}
+              onChange={(e) =>
+                onUpdate(field.id, { placeholder: e.target.value })
+              }
+              className={inputClass}
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium mb-1">
+              Description
+            </label>
+            <input
+              type="text"
+              value={field.description}
+              onChange={(e) =>
+                onUpdate(field.id, { description: e.target.value })
+              }
+              placeholder="Help text shown below the field"
+              className={inputClass}
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium mb-1">
+              Default Value
+            </label>
+            <input
+              type="text"
+              value={field.default_value}
+              onChange={(e) =>
+                onUpdate(field.id, {
+                  default_value: e.target.value,
+                })
+              }
+              className={inputClass}
+            />
+          </div>
+
+          {/* Options editor for select/radio/checkbox */}
+          {hasOptions && (
+            <OptionsEditor
+              options={field.options}
+              onChange={(options) =>
+                onUpdate(field.id, { options })
+              }
+            />
+          )}
+
+          {/* Toggles row */}
+          <div className="flex items-center gap-6 pt-1">
+            <ToggleSwitch
+              label="Required"
+              checked={field.is_required}
+              onChange={(v) =>
+                onUpdate(field.id, { is_required: v })
+              }
+            />
+            {field.linear_field && (
+              <ToggleSwitch
+                label="Hidden"
+                checked={field.is_hidden}
+                onChange={(v) =>
+                  onUpdate(field.id, { is_hidden: v })
+                }
+              />
+            )}
+          </div>
+
+          {/* Linear field mapping */}
+          <div>
+            <label className="block text-xs font-medium mb-1">
+              Linear Field Mapping
+            </label>
+            <select
+              value={field.linear_field ?? ""}
+              onChange={(e) =>
+                onUpdate(field.id, {
+                  linear_field:
+                    (e.target.value as LinearFieldMapping) || null,
+                })
+              }
+              className={inputClass}
+            >
+              <option value="">None</option>
+              <option value="title">Title</option>
+              <option value="description">Description</option>
+              <option value="priority">Priority</option>
+              <option value="label_ids">Labels</option>
+              <option value="project_id">Project</option>
+              <option value="cycle_id">Cycle</option>
+            </select>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

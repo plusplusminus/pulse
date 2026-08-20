@@ -1,5 +1,18 @@
 import crypto from "crypto";
 import { supabaseAdmin } from "./supabase";
+import {
+  issueContextFromData,
+  loadIssueContext,
+  ensurePulseAttachmentsForIssue,
+} from "./attachment-sync";
+import { isClientFacing } from "./hub-read";
+import { reactPulseOnComment } from "./pulse-reaction";
+import { updateIssueTitle } from "./linear-push";
+import {
+  applyEmojiToTitle,
+  classifyIssueEmoji,
+  extractLeadingEmoji,
+} from "./issue-emoji";
 
 // -- Signature verification --------------------------------------------------
 
@@ -63,6 +76,18 @@ type LinearProjectData = {
   priority?: number;
   createdAt?: string;
   updatedAt?: string;
+};
+
+type LinearProjectUpdateData = {
+  id: string;
+  body?: string;
+  health?: string;
+  project?: { id?: string };
+  projectId?: string;
+  user?: { name?: string };
+  createdAt?: string;
+  updatedAt?: string;
+  editedAt?: string;
 };
 
 type LinearInitiativeData = {
@@ -180,6 +205,72 @@ export async function handleIssueEvent(
     console.error("Failed to upsert synced_issue:", error);
     throw error;
   }
+
+  if (action === "create") {
+    const ctx = await issueContextFromData(data);
+    if (ctx) void ensurePulseAttachmentsForIssue(ctx);
+  }
+
+  if (action === "update") {
+    void reconcileIssueEmojiOnUpdate(issue);
+  }
+}
+
+// -- Emoji reconciliation ---------------------------------------------------
+
+/**
+ * On issue update, recompute the expected leading emoji from labels + priority
+ * and update the title if it has drifted. No-op if nothing changed (which is
+ * also why our own title-update webhooks don't loop here).
+ */
+async function reconcileIssueEmojiOnUpdate(
+  issue: LinearIssueData
+): Promise<void> {
+  if (!issue.id || typeof issue.title !== "string") return;
+  const newEmoji = classifyIssueEmoji(issue.labels, issue.priority);
+  const newTitle = applyEmojiToTitle(issue.title, newEmoji);
+  if (newTitle === issue.title) return;
+  try {
+    await updateIssueTitle(issue.id, newTitle);
+  } catch (err) {
+    console.error(
+      `[issue-emoji] Failed to reconcile title for ${issue.id}:`,
+      err
+    );
+  }
+}
+
+/**
+ * On comment create, fill in the emoji prefix on the parent issue's title
+ * if it doesn't already have one. Never replaces an existing prefix —
+ * full reconciliation only runs on issue-update events.
+ */
+async function backfillIssueEmojiFromComment(issueId: string): Promise<void> {
+  const { data, error } = await supabaseAdmin
+    .from("synced_issues")
+    .select("data")
+    .eq("linear_id", issueId)
+    .maybeSingle();
+  if (error || !data?.data) return;
+
+  const issue = data.data as LinearIssueData;
+  if (!issue.id || typeof issue.title !== "string") return;
+
+  const { emoji: existing } = extractLeadingEmoji(issue.title);
+  if (existing) return;
+
+  const newEmoji = classifyIssueEmoji(issue.labels, issue.priority);
+  if (!newEmoji) return;
+
+  const newTitle = applyEmojiToTitle(issue.title, newEmoji);
+  try {
+    await updateIssueTitle(issue.id, newTitle);
+  } catch (err) {
+    console.error(
+      `[issue-emoji] Failed to backfill title for ${issueId}:`,
+      err
+    );
+  }
 }
 
 // -- Comment event handler ---------------------------------------------------
@@ -209,6 +300,21 @@ export async function handleCommentEvent(
   if (error) {
     console.error("Failed to upsert synced_comment:", error);
     throw error;
+  }
+
+  if (action === "create") {
+    const issueId = (comment.issue as { id?: string } | undefined)?.id;
+    if (issueId) {
+      const ctx = await loadIssueContext(issueId);
+      if (ctx) void ensurePulseAttachmentsForIssue(ctx);
+      void backfillIssueEmojiFromComment(issueId);
+    }
+
+    // Confirm client-facing Linear comments made it into Pulse by adding
+    // the :pulse: reaction on the original Linear comment.
+    if (comment.body && isClientFacing(comment.body)) {
+      void reactPulseOnComment(comment.id);
+    }
   }
 }
 
@@ -309,6 +415,18 @@ export function mapInitiativeWebhookToRow(
 
 // -- Project event handler ---------------------------------------------------
 
+/** Fields in the data JSON blob that come from GraphQL nested relations
+ *  (initial sync / reconciliation) but are NOT present in webhook payloads.
+ *  We preserve these from the existing row so webhooks don't wipe them out. */
+const PROJECT_PRESERVED_FIELDS = [
+  "links",
+  "documents",
+  "milestones",
+  "labels",
+  "teams",
+  "initiatives",
+] as const;
+
 export async function handleProjectEvent(
   action: string,
   data: Record<string, unknown>,
@@ -327,6 +445,25 @@ export async function handleProjectEvent(
 
   const row = mapProjectWebhookToRow(action, data, userId);
 
+  // Merge: preserve nested relation fields from the existing row's data blob
+  // that webhook payloads don't include (links, documents, milestones, etc.)
+  const { data: existing } = await supabaseAdmin
+    .from("synced_projects")
+    .select("data")
+    .eq("user_id", userId)
+    .eq("linear_id", project.id)
+    .single();
+
+  if (existing?.data && typeof existing.data === "object") {
+    const existingData = existing.data as Record<string, unknown>;
+    const rowData = row.data as Record<string, unknown>;
+    for (const field of PROJECT_PRESERVED_FIELDS) {
+      if (!(field in rowData) && field in existingData) {
+        rowData[field] = existingData[field];
+      }
+    }
+  }
+
   const { error } = await supabaseAdmin.from("synced_projects").upsert(row, {
     onConflict: "user_id,linear_id",
   });
@@ -337,7 +474,78 @@ export async function handleProjectEvent(
   }
 }
 
+// -- Project update mapping + event handler ----------------------------------
+//
+// Linear "project health updates" (ProjectUpdate). Every update is synced;
+// client visibility is decided at READ time via the pulse/heyclient body
+// prefix (see hub-read.ts). Do NOT filter here.
+
+export function mapProjectUpdateWebhookToRow(
+  action: string,
+  data: Record<string, unknown>,
+  userId: string
+): Record<string, unknown> {
+  const update = data as unknown as LinearProjectUpdateData;
+
+  const row: Record<string, unknown> = {
+    linear_id: update.id,
+    user_id: userId,
+    synced_at: new Date().toISOString(),
+    data, // Store full webhook payload as-is
+  };
+
+  // Linear webhooks send projectId as a top-level string OR nested object
+  const projectId = update.project?.id ?? update.projectId;
+  if (projectId) row.project_id = projectId;
+  if (update.health !== undefined) row.health = update.health;
+
+  if (action === "create") {
+    row.created_at = update.createdAt || new Date().toISOString();
+    row.updated_at = update.updatedAt || new Date().toISOString();
+  } else {
+    row.updated_at = update.updatedAt || new Date().toISOString();
+  }
+
+  return row;
+}
+
+export async function handleProjectUpdateEvent(
+  action: string,
+  data: Record<string, unknown>,
+  userId: string
+): Promise<void> {
+  const update = data as unknown as LinearProjectUpdateData;
+
+  if (action === "remove") {
+    await supabaseAdmin
+      .from("synced_project_updates")
+      .delete()
+      .eq("user_id", userId)
+      .eq("linear_id", update.id);
+    return;
+  }
+
+  const row = mapProjectUpdateWebhookToRow(action, data, userId);
+
+  const { error } = await supabaseAdmin
+    .from("synced_project_updates")
+    .upsert(row, { onConflict: "user_id,linear_id" });
+
+  if (error) {
+    console.error("Failed to upsert synced_project_update:", error);
+    throw error;
+  }
+}
+
 // -- Cycle event handler -----------------------------------------------------
+
+/** Fields in the data JSON blob that come from GraphQL nested relations
+ *  (initial sync / reconciliation) but are NOT present in webhook payloads.
+ *  We preserve these from the existing row so webhooks don't wipe them out. */
+const CYCLE_PRESERVED_FIELDS = [
+  "links",
+  "documents",
+] as const;
 
 export async function handleCycleEvent(
   action: string,
@@ -356,6 +564,25 @@ export async function handleCycleEvent(
   }
 
   const row = mapCycleWebhookToRow(action, data, userId);
+
+  // Merge: preserve nested relation fields from the existing row's data blob
+  // that webhook payloads don't include (links, documents)
+  const { data: existing } = await supabaseAdmin
+    .from("synced_cycles")
+    .select("data")
+    .eq("user_id", userId)
+    .eq("linear_id", cycle.id)
+    .single();
+
+  if (existing?.data && typeof existing.data === "object") {
+    const existingData = existing.data as Record<string, unknown>;
+    const rowData = row.data as Record<string, unknown>;
+    for (const field of CYCLE_PRESERVED_FIELDS) {
+      if (!(field in rowData) && field in existingData) {
+        rowData[field] = existingData[field];
+      }
+    }
+  }
 
   const { error } = await supabaseAdmin.from("synced_cycles").upsert(row, {
     onConflict: "user_id,linear_id",
@@ -414,6 +641,9 @@ export async function routeWebhookEvent(
       break;
     case "Project":
       await handleProjectEvent(action, data, userId);
+      break;
+    case "ProjectUpdate":
+      await handleProjectUpdateEvent(action, data, userId);
       break;
     case "Initiative":
       await handleInitiativeEvent(action, data, userId);

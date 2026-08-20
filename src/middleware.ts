@@ -3,7 +3,13 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { lookupHubBySlug, lookupPPMAdmin } from '@/lib/edge-db'
 
 export default async function middleware(request: NextRequest) {
-  const { session, headers, authorizationUrl } = await authkit(request)
+  // On Vercel preview deployments, derive the redirect URI from the request
+  // so the OAuth callback returns to the preview URL instead of production.
+  const redirectUri = process.env.VERCEL_ENV === 'preview'
+    ? `${request.nextUrl.origin}/auth/callback`
+    : undefined
+
+  const { session, headers, authorizationUrl } = await authkit(request, { redirectUri })
   const { pathname } = request.nextUrl
 
   // Enforce auth on protected PPM routes
@@ -34,10 +40,18 @@ export default async function middleware(request: NextRequest) {
     const slug = hubMatch[1]
     const isLoginPage = pathname === `/hub/${slug}/login`
 
+    // Carry the original destination (e.g. ?issue= deep links from Linear's
+    // "View in Pulse" attachments) through the login flow (PULSE-306).
+    const buildLoginUrl = () => {
+      const loginUrl = new URL(`/hub/${slug}/login`, request.url)
+      const next = pathname + request.nextUrl.search
+      if (next !== `/hub/${slug}`) loginUrl.searchParams.set('next', next)
+      return loginUrl.toString()
+    }
+
     // Login page is always accessible
     if (!isLoginPage && !session.user) {
-      const loginUrl = new URL(`/hub/${slug}/login`, request.url)
-      return handleAuthkitHeaders(request, headers, { redirect: loginUrl.toString() })
+      return handleAuthkitHeaders(request, headers, { redirect: buildLoginUrl() })
     }
 
     // If authenticated, verify org match or PPM admin status
@@ -53,12 +67,14 @@ export default async function middleware(request: NextRequest) {
       if (session.organizationId) {
         // Client user — verify org matches hub
         if (hub && hub.workos_org_id && session.organizationId !== hub.workos_org_id) {
-          const loginUrl = new URL(`/hub/${slug}/login`, request.url)
-          return handleAuthkitHeaders(request, headers, { redirect: loginUrl.toString() })
+          return handleAuthkitHeaders(request, headers, { redirect: buildLoginUrl() })
         }
       } else {
-        // No org, not admin — deny
-        return new NextResponse('Forbidden', { status: 403 })
+        // Authenticated but no org — redirect to the hub login page so the
+        // user can sign in through the org-specific flow. This commonly
+        // happens when a user completed email/code auth without a prior org
+        // invitation acceptance (e.g. the callback was broken).
+        return handleAuthkitHeaders(request, headers, { redirect: buildLoginUrl() })
       }
     }
 
@@ -70,6 +86,6 @@ export default async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\..*).*)',
+    '/((?!monitoring|_next/static|_next/image|favicon.ico|.*\\..*).*)',
   ],
 }

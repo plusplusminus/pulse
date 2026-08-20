@@ -6,6 +6,14 @@ import {
   EVENT_TYPES,
   type NotificationEventType,
 } from "@/lib/notification-preferences";
+import {
+  getSettings,
+  upsertSettings,
+  COMMENT_SCOPES,
+  WATCH_MODES,
+  type CommentScope,
+  type WatchMode,
+} from "@/lib/notification-settings";
 
 export async function GET(
   _request: Request,
@@ -22,8 +30,17 @@ export async function GET(
       );
     }
 
-    const preferences = await getPreferencesForUser(hubId, auth.user.id);
-    return NextResponse.json({ preferences });
+    const [preferences, settings] = await Promise.all([
+      getPreferencesForUser(hubId, auth.user.id),
+      getSettings(hubId, auth.user.id),
+    ]);
+    return NextResponse.json({
+      preferences,
+      settings: {
+        comment_scope: settings.commentScope,
+        watch_mode: settings.watchMode,
+      },
+    });
   } catch (error) {
     console.error("GET /api/hub/[hubId]/notifications/preferences error:", error);
     return NextResponse.json(
@@ -56,6 +73,7 @@ export async function PUT(
         digest_time?: string;
         timezone?: string;
       }>;
+      settings?: { comment_scope?: string; watch_mode?: string };
     };
 
     if (!Array.isArray(body.preferences) || body.preferences.length === 0) {
@@ -83,6 +101,28 @@ export async function PUT(
       }
     }
 
+    const commentScopeInput = body.settings?.comment_scope;
+    if (
+      commentScopeInput !== undefined &&
+      !COMMENT_SCOPES.includes(commentScopeInput as CommentScope)
+    ) {
+      return NextResponse.json(
+        { error: `Invalid comment_scope: ${commentScopeInput}` },
+        { status: 400 }
+      );
+    }
+
+    const watchModeInput = body.settings?.watch_mode;
+    if (
+      watchModeInput !== undefined &&
+      !WATCH_MODES.includes(watchModeInput as WatchMode)
+    ) {
+      return NextResponse.json(
+        { error: `Invalid watch_mode: ${watchModeInput}` },
+        { status: 400 }
+      );
+    }
+
     const preferences = await upsertPreferences(
       hubId,
       auth.user.id,
@@ -95,7 +135,25 @@ export async function PUT(
       }>
     );
 
-    return NextResponse.json({ preferences });
+    const settings =
+      commentScopeInput !== undefined || watchModeInput !== undefined
+        ? await upsertSettings(hubId, auth.user.id, {
+            ...(commentScopeInput !== undefined
+              ? { commentScope: commentScopeInput as CommentScope }
+              : {}),
+            ...(watchModeInput !== undefined
+              ? { watchMode: watchModeInput as WatchMode }
+              : {}),
+          })
+        : await getSettings(hubId, auth.user.id);
+
+    return NextResponse.json({
+      preferences,
+      settings: {
+        comment_scope: settings.commentScope,
+        watch_mode: settings.watchMode,
+      },
+    });
   } catch (error) {
     console.error("PUT /api/hub/[hubId]/notifications/preferences error:", error);
     return NextResponse.json(

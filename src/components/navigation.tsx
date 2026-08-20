@@ -12,7 +12,7 @@ export function Navigation() {
     return (
       <nav className="border-b border-border/50 bg-card/80 backdrop-blur-sm px-6 py-4">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
-          <h1 className="text-xl font-semibold">PPM Client Hub</h1>
+          <h1 className="text-xl font-semibold">Pulse</h1>
           <div className="text-sm text-muted-foreground">Loading...</div>
         </div>
       </nav>
@@ -23,7 +23,7 @@ export function Navigation() {
     <nav className="border-b border-border/50 bg-card/80 backdrop-blur-sm px-6 py-4 sticky top-0 z-50">
       <div className="max-w-7xl mx-auto flex justify-between items-center">
         <Link href="/" className="text-xl font-semibold hover:text-primary transition-colors duration-200">
-          PPM Client Hub
+          Pulse
         </Link>
 
         <div className="flex items-center gap-2">

@@ -17,6 +17,7 @@ function makeRule(overrides: Partial<HubWorkflowRule> = {}): HubWorkflowRule {
     trigger_type: "label_added",
     trigger_label_id: "label-a",
     trigger_from_label_id: null,
+    condition_state_ids: null,
     action_type: "set_status",
     action_config: { stateId: "state-done" },
     created_at: "2026-01-01T00:00:00Z",
@@ -225,6 +226,147 @@ describe("evaluateWorkflowRules", () => {
           trigger_type: "label_changed",
           trigger_label_id: "label-to",
           trigger_from_label_id: null,
+        }),
+      ];
+      expect(evaluateWorkflowRules(ctx, rules)).toEqual([]);
+    });
+  });
+
+  // -- Status condition --
+
+  describe("status condition", () => {
+    it("matches when issue state is in condition_state_ids", () => {
+      const ctx: LabelChangeContext = {
+        previousLabelIds: [],
+        newLabelIds: ["label-a"],
+        addedLabelIds: ["label-a"],
+        removedLabelIds: [],
+        currentStateId: "state-staging",
+      };
+      const rules = [
+        makeRule({
+          trigger_type: "label_added",
+          trigger_label_id: "label-a",
+          condition_state_ids: ["state-staging", "state-qa"],
+          action_config: { stateId: "state-ready" },
+        }),
+      ];
+      const actions = evaluateWorkflowRules(ctx, rules);
+      expect(actions).toHaveLength(1);
+    });
+
+    it("does NOT match when issue state is NOT in condition_state_ids", () => {
+      const ctx: LabelChangeContext = {
+        previousLabelIds: [],
+        newLabelIds: ["label-a"],
+        addedLabelIds: ["label-a"],
+        removedLabelIds: [],
+        currentStateId: "state-prod",
+      };
+      const rules = [
+        makeRule({
+          trigger_type: "label_added",
+          trigger_label_id: "label-a",
+          condition_state_ids: ["state-staging"],
+          action_config: { stateId: "state-ready" },
+        }),
+      ];
+      expect(evaluateWorkflowRules(ctx, rules)).toEqual([]);
+    });
+
+    it("null condition_state_ids fires unconditionally", () => {
+      const ctx: LabelChangeContext = {
+        previousLabelIds: [],
+        newLabelIds: ["label-a"],
+        addedLabelIds: ["label-a"],
+        removedLabelIds: [],
+        currentStateId: "state-anything",
+      };
+      const rules = [
+        makeRule({
+          trigger_type: "label_added",
+          trigger_label_id: "label-a",
+          condition_state_ids: null,
+        }),
+      ];
+      const actions = evaluateWorkflowRules(ctx, rules);
+      expect(actions).toHaveLength(1);
+    });
+
+    it("empty condition_state_ids array never fires", () => {
+      const ctx: LabelChangeContext = {
+        previousLabelIds: [],
+        newLabelIds: ["label-a"],
+        addedLabelIds: ["label-a"],
+        removedLabelIds: [],
+        currentStateId: "state-staging",
+      };
+      const rules = [
+        makeRule({
+          trigger_type: "label_added",
+          trigger_label_id: "label-a",
+          condition_state_ids: [],
+        }),
+      ];
+      expect(evaluateWorkflowRules(ctx, rules)).toEqual([]);
+    });
+
+    it("same label triggers different actions based on current state", () => {
+      const ctxStaging: LabelChangeContext = {
+        previousLabelIds: [],
+        newLabelIds: ["label-approved"],
+        addedLabelIds: ["label-approved"],
+        removedLabelIds: [],
+        currentStateId: "state-staging-review",
+      };
+      const ctxProd: LabelChangeContext = {
+        previousLabelIds: [],
+        newLabelIds: ["label-approved"],
+        addedLabelIds: ["label-approved"],
+        removedLabelIds: [],
+        currentStateId: "state-prod-review",
+      };
+      const rules = [
+        makeRule({
+          id: "rule-staging",
+          trigger_type: "label_added",
+          trigger_label_id: "label-approved",
+          condition_state_ids: ["state-staging-review"],
+          action_config: { stateId: "state-ready-for-release" },
+        }),
+        makeRule({
+          id: "rule-prod",
+          trigger_type: "label_added",
+          trigger_label_id: "label-approved",
+          condition_state_ids: ["state-prod-review"],
+          action_config: { stateId: "state-done" },
+        }),
+      ];
+
+      const stagingActions = evaluateWorkflowRules(ctxStaging, rules);
+      expect(stagingActions).toHaveLength(1);
+      expect(stagingActions[0].ruleId).toBe("rule-staging");
+      expect(stagingActions[0].actionConfig).toEqual({ stateId: "state-ready-for-release" });
+
+      const prodActions = evaluateWorkflowRules(ctxProd, rules);
+      expect(prodActions).toHaveLength(1);
+      expect(prodActions[0].ruleId).toBe("rule-prod");
+      expect(prodActions[0].actionConfig).toEqual({ stateId: "state-done" });
+    });
+
+    it("does NOT match when currentStateId is undefined and condition is set", () => {
+      const ctx: LabelChangeContext = {
+        previousLabelIds: [],
+        newLabelIds: ["label-a"],
+        addedLabelIds: ["label-a"],
+        removedLabelIds: [],
+        // currentStateId is undefined
+      };
+      const rules = [
+        makeRule({
+          trigger_type: "label_added",
+          trigger_label_id: "label-a",
+          condition_state_ids: ["state-staging"],
         }),
       ];
       expect(evaluateWorkflowRules(ctx, rules)).toEqual([]);

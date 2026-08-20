@@ -1,0 +1,24 @@
+-- PULSE-307: index the JSONB state-id path used by resolveStateName().
+--
+-- resolveStateName() (src/lib/notification-events.ts) resolves a Linear
+-- workflow-state UUID to its name by querying synced_issues with
+-- `data->state->>id = <id>`, which runs on every status-change webhook.
+-- Without an index that expression forces a sequential scan that gets slower as
+-- synced_issues grows. This functional index matches the expression PostgREST
+-- generates (data -> 'state' ->> 'id') so the lookup is index-backed.
+--
+-- Note: plain CREATE INDEX takes an ACCESS EXCLUSIVE lock that blocks writes to
+-- synced_issues while the index builds. That's fine for a small table, but if
+-- synced_issues exceeds ~1,000,000 rows, prefer CREATE INDEX CONCURRENTLY in a
+-- low-traffic window instead.
+--
+-- Check the size before deploying:
+--   SELECT count(*) FROM synced_issues;                      -- exact
+--   SELECT reltuples::bigint FROM pg_class                   -- fast estimate
+--     WHERE relname = 'synced_issues';
+-- If above ~1,000,000 rows, skip this migration's statement and run manually
+-- (CREATE INDEX CONCURRENTLY cannot run inside a migration transaction):
+--   CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_synced_issues_state_id
+--     ON synced_issues ((data -> 'state' ->> 'id'));
+CREATE INDEX IF NOT EXISTS idx_synced_issues_state_id
+  ON synced_issues ((data -> 'state' ->> 'id'));

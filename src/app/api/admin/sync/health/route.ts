@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import { withAdminAuth } from "@/lib/admin-auth";
 import { supabaseAdmin } from "@/lib/supabase";
 
@@ -135,6 +136,7 @@ export async function GET() {
       failedPushes,
     });
   } catch (error) {
+    Sentry.captureException(error, { tags: { area: "sync" } });
     console.error("GET /api/admin/sync/health error:", error);
     const message =
       error instanceof Error ? error.message : "Internal server error";

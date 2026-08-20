@@ -7,6 +7,7 @@ export const EVENT_TYPES = [
   "new_issue",
   "cycle_update",
   "initiative_update",
+  "health_update",
 ] as const;
 
 export type NotificationEventType = (typeof EVENT_TYPES)[number];
@@ -19,12 +20,41 @@ export type NotificationPreference = {
   timezone: string;
 };
 
-const DEFAULT_PREFERENCE: Omit<NotificationPreference, "event_type"> = {
+// Quiet-by-default baseline (PULSE-360).
+//
+// New hub members have no stored rows, so these defaults decide what they
+// receive out of the box. Previously every event type defaulted to a daily
+// email digest, which firehosed clients with automated noise and buried the
+// messages PMs actually addressed to them. We now default email ON only for
+// the client-directed streams (`comment`, `health_update`) and OFF for automated
+// event types. The in-app activity feed still surfaces everything (in_app_enabled
+// stays true); only the push channel (email) is quieted.
+//
+// `health_update` (PULSE-363) is a deliberate PM-authored client update gated by
+// the heyclient/pulse trigger — like comments, it's directed at the client, so
+// it's email-on by default.
+const EMAIL_ON_BY_DEFAULT: ReadonlySet<NotificationEventType> = new Set([
+  "comment",
+  "health_update",
+]);
+
+const BASE_DEFAULT = {
   in_app_enabled: true,
-  email_mode: "off",
   digest_time: "09:00",
-  timezone: "UTC",
-};
+  // Recipients are predominantly SA-based, so "09:00" means 9am SAST, not UTC
+  // (PULSE-307). Backfilled for existing rows in 20260602_digest_default_timezone.sql.
+  timezone: "Africa/Johannesburg",
+} as const;
+
+export function defaultPreferenceFor(
+  eventType: NotificationEventType
+): NotificationPreference {
+  return {
+    event_type: eventType,
+    ...BASE_DEFAULT,
+    email_mode: EMAIL_ON_BY_DEFAULT.has(eventType) ? "immediate" : "off",
+  };
+}
 
 /**
  * Fetch notification preferences for a user in a hub.
@@ -56,8 +86,8 @@ export async function getPreferencesForUser(
     });
   }
 
-  return EVENT_TYPES.map((eventType) =>
-    stored.get(eventType) ?? { event_type: eventType, ...DEFAULT_PREFERENCE }
+  return EVENT_TYPES.map(
+    (eventType) => stored.get(eventType) ?? defaultPreferenceFor(eventType)
   );
 }
 
@@ -76,16 +106,19 @@ export async function upsertPreferences(
     timezone?: string;
   }>
 ): Promise<NotificationPreference[]> {
-  const rows = preferences.map((p) => ({
-    hub_id: hubId,
-    user_id: userId,
-    event_type: p.event_type,
-    in_app_enabled: p.in_app_enabled ?? true,
-    email_mode: p.email_mode ?? "off",
-    digest_time: p.digest_time ?? "09:00",
-    timezone: p.timezone ?? "UTC",
-    updated_at: new Date().toISOString(),
-  }));
+  const rows = preferences.map((p) => {
+    const d = defaultPreferenceFor(p.event_type);
+    return {
+      hub_id: hubId,
+      user_id: userId,
+      event_type: p.event_type,
+      in_app_enabled: p.in_app_enabled ?? d.in_app_enabled,
+      email_mode: p.email_mode ?? d.email_mode,
+      digest_time: p.digest_time ?? d.digest_time,
+      timezone: p.timezone ?? d.timezone,
+      updated_at: new Date().toISOString(),
+    };
+  });
 
   const { error } = await supabaseAdmin
     .from("notification_preferences")

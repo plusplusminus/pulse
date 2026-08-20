@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { withHubAuthWrite, type HubAuthError } from "@/lib/hub-auth";
 import { supabaseAdmin } from "@/lib/supabase";
 import { pushCommentToLinear } from "@/lib/linear-push";
+import { isPPMAdmin } from "@/lib/ppm-admin";
+import { isAdminLinearConnected } from "@/lib/admin-linear-oauth";
 import { logSyncEvent } from "@/lib/sync-logger";
+import { autoSubscribe } from "@/lib/task-subscriptions";
 
 export async function POST(
   request: Request,
@@ -37,6 +40,24 @@ export async function POST(
       .filter(Boolean)
       .join(" ") || user.email;
 
+    // Check if user is a PPM admin (their personal Linear token will be used if available)
+    const isAdmin = await isPPMAdmin(user.id, user.email);
+
+    // PPM admins must connect their Linear account before creating comments
+    if (isAdmin) {
+      const connected = await isAdminLinearConnected(user.id);
+      if (!connected) {
+        return NextResponse.json(
+          {
+            error: "linear_not_connected",
+            message:
+              "Connect your Linear account in admin settings before creating issues/comments",
+          },
+          { status: 403 }
+        );
+      }
+    }
+
     // Insert comment locally
     const { data: comment, error: insertError } = await supabaseAdmin
       .from("hub_comments")
@@ -61,14 +82,22 @@ export async function POST(
       );
     }
 
-    // Push to Linear (non-blocking for the response — we update status after)
-    const linearBody = `**${authorName}:** ${body.trim()}`;
+    // Auto-subscribe the commenter to this task so they follow future updates —
+    // unless they've already set an explicit override (PULSE-364). Fire-and-forget.
+    void autoSubscribe(hubId, user.id, issueLinearId, "auto_comment");
 
+    // Push to Linear with author attribution (createAsUser if OAuth app configured)
     try {
       const linearCommentId = await pushCommentToLinear(
         issueLinearId,
-        linearBody,
-        parentId
+        body.trim(),
+        parentId,
+        undefined,
+        {
+          authorName,
+          authorAvatarUrl: user.profilePictureUrl ?? undefined,
+        },
+        isAdmin ? user.id : undefined
       );
 
       await supabaseAdmin
@@ -152,6 +181,7 @@ export async function PATCH(
       );
     }
 
+    const { user } = auth;
     const { commentId } = (await request.json()) as { commentId?: string };
     if (!commentId) {
       return NextResponse.json(
@@ -159,6 +189,10 @@ export async function PATCH(
         { status: 400 }
       );
     }
+
+    // Check if user is a PPM admin (use their personal Linear token if available)
+    const isAdmin = await isPPMAdmin(user.id, user.email);
+    const adminUserId = isAdmin ? user.id : undefined;
 
     // Fetch the failed comment
     const { data: comment, error: fetchError } = await supabaseAdmin
@@ -176,13 +210,19 @@ export async function PATCH(
       );
     }
 
-    const linearBody = `**${comment.author_name}:** ${comment.body}`;
-
     try {
+      // Avatar URL is not persisted in hub_comments (it's transient from the
+      // WorkOS user profile at request time), so retries won't have an avatar.
+      // The author name is still attributed via createAsUser.
       const linearCommentId = await pushCommentToLinear(
         comment.issue_linear_id,
-        linearBody,
-        comment.parent_comment_id ?? undefined
+        comment.body,
+        comment.parent_comment_id ?? undefined,
+        undefined,
+        {
+          authorName: comment.author_name,
+        },
+        adminUserId
       );
 
       await supabaseAdmin

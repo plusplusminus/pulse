@@ -53,7 +53,7 @@ type DocCategory = {
 const categories: DocCategory[] = [
   {
     name: 'Product',
-    description: 'How PPM Client Hub works for you and your clients.',
+    description: 'How Pulse works for you and your clients.',
     icon: Users,
     type: 'rich',
     docs: [
@@ -87,7 +87,7 @@ export default function DocsPage() {
         <div className="mb-10">
           <h1 className="text-3xl font-bold mb-2">Documentation</h1>
           <p className="text-muted-foreground">
-            Product guides and technical reference for the PPM Client Hub team.
+            Product guides and technical reference for the Pulse team.
           </p>
         </div>
 
