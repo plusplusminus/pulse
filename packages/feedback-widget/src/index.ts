@@ -2,8 +2,9 @@ import type { PulseConfig, RuntimeConfig, SubmitResult } from './types'
 import { ConsoleInterceptor } from './console'
 import { detectSentry } from './sentry'
 import { collectContext } from './context'
-import { captureScreenshot, cropBlob, blobToBase64 } from './screenshot'
+import { captureScreenshot, cropBlob } from './screenshot'
 import { submitFeedback } from './api'
+import { uploadBlob } from './transport/upload'
 import { Widget } from './widget'
 import { normaliseApiUrl } from './config'
 import { fetchBootstrap, resolveRuntimeConfig } from './bootstrap'
@@ -118,9 +119,15 @@ export class Pulse implements PulseInstance {
       this.custom
     )
 
-    let screenshotBase64: string | undefined
+    // Bytes go browser -> Supabase Storage; only the object key is submitted.
+    let screenshotStoragePath: string | undefined
     if (formData.screenshot && this.runtime.capture.screenshot) {
-      screenshotBase64 = await blobToBase64(formData.screenshot)
+      screenshotStoragePath = await uploadBlob(
+        this.runtime.apiUrl,
+        this.runtime.siteKey,
+        'screenshot',
+        formData.screenshot
+      )
     }
 
     const result = await submitFeedback(this.runtime.apiUrl, this.runtime.siteKey, {
@@ -132,7 +139,7 @@ export class Pulse implements PulseInstance {
         email: formData.email,
         name: formData.name,
       },
-      screenshot: screenshotBase64,
+      screenshotStoragePath,
     })
 
     this.runtime.onSubmit?.(result)

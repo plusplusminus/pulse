@@ -57,7 +57,8 @@ export interface FeedbackPayload {
     email: string
     name?: string
   }
-  screenshot?: string
+  /** Object key in the private widget-media bucket (from uploadBlob) */
+  screenshotStoragePath?: string
 }
 
 export type WidgetState = 'closed' | 'open' | 'capturing' | 'annotating' | 'submitting' | 'success' | 'error'
