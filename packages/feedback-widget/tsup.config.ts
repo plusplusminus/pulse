@@ -28,6 +28,20 @@ export default defineConfig([
     define: { __PULSE_API_URL__: JSON.stringify(PULSE_API_URL) },
   },
   {
+    // Lazily injected capture engine (snapdom). Kept out of the embed on
+    // purpose: the iife format cannot code-split, so anything the embed
+    // imports — statically or dynamically — is inlined into it.
+    entry: { 'capture-engine': 'src/entries/capture-engine.ts' },
+    format: ['iife'],
+    globalName: '__PulseCaptureEngine',
+    sourcemap: true,
+    clean: false,
+    target: 'es2020',
+    minify: true,
+    treeshake: true,
+    define: { __PULSE_API_URL__: JSON.stringify(PULSE_API_URL) },
+  },
+  {
     // Cookie-gated loader; unchanged semantics
     entry: { 'pulse-loader': 'src/loader.ts' },
     format: ['iife'],

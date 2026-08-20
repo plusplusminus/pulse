@@ -175,7 +175,12 @@ export class Pulse implements PulseInstance {
   /** null means the site has screenshots switched off; a real failure rejects. */
   async captureScreenshot(): Promise<Blob | null> {
     if (!this.runtime.capture.screenshot) return null
-    return captureViewport({ maskSelectors: this.runtime.privacy.maskSelectors })
+    // apiUrl is the SAME resolved base the widget is already talking to, so the
+    // engine is fetched from whichever Pulse origin this install points at.
+    return captureViewport({
+      maskSelectors: this.runtime.privacy.maskSelectors,
+      apiUrl: this.runtime.apiUrl,
+    })
   }
 
 }

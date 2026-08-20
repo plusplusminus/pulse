@@ -144,4 +144,19 @@ describe('frameFromStream', () => {
     await expect(frameFromStream(fakeStream(track))).rejects.toThrow('no frame')
     expect(track.stop).toHaveBeenCalled()
   })
+
+  it('never pulls the lazy capture engine — this path is getDisplayMedia only', async () => {
+    document.head.innerHTML = ''
+    delete window.__PulseCaptureEngine
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { getDisplayMedia: vi.fn(async () => fakeStream()) },
+      configurable: true,
+    })
+    stubMedia(2880, 1800)
+
+    await frameFromStream(await requestTabStream())
+
+    expect(document.querySelector('script[data-pulse-capture-engine]')).toBeNull()
+    expect(window.__PulseCaptureEngine).toBeUndefined()
+  })
 })

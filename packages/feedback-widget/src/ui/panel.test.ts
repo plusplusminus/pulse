@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest'
 import { FeedbackPanel } from './panel'
+import { ENGINE_LOAD_ERROR } from '../screenshot'
 import type { WidgetPick } from '../types'
 
 function pick(id: string, name: string, comment: string, intent: WidgetPick['intent'] = 'fix'): WidgetPick {
@@ -162,5 +163,16 @@ describe('capture controls', () => {
     expect(shadow.querySelectorAll('.pulse-capture-note').length).toBe(2)
     panel.setCaptureError(null)
     expect(shadow.querySelector('.pulse-capture-note--error')).toBeNull()
+  })
+
+  it('surfaces an engine-load failure with Capture tab still on offer', () => {
+    const panel = makePanel(false, { allowScreenshot: true, allowCaptureTab: true })
+    panel.setState('open')
+    panel.setCaptureError(ENGINE_LOAD_ERROR)
+
+    expect(shadow.querySelector('.pulse-capture-note--error')?.textContent).toBe(ENGINE_LOAD_ERROR)
+    // The panel is back in its resting state, not spinning, and the fallback
+    // that needs no engine is still one click away.
+    expect(labels()).toContain('Capture tab')
   })
 })
