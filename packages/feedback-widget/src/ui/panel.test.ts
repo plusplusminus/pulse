@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest'
-import { FeedbackPanel } from './panel'
+import { BAR_IN_RECORDING_NOTICE, FeedbackPanel } from './panel'
 import { ENGINE_LOAD_ERROR } from '../screenshot'
 import type { WidgetPick } from '../types'
 
@@ -223,11 +223,31 @@ describe('video recording controls (PULSE-338)', () => {
     expect(config.onRecordVideo).toHaveBeenCalledTimes(1)
   })
 
-  it('explains that the widget hides itself, since there is no in-page stop button', () => {
+  it('points at the in-page control bar and says only Discard drops a recording', () => {
     const panel = makePanel(false, { allowVideo: true })
     panel.setState('open')
     const notes = Array.from(shadow.querySelectorAll('.pulse-capture-note')).map((n) => n.textContent)
-    expect(notes.some((n) => n?.includes('Stop sharing'))).toBe(true)
+    expect(notes.some((n) => n?.includes('control bar stays on the page'))).toBe(true)
+    // Esc stops and KEEPS now (PULSE-399); the copy must not send anyone to
+    // the browser's Stop sharing bar as if it were the only way out.
+    expect(notes.some((n) => n?.includes('Only Discard drops a recording'))).toBe(true)
+    expect(notes.some((n) => n?.includes('Stop sharing'))).toBe(false)
+  })
+
+  it('carries a post-recording notice only while there is a recording to describe', () => {
+    stubObjectUrls()
+    const panel = makePanel(false, { allowVideo: true })
+    panel.setState('open')
+
+    panel.setVideoNotice(BAR_IN_RECORDING_NOTICE)
+    // No recording yet: nothing to own up to.
+    expect(shadow.textContent).not.toContain(BAR_IN_RECORDING_NOTICE)
+
+    panel.setVideo(clip(2048), 5_000)
+    expect(shadow.textContent).toContain(BAR_IN_RECORDING_NOTICE)
+
+    panel.setVideo(null)
+    expect(shadow.textContent).not.toContain(BAR_IN_RECORDING_NOTICE)
   })
 
   it('swaps the button for a <video controls> preview with duration and size', () => {

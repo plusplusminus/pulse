@@ -2,12 +2,20 @@ import type { WidgetState, SubmitResult, WidgetPick } from '../types'
 import { CROSS_ORIGIN_NOTICE } from '../screenshot'
 
 /**
- * The widget hides itself for the whole recording so it stays out of the shot,
- * which means there is no in-page stop button to offer — the browser's own
- * "Stop sharing" control is the one the reporter must use.
+ * The panel and trigger hide for the recording, but a compact control bar
+ * stays on the page (PULSE-399) — so there IS an in-page stop button, and Esc
+ * now stops and keeps rather than discarding.
  */
 export const RECORDING_NOTICE =
-  'Your browser will ask what to share. Pulse hides itself while recording — stop with your browser’s “Stop sharing” button, or press Esc.'
+  'Your browser will ask what to share. A small control bar stays on the page while recording — stop from there or press Esc. Only Discard drops a recording.'
+
+/**
+ * Shown under a finished recording when the shared surface was this tab. The
+ * bar is composited into the video like any other element; no page can leave
+ * itself out of its own capture, so the honest move is to say so.
+ */
+export const BAR_IN_RECORDING_NOTICE =
+  'You shared this tab, so the recording bar is visible in your recording — a page cannot leave itself out of its own capture.'
 
 export interface PanelFormData {
   title: string
@@ -27,6 +35,7 @@ export class FeedbackPanel {
   private videoUrl: string | null = null
   private videoDurationMs = 0
   private videoError: string | null = null
+  private videoNotice: string | null = null
   private uploadPercent: number | null = null
   private picks: WidgetPick[] = []
   private paused = false
@@ -581,6 +590,14 @@ export class FeedbackPanel {
     actions.appendChild(remove)
 
     container.appendChild(actions)
+
+    if (this.videoNotice) {
+      const notice = document.createElement('div')
+      notice.className = 'pulse-capture-note pulse-video__note'
+      notice.textContent = this.videoNotice
+      container.appendChild(notice)
+    }
+
     return container
   }
 
@@ -646,6 +663,8 @@ export class FeedbackPanel {
     }
     this.videoBlob = blob
     this.videoDurationMs = blob ? durationMs : 0
+    // The notice describes one particular recording; it goes with it.
+    if (!blob) this.videoNotice = null
     if (blob) this.videoUrl = URL.createObjectURL(blob)
     if (this.state === 'open') this.renderForm()
   }
@@ -656,6 +675,12 @@ export class FeedbackPanel {
 
   setVideoError(message: string | null): void {
     this.videoError = message
+    if (this.state === 'open') this.renderForm()
+  }
+
+  /** Sits under the finished recording; only rendered once there is one. */
+  setVideoNotice(message: string | null): void {
+    this.videoNotice = message
     if (this.state === 'open') this.renderForm()
   }
 
