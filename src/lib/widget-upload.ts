@@ -27,6 +27,16 @@ export const WIDGET_MEDIA_MAX_BYTES: Record<WidgetMediaKind, number> = {
   replay: 20 * 1024 * 1024,
 };
 
+/**
+ * MediaRecorder reports parameterised types ("video/webm;codecs=vp9") and the
+ * widget forwards them verbatim, because relabelling a recording is worse than
+ * a long content type. The allowlist is keyed on the base type, so every lookup
+ * has to normalise first.
+ */
+export function baseContentType(contentType: string): string {
+  return contentType.split(";")[0].trim().toLowerCase();
+}
+
 /** MIME allowlist per kind; the value is the file extension used in the key. */
 export const WIDGET_MEDIA_CONTENT_TYPES: Record<
   WidgetMediaKind,
@@ -131,7 +141,8 @@ export async function signWidgetUpload(
     throw new Error(`Invalid media kind: ${String(input.kind)}`);
   }
 
-  const ext = WIDGET_MEDIA_CONTENT_TYPES[input.kind][input.contentType];
+  const ext =
+    WIDGET_MEDIA_CONTENT_TYPES[input.kind][baseContentType(input.contentType)];
   if (!ext) {
     throw new Error(
       `Unsupported content type for ${input.kind}: ${input.contentType}`

@@ -222,6 +222,26 @@ describe("POST /api/widget/upload", () => {
     expect(signedUploads).toEqual([]);
   });
 
+  // Regression: the widget forwards MediaRecorder's mimeType verbatim
+  // ("video/webm;codecs=vp9"). The allowlist check was an exact key lookup, so
+  // every real video upload 400'd while the mocked tests on both sides passed.
+  it("accepts the parameterised video content types MediaRecorder emits", async () => {
+    for (const contentType of [
+      "video/webm;codecs=vp9",
+      "video/webm;codecs=vp8",
+      "video/mp4;codecs=avc1",
+    ]) {
+      signedUploads.length = 0;
+      authOk();
+      const res = await post({ kind: "video", contentType, sizeBytes: 15_960 });
+      expect(res.status).toBe(200);
+      expect(signedUploads).toHaveLength(1);
+      const body = await readJson(res);
+      expect(body.storagePath).not.toContain(";");
+      expect(body.storagePath).toMatch(/\/videos\/[^/]+\.(webm|mp4)$/);
+    }
+  });
+
   it("rejects a content type that is not allowed for the kind", async () => {
     authOk();
     const res = await post({
