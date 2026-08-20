@@ -6,4 +6,6 @@ declare const __PULSE_API_URL__: string
 interface Window {
   /** Set by capture-engine.global.js once the lazily injected engine has run. */
   __PulseCaptureEngine?: import('./screenshot').CaptureEngine
+  /** Set by webm-duration.global.js once the lazily injected fixer has run. */
+  __PulseWebmDuration?: import('./capture/webm-duration').WebmDurationFixer
 }

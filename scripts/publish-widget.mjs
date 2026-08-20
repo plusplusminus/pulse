@@ -15,6 +15,10 @@ const files = [
   // is derived from the widget's own API base, so it must sit next to pulse.js.
   ["capture-engine.global.js", "capture-engine.js"],
   ["capture-engine.global.js.map", "capture-engine.js.map"],
+  // Lazily fetched when a WebM recording finishes (PULSE-336); same origin rule
+  // as the capture engine, so it must sit next to pulse.js.
+  ["webm-duration.global.js", "webm-duration.js"],
+  ["webm-duration.global.js.map", "webm-duration.js.map"],
   ["pulse-loader.global.js", "pulse-loader.js"],
 ];
 
