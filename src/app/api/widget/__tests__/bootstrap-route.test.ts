@@ -46,6 +46,7 @@ function siteOk() {
     name: "Default",
     is_active: true,
     config: {},
+    output_detail_level: "standard",
     allowed_origins: ["https://customer.example"],
     created_at: "",
     updated_at: "",

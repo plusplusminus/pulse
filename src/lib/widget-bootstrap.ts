@@ -5,14 +5,15 @@ import type {
 } from "@/lib/widget-types";
 
 /**
- * Safe defaults: screenshot only, every other capture mode off, replay off.
- * The widget falls back to the same shape when bootstrap is unreachable.
+ * Safe defaults: screenshot + element pick (both user-initiated), every passive
+ * capture mode off, replay off. The widget falls back to the same shape when
+ * bootstrap is unreachable.
  */
 export const BOOTSTRAP_DEFAULTS: Omit<WidgetBootstrapPayload, "site" | "api"> = {
   capture: {
     screenshot: true,
     captureTab: false,
-    elementPick: false,
+    elementPick: true,
     video: false,
     console: false,
     sentry: false,

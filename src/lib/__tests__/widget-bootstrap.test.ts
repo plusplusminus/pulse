@@ -15,6 +15,7 @@ const row: WidgetConfig = {
   is_active: true,
   config: {},
   allowed_origins: ["https://acme.example"],
+  output_detail_level: "standard",
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };

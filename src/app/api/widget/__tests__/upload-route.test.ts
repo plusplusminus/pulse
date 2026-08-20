@@ -65,6 +65,7 @@ function authOk(prefix = "wk_abc") {
       is_active: true,
       config: {},
       allowed_origins: [],
+      output_detail_level: "standard",
       created_at: "",
       updated_at: "",
     },

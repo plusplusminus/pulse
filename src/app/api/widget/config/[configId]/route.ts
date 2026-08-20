@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { withHubAuthWrite, type HubAuthError } from "@/lib/hub-auth";
 import { canActivate, invalidOrigins, normaliseOrigins } from "@/lib/widget-origin";
+import { isOutputDetailLevel } from "@/lib/widget-picks";
 
 async function getConfigHubId(configId: string): Promise<string | null> {
   const { data } = await supabaseAdmin
@@ -47,12 +48,20 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const { name, is_active, allowed_origins, config } = body as {
+    const { name, is_active, allowed_origins, config, output_detail_level } = body as {
       name?: string;
       is_active?: boolean;
       allowed_origins?: string[];
       config?: Record<string, unknown>;
+      output_detail_level?: string;
     };
+
+    if (output_detail_level !== undefined && !isOutputDetailLevel(output_detail_level)) {
+      return NextResponse.json(
+        { error: "invalid_output_detail_level", message: "Must be compact, standard, detailed or forensic" },
+        { status: 400 }
+      );
+    }
 
     if (allowed_origins !== undefined) {
       const bad = invalidOrigins(allowed_origins);
@@ -86,13 +95,14 @@ export async function PATCH(
     if (is_active !== undefined) updates.is_active = is_active;
     if (allowed_origins !== undefined) updates.allowed_origins = resultingOrigins;
     if (config !== undefined) updates.config = config;
+    if (output_detail_level !== undefined) updates.output_detail_level = output_detail_level;
 
     const { data, error } = await supabaseAdmin
       .from("widget_configs")
       .update(updates)
       .eq("id", configId)
       .select(
-        "id, hub_id, api_key_prefix, name, is_active, config, allowed_origins, created_at, updated_at"
+        "id, hub_id, api_key_prefix, name, is_active, config, allowed_origins, output_detail_level, created_at, updated_at"
       )
       .single();
 

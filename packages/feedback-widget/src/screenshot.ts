@@ -123,39 +123,3 @@ export async function captureScreenshot(
     if (widgetHost) widgetHost.style.display = ''
   }
 }
-
-export async function cropBlob(
-  blob: Blob,
-  rect: { x: number; y: number; width: number; height: number }
-): Promise<Blob> {
-  const img = await loadImage(blob)
-
-  const scaleX = img.naturalWidth / window.innerWidth
-  const scaleY = img.naturalHeight / window.innerHeight
-  const sx = Math.round(rect.x * scaleX)
-  const sy = Math.round(rect.y * scaleY)
-  const sw = Math.round(rect.width * scaleX)
-  const sh = Math.round(rect.height * scaleY)
-
-  const canvas = document.createElement('canvas')
-  canvas.width = sw
-  canvas.height = sh
-  const ctx = canvas.getContext('2d')!
-  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
-  return new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob((b) => {
-      if (b) resolve(b)
-      else reject(new Error('Failed to crop screenshot'))
-    }, 'image/png')
-  })
-}
-
-function loadImage(blob: Blob): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    const url = URL.createObjectURL(blob)
-    img.onload = () => { URL.revokeObjectURL(url); resolve(img) }
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Failed to load image')) }
-    img.src = url
-  })
-}

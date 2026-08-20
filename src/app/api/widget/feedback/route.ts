@@ -14,12 +14,13 @@ import {
   type RateLimitResult,
 } from "@/lib/widget-rate-limit";
 import {
-  buildWidgetIssueDescription,
+  renderSubmissionBody,
   createWidgetLinearIssue,
   widgetMediaUrl,
 } from "@/lib/widget-linear";
 import type { WidgetFeedbackResponse } from "@/lib/widget-types";
 import { STORAGE_PATH_PATTERN } from "@/lib/widget-upload";
+import { picksSchema, screenshotAnnotationsSchema } from "@/lib/widget-picks";
 
 // Distributed budgets (PULSE-313): per site, then per reporter; either denies.
 const SITE_BUDGET = { limit: 60, windowMs: 60_000 };
@@ -92,6 +93,10 @@ const feedbackSchema = z.object({
     .string()
     .regex(STORAGE_PATH_PATTERN, "Invalid storage path")
     .optional(),
+  // Element picks (PULSE-329); rendered into the Linear body per output_detail_level.
+  picks: picksSchema,
+  // Screenshot annotation rects (PULSE-333), in the captured bitmap's pixel space.
+  screenshotAnnotations: screenshotAnnotationsSchema,
 });
 
 export async function POST(request: Request) {
@@ -184,6 +189,8 @@ export async function POST(request: Request) {
         screenshot_url: screenshotUrl ?? null,
         screenshot_storage_path: data.screenshotStoragePath ?? null,
         metadata: data.metadata,
+        picks: data.picks,
+        screenshot_annotations: data.screenshotAnnotations,
         reporter_email: data.reporter.email,
         reporter_name: data.reporter.name ?? null,
         page_url: data.metadata.url,
@@ -215,11 +222,15 @@ export async function POST(request: Request) {
 
     if (mapping) {
       try {
-        const description = buildWidgetIssueDescription({
-          description: data.description,
-          reporter: data.reporter,
-          metadata: data.metadata,
-          screenshotUrl,
+        const description = renderSubmissionBody({
+          submission: {
+            description: data.description,
+            reporter: data.reporter,
+            metadata: data.metadata,
+            screenshotUrl,
+          },
+          picks: data.picks,
+          config,
         });
 
         const issue = await createWidgetLinearIssue({
