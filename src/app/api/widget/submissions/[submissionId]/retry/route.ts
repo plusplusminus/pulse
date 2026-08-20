@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { withHubAuthWrite, type HubAuthError } from "@/lib/hub-auth";
 import {
-  buildWidgetIssueDescription,
+  renderSubmissionBody,
   createWidgetLinearIssue,
 } from "@/lib/widget-linear";
 import type { WidgetSubmission } from "@/lib/widget-types";
@@ -60,15 +60,26 @@ export async function POST(
       );
     }
 
+    // Retries must render at the same detail level a fresh submission would.
+    const { data: widgetConfig } = await supabaseAdmin
+      .from("widget_configs")
+      .select("output_detail_level")
+      .eq("id", sub.widget_config_id)
+      .single();
+
     try {
-      const description = buildWidgetIssueDescription({
-        description: sub.description ?? undefined,
-        reporter: {
-          email: sub.reporter_email,
-          name: sub.reporter_name ?? undefined,
+      const description = renderSubmissionBody({
+        submission: {
+          description: sub.description ?? undefined,
+          reporter: {
+            email: sub.reporter_email,
+            name: sub.reporter_name ?? undefined,
+          },
+          metadata: sub.metadata,
+          screenshotUrl: sub.screenshot_url ?? undefined,
         },
-        metadata: sub.metadata,
-        screenshotUrl: sub.screenshot_url ?? undefined,
+        picks: sub.picks,
+        config: widgetConfig ?? undefined,
       });
 
       const issue = await createWidgetLinearIssue({

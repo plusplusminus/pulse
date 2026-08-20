@@ -8,7 +8,7 @@ import {
   stripUrlForStorage,
 } from "@/lib/widget-origin";
 import {
-  buildWidgetIssueDescription,
+  renderSubmissionBody,
   createWidgetLinearIssue,
   widgetMediaUrl,
 } from "@/lib/widget-linear";
@@ -207,11 +207,15 @@ export async function POST(request: Request) {
 
     if (mapping) {
       try {
-        const description = buildWidgetIssueDescription({
-          description: data.description,
-          reporter: data.reporter,
-          metadata: data.metadata,
-          screenshotUrl,
+        const description = renderSubmissionBody({
+          submission: {
+            description: data.description,
+            reporter: data.reporter,
+            metadata: data.metadata,
+            screenshotUrl,
+          },
+          picks: data.picks,
+          config,
         });
 
         const issue = await createWidgetLinearIssue({

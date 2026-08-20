@@ -1,0 +1,831 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`renderSubmissionBody > renders area-pick at compact 1`] = `
+"## Feedback
+The hero CTA is too small on mobile.
+
+## Reporter
+Sam (sam@acme.test)
+
+## Context
+- **Page:** https://acme.test/pricing
+- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Viewport:** 1440x900
+- **Submitted:** 2026-05-12T10:00:00.000Z
+
+## Sentry
+[Session Replay](https://sentry.io/replay/r1)
+
+## Console (last errors)
+- TypeError: x is undefined
+
+## Screenshot
+![Screenshot](https://pulse.test/api/widget/media/sub-1/screenshot)
+
+## Video
+[Watch recording](https://pulse.test/api/widget/media/sub-1/video)
+
+## Session replay
+[Open replay](https://pulse.test/api/widget/media/sub-1/replay)
+
+## Page Feedback: /pricing
+
+1. **Area selection** at (40, 500): This whole block feels cramped (intent: question)
+
+---
+*Submitted via Pulse feedback widget*"
+`;
+
+exports[`renderSubmissionBody > renders area-pick at detailed 1`] = `
+"## Feedback
+The hero CTA is too small on mobile.
+
+## Reporter
+Sam (sam@acme.test)
+
+## Context
+- **Page:** https://acme.test/pricing
+- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Viewport:** 1440x900
+- **Submitted:** 2026-05-12T10:00:00.000Z
+
+## Sentry
+[Session Replay](https://sentry.io/replay/r1)
+
+## Console (last errors)
+- TypeError: x is undefined
+
+## Screenshot
+![Screenshot](https://pulse.test/api/widget/media/sub-1/screenshot)
+
+## Video
+[Watch recording](https://pulse.test/api/widget/media/sub-1/video)
+
+## Session replay
+[Open replay](https://pulse.test/api/widget/media/sub-1/replay)
+
+## Page Feedback: /pricing
+
+**Viewport:** 1440x900
+
+### 1. Area selection
+**Intent:** question
+**Region:** (40, 500) 620×240
+**Classes:** btn btn-primary
+**Position:** 40px, 500px (620×240px)
+**Context:** [before: "Get started"] CTA
+**Comment:** This whole block feels cramped
+
+---
+*Submitted via Pulse feedback widget*"
+`;
+
+exports[`renderSubmissionBody > renders area-pick at forensic 1`] = `
+"## Feedback
+The hero CTA is too small on mobile.
+
+## Reporter
+Sam (sam@acme.test)
+
+## Context
+- **Page:** https://acme.test/pricing
+- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Viewport:** 1440x900
+- **Submitted:** 2026-05-12T10:00:00.000Z
+
+## Sentry
+[Session Replay](https://sentry.io/replay/r1)
+
+## Console (last errors)
+- TypeError: x is undefined
+
+## Screenshot
+![Screenshot](https://pulse.test/api/widget/media/sub-1/screenshot)
+
+## Video
+[Watch recording](https://pulse.test/api/widget/media/sub-1/video)
+
+## Session replay
+[Open replay](https://pulse.test/api/widget/media/sub-1/replay)
+
+## Page Feedback: /pricing
+
+**Environment:** viewport: 1440x900, URL: https://acme.test/pricing, UA: Mozilla/5.0 (Macintosh) Chrome/140.0, dpr: 2, captured: 2026-05-12T10:00:00.000Z
+
+---
+
+### 1. Area selection
+**Intent:** question
+**Region:** (40, 500) 620×240
+**Classes:** btn btn-primary
+**Position:** 40px, 500px (620×240px)
+**Full DOM Path:** \`html > body > main.app > section.hero > div.cta > button.btn\`
+**Computed Styles:** color: rgb(255,255,255); background-color: rgb(0,0,0); font-size: 16px
+**Accessibility:** role="button", aria-label="Sign up", focusable
+**Nearby Elements:** a.link, div.spacer (5 total in .cta)
+**Context:** [before: "Get started"] CTA
+**Comment:** This whole block feels cramped
+
+---
+*Submitted via Pulse feedback widget*"
+`;
+
+exports[`renderSubmissionBody > renders area-pick at standard 1`] = `
+"## Feedback
+The hero CTA is too small on mobile.
+
+## Reporter
+Sam (sam@acme.test)
+
+## Context
+- **Page:** https://acme.test/pricing
+- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Viewport:** 1440x900
+- **Submitted:** 2026-05-12T10:00:00.000Z
+
+## Sentry
+[Session Replay](https://sentry.io/replay/r1)
+
+## Console (last errors)
+- TypeError: x is undefined
+
+## Screenshot
+![Screenshot](https://pulse.test/api/widget/media/sub-1/screenshot)
+
+## Video
+[Watch recording](https://pulse.test/api/widget/media/sub-1/video)
+
+## Session replay
+[Open replay](https://pulse.test/api/widget/media/sub-1/replay)
+
+## Page Feedback: /pricing
+
+**Viewport:** 1440x900
+
+### 1. Area selection
+**Intent:** question
+**Region:** (40, 500) 620×240
+**Comment:** This whole block feels cramped
+
+---
+*Submitted via Pulse feedback widget*"
+`;
+
+exports[`renderSubmissionBody > renders empty at compact 1`] = `
+"## Feedback
+The hero CTA is too small on mobile.
+
+## Reporter
+Sam (sam@acme.test)
+
+## Context
+- **Page:** https://acme.test/pricing
+- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Viewport:** 1440x900
+- **Submitted:** 2026-05-12T10:00:00.000Z
+
+## Sentry
+[Session Replay](https://sentry.io/replay/r1)
+
+## Console (last errors)
+- TypeError: x is undefined
+
+## Screenshot
+![Screenshot](https://pulse.test/api/widget/media/sub-1/screenshot)
+
+## Video
+[Watch recording](https://pulse.test/api/widget/media/sub-1/video)
+
+## Session replay
+[Open replay](https://pulse.test/api/widget/media/sub-1/replay)
+
+## Page Feedback: /pricing
+
+---
+*Submitted via Pulse feedback widget*"
+`;
+
+exports[`renderSubmissionBody > renders empty at detailed 1`] = `
+"## Feedback
+The hero CTA is too small on mobile.
+
+## Reporter
+Sam (sam@acme.test)
+
+## Context
+- **Page:** https://acme.test/pricing
+- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Viewport:** 1440x900
+- **Submitted:** 2026-05-12T10:00:00.000Z
+
+## Sentry
+[Session Replay](https://sentry.io/replay/r1)
+
+## Console (last errors)
+- TypeError: x is undefined
+
+## Screenshot
+![Screenshot](https://pulse.test/api/widget/media/sub-1/screenshot)
+
+## Video
+[Watch recording](https://pulse.test/api/widget/media/sub-1/video)
+
+## Session replay
+[Open replay](https://pulse.test/api/widget/media/sub-1/replay)
+
+## Page Feedback: /pricing
+
+**Viewport:** 1440x900
+
+---
+*Submitted via Pulse feedback widget*"
+`;
+
+exports[`renderSubmissionBody > renders empty at forensic 1`] = `
+"## Feedback
+The hero CTA is too small on mobile.
+
+## Reporter
+Sam (sam@acme.test)
+
+## Context
+- **Page:** https://acme.test/pricing
+- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Viewport:** 1440x900
+- **Submitted:** 2026-05-12T10:00:00.000Z
+
+## Sentry
+[Session Replay](https://sentry.io/replay/r1)
+
+## Console (last errors)
+- TypeError: x is undefined
+
+## Screenshot
+![Screenshot](https://pulse.test/api/widget/media/sub-1/screenshot)
+
+## Video
+[Watch recording](https://pulse.test/api/widget/media/sub-1/video)
+
+## Session replay
+[Open replay](https://pulse.test/api/widget/media/sub-1/replay)
+
+## Page Feedback: /pricing
+
+**Environment:** viewport: 1440x900, URL: https://acme.test/pricing, UA: Mozilla/5.0 (Macintosh) Chrome/140.0, dpr: 1, captured: 2026-05-12T10:00:00.000Z
+
+---
+
+---
+*Submitted via Pulse feedback widget*"
+`;
+
+exports[`renderSubmissionBody > renders empty at standard 1`] = `
+"## Feedback
+The hero CTA is too small on mobile.
+
+## Reporter
+Sam (sam@acme.test)
+
+## Context
+- **Page:** https://acme.test/pricing
+- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Viewport:** 1440x900
+- **Submitted:** 2026-05-12T10:00:00.000Z
+
+## Sentry
+[Session Replay](https://sentry.io/replay/r1)
+
+## Console (last errors)
+- TypeError: x is undefined
+
+## Screenshot
+![Screenshot](https://pulse.test/api/widget/media/sub-1/screenshot)
+
+## Video
+[Watch recording](https://pulse.test/api/widget/media/sub-1/video)
+
+## Session replay
+[Open replay](https://pulse.test/api/widget/media/sub-1/replay)
+
+## Page Feedback: /pricing
+
+**Viewport:** 1440x900
+
+---
+*Submitted via Pulse feedback widget*"
+`;
+
+exports[`renderSubmissionBody > renders multi-select at compact 1`] = `
+"## Feedback
+The hero CTA is too small on mobile.
+
+## Reporter
+Sam (sam@acme.test)
+
+## Context
+- **Page:** https://acme.test/pricing
+- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Viewport:** 1440x900
+- **Submitted:** 2026-05-12T10:00:00.000Z
+
+## Sentry
+[Session Replay](https://sentry.io/replay/r1)
+
+## Console (last errors)
+- TypeError: x is undefined
+
+## Screenshot
+![Screenshot](https://pulse.test/api/widget/media/sub-1/screenshot)
+
+## Video
+[Watch recording](https://pulse.test/api/widget/media/sub-1/video)
+
+## Session replay
+[Open replay](https://pulse.test/api/widget/media/sub-1/replay)
+
+## Page Feedback: /pricing
+
+1. **3 elements: button "Save", input [email]+1 more**: These three should line up (intent: change)
+
+---
+*Submitted via Pulse feedback widget*"
+`;
+
+exports[`renderSubmissionBody > renders multi-select at detailed 1`] = `
+"## Feedback
+The hero CTA is too small on mobile.
+
+## Reporter
+Sam (sam@acme.test)
+
+## Context
+- **Page:** https://acme.test/pricing
+- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Viewport:** 1440x900
+- **Submitted:** 2026-05-12T10:00:00.000Z
+
+## Sentry
+[Session Replay](https://sentry.io/replay/r1)
+
+## Console (last errors)
+- TypeError: x is undefined
+
+## Screenshot
+![Screenshot](https://pulse.test/api/widget/media/sub-1/screenshot)
+
+## Video
+[Watch recording](https://pulse.test/api/widget/media/sub-1/video)
+
+## Session replay
+[Open replay](https://pulse.test/api/widget/media/sub-1/replay)
+
+## Page Feedback: /pricing
+
+**Viewport:** 1440x900
+
+### 1. 3 elements: button "Save", input [email]+1 more
+**Intent:** change
+**Location:** \`main > section.hero > .cta > button\`
+**Classes:** btn btn-primary
+**Position:** 5px, 20px (345×90px)
+**Context:** [before: "Get started"] CTA
+**Comment:** These three should line up
+
+---
+*Submitted via Pulse feedback widget*"
+`;
+
+exports[`renderSubmissionBody > renders multi-select at forensic 1`] = `
+"## Feedback
+The hero CTA is too small on mobile.
+
+## Reporter
+Sam (sam@acme.test)
+
+## Context
+- **Page:** https://acme.test/pricing
+- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Viewport:** 1440x900
+- **Submitted:** 2026-05-12T10:00:00.000Z
+
+## Sentry
+[Session Replay](https://sentry.io/replay/r1)
+
+## Console (last errors)
+- TypeError: x is undefined
+
+## Screenshot
+![Screenshot](https://pulse.test/api/widget/media/sub-1/screenshot)
+
+## Video
+[Watch recording](https://pulse.test/api/widget/media/sub-1/video)
+
+## Session replay
+[Open replay](https://pulse.test/api/widget/media/sub-1/replay)
+
+## Page Feedback: /pricing
+
+**Environment:** viewport: 1440x900, URL: https://acme.test/pricing, UA: Mozilla/5.0 (Macintosh) Chrome/140.0, dpr: 2, captured: 2026-05-12T10:00:00.000Z
+
+---
+
+### 1. 3 elements: button "Save", input [email]+1 more
+**Intent:** change
+**Location:** \`main > section.hero > .cta > button\`
+**Classes:** btn btn-primary
+**Position:** 5px, 20px (345×90px)
+**Full DOM Path:** \`html > body > main.app > section.hero > div.cta > button.btn\`
+**Computed Styles:** color: rgb(255,255,255); background-color: rgb(0,0,0); font-size: 16px
+**Accessibility:** role="button", aria-label="Sign up", focusable
+**Nearby Elements:** a.link, div.spacer (5 total in .cta)
+**Context:** [before: "Get started"] CTA
+**Comment:** These three should line up
+*Forensic data shown for first element of selection*
+
+---
+*Submitted via Pulse feedback widget*"
+`;
+
+exports[`renderSubmissionBody > renders multi-select at standard 1`] = `
+"## Feedback
+The hero CTA is too small on mobile.
+
+## Reporter
+Sam (sam@acme.test)
+
+## Context
+- **Page:** https://acme.test/pricing
+- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Viewport:** 1440x900
+- **Submitted:** 2026-05-12T10:00:00.000Z
+
+## Sentry
+[Session Replay](https://sentry.io/replay/r1)
+
+## Console (last errors)
+- TypeError: x is undefined
+
+## Screenshot
+![Screenshot](https://pulse.test/api/widget/media/sub-1/screenshot)
+
+## Video
+[Watch recording](https://pulse.test/api/widget/media/sub-1/video)
+
+## Session replay
+[Open replay](https://pulse.test/api/widget/media/sub-1/replay)
+
+## Page Feedback: /pricing
+
+**Viewport:** 1440x900
+
+### 1. 3 elements: button "Save", input [email]+1 more
+**Intent:** change
+**Location:** \`main > section.hero > .cta > button\`
+**Comment:** These three should line up
+
+---
+*Submitted via Pulse feedback widget*"
+`;
+
+exports[`renderSubmissionBody > renders single at compact 1`] = `
+"## Feedback
+The hero CTA is too small on mobile.
+
+## Reporter
+Sam (sam@acme.test)
+
+## Context
+- **Page:** https://acme.test/pricing
+- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Viewport:** 1440x900
+- **Submitted:** 2026-05-12T10:00:00.000Z
+
+## Sentry
+[Session Replay](https://sentry.io/replay/r1)
+
+## Console (last errors)
+- TypeError: x is undefined
+
+## Screenshot
+![Screenshot](https://pulse.test/api/widget/media/sub-1/screenshot)
+
+## Video
+[Watch recording](https://pulse.test/api/widget/media/sub-1/video)
+
+## Session replay
+[Open replay](https://pulse.test/api/widget/media/sub-1/replay)
+
+## Page Feedback: /pricing
+
+1. **button "Sign up"**: Make this bigger (intent: fix)
+
+---
+*Submitted via Pulse feedback widget*"
+`;
+
+exports[`renderSubmissionBody > renders single at detailed 1`] = `
+"## Feedback
+The hero CTA is too small on mobile.
+
+## Reporter
+Sam (sam@acme.test)
+
+## Context
+- **Page:** https://acme.test/pricing
+- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Viewport:** 1440x900
+- **Submitted:** 2026-05-12T10:00:00.000Z
+
+## Sentry
+[Session Replay](https://sentry.io/replay/r1)
+
+## Console (last errors)
+- TypeError: x is undefined
+
+## Screenshot
+![Screenshot](https://pulse.test/api/widget/media/sub-1/screenshot)
+
+## Video
+[Watch recording](https://pulse.test/api/widget/media/sub-1/video)
+
+## Session replay
+[Open replay](https://pulse.test/api/widget/media/sub-1/replay)
+
+## Page Feedback: /pricing
+
+**Viewport:** 1440x900
+
+### 1. button "Sign up"
+**Intent:** fix
+**Location:** \`main > section.hero > .cta > button\`
+**Classes:** btn btn-primary
+**Position:** 120px, 340px (180×44px)
+**Context:** [before: "Get started"] CTA
+**Comment:** Make this bigger
+
+---
+*Submitted via Pulse feedback widget*"
+`;
+
+exports[`renderSubmissionBody > renders single at forensic 1`] = `
+"## Feedback
+The hero CTA is too small on mobile.
+
+## Reporter
+Sam (sam@acme.test)
+
+## Context
+- **Page:** https://acme.test/pricing
+- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Viewport:** 1440x900
+- **Submitted:** 2026-05-12T10:00:00.000Z
+
+## Sentry
+[Session Replay](https://sentry.io/replay/r1)
+
+## Console (last errors)
+- TypeError: x is undefined
+
+## Screenshot
+![Screenshot](https://pulse.test/api/widget/media/sub-1/screenshot)
+
+## Video
+[Watch recording](https://pulse.test/api/widget/media/sub-1/video)
+
+## Session replay
+[Open replay](https://pulse.test/api/widget/media/sub-1/replay)
+
+## Page Feedback: /pricing
+
+**Environment:** viewport: 1440x900, URL: https://acme.test/pricing, UA: Mozilla/5.0 (Macintosh) Chrome/140.0, dpr: 2, captured: 2026-05-12T10:00:00.000Z
+
+---
+
+### 1. button "Sign up"
+**Intent:** fix
+**Location:** \`main > section.hero > .cta > button\`
+**Classes:** btn btn-primary
+**Position:** 120px, 340px (180×44px)
+**Full DOM Path:** \`html > body > main.app > section.hero > div.cta > button.btn\`
+**Computed Styles:** color: rgb(255,255,255); background-color: rgb(0,0,0); font-size: 16px
+**Accessibility:** role="button", aria-label="Sign up", focusable
+**Nearby Elements:** a.link, div.spacer (5 total in .cta)
+**Context:** [before: "Get started"] CTA
+**Comment:** Make this bigger
+
+---
+*Submitted via Pulse feedback widget*"
+`;
+
+exports[`renderSubmissionBody > renders single at standard 1`] = `
+"## Feedback
+The hero CTA is too small on mobile.
+
+## Reporter
+Sam (sam@acme.test)
+
+## Context
+- **Page:** https://acme.test/pricing
+- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Viewport:** 1440x900
+- **Submitted:** 2026-05-12T10:00:00.000Z
+
+## Sentry
+[Session Replay](https://sentry.io/replay/r1)
+
+## Console (last errors)
+- TypeError: x is undefined
+
+## Screenshot
+![Screenshot](https://pulse.test/api/widget/media/sub-1/screenshot)
+
+## Video
+[Watch recording](https://pulse.test/api/widget/media/sub-1/video)
+
+## Session replay
+[Open replay](https://pulse.test/api/widget/media/sub-1/replay)
+
+## Page Feedback: /pricing
+
+**Viewport:** 1440x900
+
+### 1. button "Sign up"
+**Intent:** fix
+**Location:** \`main > section.hero > .cta > button\`
+**Comment:** Make this bigger
+
+---
+*Submitted via Pulse feedback widget*"
+`;
+
+exports[`renderSubmissionBody > renders text-selected at compact 1`] = `
+"## Feedback
+The hero CTA is too small on mobile.
+
+## Reporter
+Sam (sam@acme.test)
+
+## Context
+- **Page:** https://acme.test/pricing
+- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Viewport:** 1440x900
+- **Submitted:** 2026-05-12T10:00:00.000Z
+
+## Sentry
+[Session Replay](https://sentry.io/replay/r1)
+
+## Console (last errors)
+- TypeError: x is undefined
+
+## Screenshot
+![Screenshot](https://pulse.test/api/widget/media/sub-1/screenshot)
+
+## Video
+[Watch recording](https://pulse.test/api/widget/media/sub-1/video)
+
+## Session replay
+[Open replay](https://pulse.test/api/widget/media/sub-1/replay)
+
+## Page Feedback: /pricing
+
+1. **button "Sign up"**: Reword this (intent: fix; re: "Sign up now")
+
+---
+*Submitted via Pulse feedback widget*"
+`;
+
+exports[`renderSubmissionBody > renders text-selected at detailed 1`] = `
+"## Feedback
+The hero CTA is too small on mobile.
+
+## Reporter
+Sam (sam@acme.test)
+
+## Context
+- **Page:** https://acme.test/pricing
+- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Viewport:** 1440x900
+- **Submitted:** 2026-05-12T10:00:00.000Z
+
+## Sentry
+[Session Replay](https://sentry.io/replay/r1)
+
+## Console (last errors)
+- TypeError: x is undefined
+
+## Screenshot
+![Screenshot](https://pulse.test/api/widget/media/sub-1/screenshot)
+
+## Video
+[Watch recording](https://pulse.test/api/widget/media/sub-1/video)
+
+## Session replay
+[Open replay](https://pulse.test/api/widget/media/sub-1/replay)
+
+## Page Feedback: /pricing
+
+**Viewport:** 1440x900
+
+### 1. button "Sign up"
+**Intent:** fix
+**Location:** \`main > section.hero > .cta > button\`
+**Classes:** btn btn-primary
+**Position:** 120px, 340px (180×44px)
+**Selected text:** "Sign up now"
+**Comment:** Reword this
+
+---
+*Submitted via Pulse feedback widget*"
+`;
+
+exports[`renderSubmissionBody > renders text-selected at forensic 1`] = `
+"## Feedback
+The hero CTA is too small on mobile.
+
+## Reporter
+Sam (sam@acme.test)
+
+## Context
+- **Page:** https://acme.test/pricing
+- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Viewport:** 1440x900
+- **Submitted:** 2026-05-12T10:00:00.000Z
+
+## Sentry
+[Session Replay](https://sentry.io/replay/r1)
+
+## Console (last errors)
+- TypeError: x is undefined
+
+## Screenshot
+![Screenshot](https://pulse.test/api/widget/media/sub-1/screenshot)
+
+## Video
+[Watch recording](https://pulse.test/api/widget/media/sub-1/video)
+
+## Session replay
+[Open replay](https://pulse.test/api/widget/media/sub-1/replay)
+
+## Page Feedback: /pricing
+
+**Environment:** viewport: 1440x900, URL: https://acme.test/pricing, UA: Mozilla/5.0 (Macintosh) Chrome/140.0, dpr: 2, captured: 2026-05-12T10:00:00.000Z
+
+---
+
+### 1. button "Sign up"
+**Intent:** fix
+**Location:** \`main > section.hero > .cta > button\`
+**Classes:** btn btn-primary
+**Position:** 120px, 340px (180×44px)
+**Full DOM Path:** \`html > body > main.app > section.hero > div.cta > button.btn\`
+**Computed Styles:** color: rgb(255,255,255); background-color: rgb(0,0,0); font-size: 16px
+**Accessibility:** role="button", aria-label="Sign up", focusable
+**Nearby Elements:** a.link, div.spacer (5 total in .cta)
+**Selected text:** "Sign up now"
+**Comment:** Reword this
+
+---
+*Submitted via Pulse feedback widget*"
+`;
+
+exports[`renderSubmissionBody > renders text-selected at standard 1`] = `
+"## Feedback
+The hero CTA is too small on mobile.
+
+## Reporter
+Sam (sam@acme.test)
+
+## Context
+- **Page:** https://acme.test/pricing
+- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Viewport:** 1440x900
+- **Submitted:** 2026-05-12T10:00:00.000Z
+
+## Sentry
+[Session Replay](https://sentry.io/replay/r1)
+
+## Console (last errors)
+- TypeError: x is undefined
+
+## Screenshot
+![Screenshot](https://pulse.test/api/widget/media/sub-1/screenshot)
+
+## Video
+[Watch recording](https://pulse.test/api/widget/media/sub-1/video)
+
+## Session replay
+[Open replay](https://pulse.test/api/widget/media/sub-1/replay)
+
+## Page Feedback: /pricing
+
+**Viewport:** 1440x900
+
+### 1. button "Sign up"
+**Intent:** fix
+**Location:** \`main > section.hero > .cta > button\`
+**Selected text:** "Sign up now"
+**Comment:** Reword this
+
+---
+*Submitted via Pulse feedback widget*"
+`;
