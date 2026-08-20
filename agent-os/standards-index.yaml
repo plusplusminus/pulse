@@ -7,6 +7,16 @@ version: 4
 updated: 2026-08-20
 
 standards:
+  pulse-project:
+    path: agent-os/standards/pulse-project.md
+    domain: global
+    applies_to:
+      - "src/**/*"
+      - "supabase/**/*"
+      - "packages/**/*"
+    auto_inject: true
+    priority: 1
+
   code-style:
     path: agent-os/standards/code-style.md
     domain: global
@@ -43,7 +53,8 @@ standards:
       - "src/lib/**/*.ts"
       - "supabase/**/*.sql"
       - "scripts/**/*"
-    auto_inject: true
+    auto_inject: false
+    note: house backend.md is NestJS/Drizzle; Pulse route-handler conventions live in pulse-project.md
     priority: 2
 
   frontend:
@@ -53,7 +64,8 @@ standards:
       - "src/app/**/*.tsx"
       - "src/components/**/*.tsx"
       - "packages/feedback-widget/src/ui/**/*.ts"
-    auto_inject: true
+    auto_inject: false
+    note: house frontend.md is TanStack Router/Query; Pulse App Router conventions live in pulse-project.md
     priority: 2
 
   react-best-practices:

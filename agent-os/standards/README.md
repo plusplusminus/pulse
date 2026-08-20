@@ -12,12 +12,12 @@ Manual reference: `agent-os/standards/{name}.md`
 
 | Standard | Domain | Auto-Inject | Purpose |
 |----------|--------|-------------|---------|
+| `pulse-project.md` | Global | Yes | Pulse repo conventions — overrides house core where they disagree |
 | `code-style.md` | Global | Yes | TypeScript/React conventions |
 | `testing.md` | Global | Yes | Vitest patterns and requirements |
-| `frontend.md` | Frontend | Yes | React/TanStack patterns |
+| `frontend.md` | Frontend | No | React/TanStack patterns (house core; not Pulse's stack) |
 | `react-best-practices.md` | Frontend | Yes | React performance & quality checklist |
-| `backend.md` | Backend | Yes | NestJS/Drizzle patterns |
-| `cms.md` | CMS | No | Sanity CMS patterns |
+| `backend.md` | Backend | No | NestJS/Drizzle patterns (house core; not Pulse's stack) |
 | `linear.md` | Process | No | Linear workflow conventions (MCP) |
 | `estimation-standards.md` | Process | No | Estimation guide (small/medium/large) |
 | `ppm-v4-process.md` | Process | No | PPM v4 process quick reference |
