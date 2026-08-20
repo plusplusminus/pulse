@@ -10,8 +10,10 @@ import {
 import {
   buildWidgetIssueDescription,
   createWidgetLinearIssue,
+  widgetMediaUrl,
 } from "@/lib/widget-linear";
 import type { WidgetFeedbackResponse } from "@/lib/widget-types";
+import { STORAGE_PATH_PATTERN } from "@/lib/widget-upload";
 
 // In-memory rate limiter: apiKeyPrefix -> timestamps
 const rateLimitMap = new Map<string, number[]>();
@@ -80,7 +82,11 @@ const feedbackSchema = z.object({
     email: z.string().email("Valid email is required"),
     name: z.string().optional(),
   }),
-  screenshot: z.string().optional(),
+  // Object key minted by POST /api/widget/upload — bytes never come through here.
+  screenshotStoragePath: z
+    .string()
+    .regex(STORAGE_PATH_PATTERN, "Invalid storage path")
+    .optional(),
 });
 
 export async function POST(request: Request) {
@@ -131,37 +137,40 @@ export async function POST(request: Request) {
     }
     data.metadata = { ...data.metadata, url: stripUrlForStorage(data.metadata.url) };
 
-    // Upload screenshot if provided
-    let screenshotUrl: string | undefined;
-    if (data.screenshot) {
-      try {
-        const buffer = Buffer.from(data.screenshot, "base64");
-        const filename = `${config.hub_id}/${Date.now()}-${crypto.randomUUID()}.png`;
-        const { error: uploadError } = await supabaseAdmin.storage
-          .from("widget-screenshots")
-          .upload(filename, buffer, { contentType: "image/png" });
-
-        if (!uploadError) {
-          const { data: urlData } = supabaseAdmin.storage
-            .from("widget-screenshots")
-            .getPublicUrl(filename);
-          screenshotUrl = urlData.publicUrl;
-        }
-      } catch {
-        // Non-fatal: continue without screenshot
+    // The path's hub segment must be this site's hub: a ticket minted for
+    // another site cannot be attached here (PULSE-324).
+    if (data.screenshotStoragePath) {
+      const [pathHubId, folder] = data.screenshotStoragePath.split("/");
+      if (
+        pathHubId.toLowerCase() !== config.hub_id.toLowerCase() ||
+        folder !== "screenshots"
+      ) {
+        return NextResponse.json(
+          { error: "screenshotStoragePath does not belong to this site" },
+          { status: 400, headers }
+        );
       }
     }
+
+    // Generate the id up front so the media-proxy URL can be stored and
+    // rendered into Linear in the same pass.
+    const submissionId = crypto.randomUUID();
+    const screenshotUrl = data.screenshotStoragePath
+      ? widgetMediaUrl(submissionId, "screenshot")
+      : undefined;
 
     // Insert submission
     const { data: submission, error: insertError } = await supabaseAdmin
       .from("widget_submissions")
       .insert({
+        id: submissionId,
         widget_config_id: config.id,
         hub_id: config.hub_id,
         title: data.title,
         description: data.description ?? null,
         type: data.type,
         screenshot_url: screenshotUrl ?? null,
+        screenshot_storage_path: data.screenshotStoragePath ?? null,
         metadata: data.metadata,
         reporter_email: data.reporter.email,
         reporter_name: data.reporter.name ?? null,

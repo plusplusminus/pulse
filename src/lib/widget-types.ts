@@ -73,6 +73,10 @@ export type WidgetSubmission = {
   description: string | null
   type: 'bug' | 'feedback' | 'idea'
   screenshot_url: string | null
+  screenshot_storage_path: string | null
+  video_storage_path: string | null
+  replay_storage_path: string | null
+  media_purged_at: string | null
   metadata: WidgetMetadata
   reporter_email: string
   reporter_name: string | null
@@ -120,6 +124,8 @@ export type WidgetFeedbackRequest = {
     email: string
     name?: string
   }
+  /** Object key in the private widget-media bucket, minted by POST /api/widget/upload */
+  screenshotStoragePath?: string
 }
 
 export type WidgetFeedbackResponse = {

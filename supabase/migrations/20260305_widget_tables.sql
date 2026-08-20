@@ -41,7 +41,5 @@ CREATE INDEX IF NOT EXISTS idx_widget_submissions_hub ON widget_submissions(hub_
 CREATE INDEX IF NOT EXISTS idx_widget_submissions_widget ON widget_submissions(widget_config_id);
 CREATE INDEX IF NOT EXISTS idx_widget_submissions_sync_status ON widget_submissions(sync_status);
 
--- Storage bucket for widget screenshots
-INSERT INTO storage.buckets (id, name, public)
-VALUES ('widget-screenshots', 'widget-screenshots', true)
-ON CONFLICT (id) DO NOTHING;
+-- Widget media lives in the private `widget-media` bucket
+-- (20260820_widget_media_bucket.sql, PULSE-321).
