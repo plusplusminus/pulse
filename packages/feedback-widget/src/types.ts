@@ -46,6 +46,8 @@ export interface WidgetContext {
   console: ConsoleEntry[]
   sentry: SentryContext | null
   custom: Record<string, string>
+  /** What surface a native tab capture actually recorded (PULSE-335). */
+  captureSurface?: 'browser' | 'window' | 'monitor'
 }
 
 export interface FeedbackPayload {

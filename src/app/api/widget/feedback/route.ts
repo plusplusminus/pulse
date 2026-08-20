@@ -12,7 +12,7 @@ import {
   createWidgetLinearIssue,
   widgetMediaUrl,
 } from "@/lib/widget-linear";
-import type { WidgetFeedbackResponse } from "@/lib/widget-types";
+import { CAPTURE_SURFACES, type WidgetFeedbackResponse } from "@/lib/widget-types";
 import { STORAGE_PATH_PATTERN } from "@/lib/widget-upload";
 import { picksSchema, screenshotAnnotationsSchema } from "@/lib/widget-picks";
 
@@ -78,6 +78,8 @@ const feedbackSchema = z.object({
       .nullable()
       .default(null),
     custom: z.record(z.string(), z.string()).default({}),
+    // Present only for native tab captures (PULSE-335).
+    captureSurface: z.enum(CAPTURE_SURFACES).optional(),
   }),
   reporter: z.object({
     email: z.string().email("Valid email is required"),

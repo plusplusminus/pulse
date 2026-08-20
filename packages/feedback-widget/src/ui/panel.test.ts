@@ -23,13 +23,15 @@ let config: {
   onDeletePick: Mock<(id: string) => void>
   onPickElement: Mock<() => void>
   onTogglePause: Mock<() => void>
+  onCaptureTab: Mock<() => void>
 }
 
-function makePanel(allowElementPick = true): FeedbackPanel {
+function makePanel(allowElementPick = true, extra: { allowScreenshot?: boolean; allowCaptureTab?: boolean } = {}): FeedbackPanel {
   return new FeedbackPanel(shadow, {
     position: 'bottom-right',
     allowElementPick,
     allowScreenshot: false,
+    ...extra,
     onSubmit: vi.fn(async () => ({ id: '1', linearIssueId: null, linearIssueUrl: null, status: 'created' as const })),
     onClose: vi.fn(),
     onAnnotate: vi.fn(),
@@ -47,6 +49,7 @@ beforeEach(() => {
     onDeletePick: vi.fn<(id: string) => void>(),
     onPickElement: vi.fn<() => void>(),
     onTogglePause: vi.fn<() => void>(),
+    onCaptureTab: vi.fn<() => void>(),
   }
 })
 
@@ -120,5 +123,44 @@ describe('pause toggle', () => {
 
     panel.setPaused(false)
     expect(btn.classList.contains('pulse-header__pause--active')).toBe(false)
+  })
+})
+
+describe('capture controls', () => {
+  const labels = () =>
+    Array.from(shadow.querySelectorAll('.pulse-add-screenshot span')).map((el) => el.textContent)
+
+  it('shows Capture tab beside the screenshot button only when allowed', () => {
+    const panel = makePanel(false, { allowScreenshot: true, allowCaptureTab: true })
+    panel.setState('open')
+    expect(labels()).toEqual(['Add screenshot', 'Capture tab'])
+  })
+
+  it('hides Capture tab where the browser or the site does not allow it', () => {
+    const panel = makePanel(false, { allowScreenshot: true, allowCaptureTab: false })
+    panel.setState('open')
+    expect(labels()).toEqual(['Add screenshot'])
+  })
+
+  it('routes the Capture tab click straight through, with nothing awaited first', () => {
+    const panel = makePanel(false, { allowScreenshot: true, allowCaptureTab: true })
+    panel.setState('open')
+    const tabBtn = Array.from(shadow.querySelectorAll('.pulse-add-screenshot')).find(
+      (b) => b.querySelector('span')?.textContent === 'Capture tab'
+    ) as HTMLButtonElement
+    tabBtn.click()
+    expect(config.onCaptureTab).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows a capture error and always shows the cross-origin notice', () => {
+    const panel = makePanel(false, { allowScreenshot: true })
+    panel.setState('open')
+    expect(shadow.querySelector('.pulse-capture-note--error')).toBeNull()
+    panel.setCaptureError('Screenshot capture timed out')
+    const error = shadow.querySelector('.pulse-capture-note--error')
+    expect(error?.textContent).toBe('Screenshot capture timed out')
+    expect(shadow.querySelectorAll('.pulse-capture-note').length).toBe(2)
+    panel.setCaptureError(null)
+    expect(shadow.querySelector('.pulse-capture-note--error')).toBeNull()
   })
 })

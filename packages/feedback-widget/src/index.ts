@@ -1,4 +1,4 @@
-import type { PulseConfig, RuntimeConfig, ScreenshotAnnotation, SubmitResult, WidgetPick } from './types'
+import type { PulseConfig, RuntimeConfig, ScreenshotAnnotation, SubmitResult, WidgetContext, WidgetPick } from './types'
 import { ConsoleInterceptor } from './console'
 import { detectSentry } from './sentry'
 import { collectContext } from './context'
@@ -114,13 +114,15 @@ export class Pulse implements PulseInstance {
     screenshot?: Blob | null
     picks?: WidgetPick[]
     screenshotAnnotations?: ScreenshotAnnotation[]
+    captureSurface?: WidgetContext['captureSurface']
   }): Promise<SubmitResult> {
     const sentryContext = this.runtime.capture.sentry ? detectSentry() : null
 
     const context = collectContext(
       this.runtime.capture.console ? this.consoleInterceptor.getEntries() : [],
       sentryContext,
-      this.custom
+      this.custom,
+      formData.captureSurface
     )
 
     // Bytes go browser -> Supabase Storage; only the object key is submitted.

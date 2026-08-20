@@ -33,11 +33,14 @@ export class FeedbackPanel {
       allowScreenshot?: boolean
       /** Per-site capture.elementPick from bootstrap; hides the pick controls when false. */
       allowElementPick?: boolean
+      /** capture.captureTab AND browser support; hides the native capture button when false. */
+      allowCaptureTab?: boolean
       onSubmit: (data: PanelFormData) => Promise<SubmitResult>
       onClose: () => void
       onAnnotate: () => void
       onRetakeScreenshot: () => void
       onCaptureScreenshot: () => void
+      onCaptureTab: () => void
       onPickElement: () => void
       onEditPick: (id: string) => void
       onDeletePick: (id: string) => void
@@ -451,7 +454,34 @@ export class FeedbackPanel {
     label.textContent = 'Add screenshot'
     btn.appendChild(label)
     btn.addEventListener('click', () => this.config.onCaptureScreenshot())
-    container.appendChild(btn)
+
+    const row = document.createElement('div')
+    row.className = 'pulse-screenshot-row'
+    row.appendChild(btn)
+
+    if (this.config.allowCaptureTab) {
+      const tabBtn = document.createElement('button')
+      tabBtn.className = 'pulse-add-screenshot'
+      tabBtn.type = 'button'
+      const tabSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+      tabSvg.setAttribute('viewBox', '0 0 16 16')
+      tabSvg.setAttribute('fill', 'none')
+      const tabPath = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+      tabPath.setAttribute('d', 'M2 4a1 1 0 0 1 1-1h4l1.5 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4Z')
+      tabPath.setAttribute('stroke', 'currentColor')
+      tabPath.setAttribute('stroke-width', '1.25')
+      tabPath.setAttribute('stroke-linejoin', 'round')
+      tabSvg.appendChild(tabPath)
+      tabBtn.appendChild(tabSvg)
+      const tabLabel = document.createElement('span')
+      tabLabel.textContent = 'Capture tab'
+      tabBtn.appendChild(tabLabel)
+      // Must reach getDisplayMedia with the user activation intact: no await here.
+      tabBtn.addEventListener('click', () => this.config.onCaptureTab())
+      row.appendChild(tabBtn)
+    }
+
+    container.appendChild(row)
 
     if (this.captureError) {
       const error = document.createElement('div')
