@@ -2,7 +2,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
   frameFromStream,
-  isTabCaptureSupported,
   isUserCancel,
   requestTabStream,
   stopStream,
@@ -29,18 +28,6 @@ beforeEach(() => {
   Object.defineProperty(window, 'innerWidth', { value: 1440, configurable: true })
   Object.defineProperty(window, 'innerHeight', { value: 900, configurable: true })
   Object.defineProperty(window, 'devicePixelRatio', { value: 2, configurable: true })
-})
-
-describe('isTabCaptureSupported', () => {
-  it('is false where getDisplayMedia is absent (iOS Safari)', () => {
-    Object.defineProperty(navigator, 'mediaDevices', { value: {}, configurable: true })
-    expect(isTabCaptureSupported()).toBe(false)
-    Object.defineProperty(navigator, 'mediaDevices', {
-      value: { getDisplayMedia: vi.fn() },
-      configurable: true,
-    })
-    expect(isTabCaptureSupported()).toBe(true)
-  })
 })
 
 describe('tabCaptureConstraints', () => {

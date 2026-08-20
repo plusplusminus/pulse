@@ -17,11 +17,11 @@ import { PageFreezer } from './capture/freeze'
 import { captureSelectedText, clearSelection } from './capture/text-selection'
 import {
   frameFromStream,
-  isTabCaptureSupported,
   isUserCancel,
   requestTabStream,
   type CaptureSurface,
 } from './capture/tab-capture'
+import { isGetDisplayMediaSupported } from './capture/display-media'
 import {
   createVideoRecorder,
   requestRecordingStream,
@@ -120,8 +120,10 @@ export class Widget {
       user: this.user,
       allowScreenshot: this.config.capture.screenshot,
       allowElementPick: this.config.capture.elementPick,
-      allowCaptureTab: this.config.capture.captureTab && isTabCaptureSupported(),
-      allowVideo: this.config.capture.video && isTabCaptureSupported(),
+      // One helper for both: the two getDisplayMedia features can never
+      // disagree about what the browser supports (PULSE-339).
+      allowCaptureTab: this.config.capture.captureTab && isGetDisplayMediaSupported(),
+      allowVideo: this.config.capture.video && isGetDisplayMediaSupported(),
       onSubmit: (data) => this.handleSubmit(data),
       onClose: () => this.close(),
       onAnnotate: () => this.startAnnotation(),
