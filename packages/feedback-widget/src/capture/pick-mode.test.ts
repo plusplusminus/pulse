@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest'
 import { ElementPicker, isTextTarget, dragRect, isMultiSelectModifier, type PickerEvents } from './pick-mode'
 
 let host: HTMLElement
 let shadow: ShadowRoot
 let picker: ElementPicker
-let events: { [K in keyof PickerEvents]-?: ReturnType<typeof vi.fn> }
+let events: { [K in keyof PickerEvents]-?: Mock<NonNullable<PickerEvents[K]>> }
 let under: Element | null
 
 function mouse(type: string, x: number, y: number, init: MouseEventInit = {}, target: EventTarget = document.body): MouseEvent {
@@ -21,12 +21,12 @@ beforeEach(() => {
   under = document.getElementById('btn')
   document.elementFromPoint = vi.fn(() => under)
   events = {
-    onPick: vi.fn(),
-    onDragStart: vi.fn(),
-    onDragMove: vi.fn(),
-    onDragEnd: vi.fn(),
-    onModifierClick: vi.fn(() => false),
-    onModifierRelease: vi.fn(),
+    onPick: vi.fn<NonNullable<PickerEvents['onPick']>>(),
+    onDragStart: vi.fn<NonNullable<PickerEvents['onDragStart']>>(),
+    onDragMove: vi.fn<NonNullable<PickerEvents['onDragMove']>>(),
+    onDragEnd: vi.fn<NonNullable<PickerEvents['onDragEnd']>>(),
+    onModifierClick: vi.fn<NonNullable<PickerEvents['onModifierClick']>>(() => false),
+    onModifierRelease: vi.fn<NonNullable<PickerEvents['onModifierRelease']>>(),
   }
   picker = new ElementPicker(shadow, host, events)
   picker.start()

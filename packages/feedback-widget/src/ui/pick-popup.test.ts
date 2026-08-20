@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { PickPopup, popupPosition } from './pick-popup'
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
+import { PickPopup, popupPosition, type PickPopupResult } from './pick-popup'
 
 describe('popupPosition', () => {
   const vp = { width: 1000, height: 800 }
@@ -19,15 +19,15 @@ describe('popupPosition', () => {
 
 describe('PickPopup', () => {
   let shadow: ShadowRoot
-  let onSave: ReturnType<typeof vi.fn>
-  let onCancel: ReturnType<typeof vi.fn>
+  let onSave: Mock<(result: PickPopupResult) => void>
+  let onCancel: Mock<() => void>
   let popup: PickPopup
 
   beforeEach(() => {
     document.body.innerHTML = '<div id="h"></div>'
     shadow = document.getElementById('h')!.attachShadow({ mode: 'open' })
-    onSave = vi.fn()
-    onCancel = vi.fn()
+    onSave = vi.fn<(result: PickPopupResult) => void>()
+    onCancel = vi.fn<() => void>()
     popup = new PickPopup(shadow, { onSave, onCancel })
   })
 

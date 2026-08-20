@@ -3,7 +3,6 @@ import {
   getAccessibilityInfo,
   getDetailedComputedStyles,
   getElementClasses,
-  getElementPath,
   getFullElementPath,
   getNearbyElements,
   getNearbyText,
