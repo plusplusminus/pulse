@@ -7,7 +7,7 @@ import type {
 } from './types'
 import { getWidgetStyles } from './ui/styles'
 import { TriggerButton } from './ui/trigger'
-import { FeedbackPanel, type PanelFormData } from './ui/panel'
+import { BAR_IN_RECORDING_NOTICE, FeedbackPanel, type PanelFormData } from './ui/panel'
 import { AnnotationCanvas } from './ui/annotation'
 import { ElementPicker, type DragRect, type Point } from './capture/pick-mode'
 import { buildPick, buildMultiPick, buildAreaPick } from './capture/pick-builder'
@@ -34,6 +34,7 @@ import { PickMarkers, type Marker } from './ui/pick-markers'
 import { PickOutlines } from './ui/pick-outlines'
 import { PickStatus } from './ui/pick-status'
 import { Marquee } from './ui/marquee'
+import { RecordingBar } from './ui/recording-bar'
 
 export interface PulseCore {
   submitFeedback(data: {
@@ -85,6 +86,7 @@ export class Widget {
   private captureSurface: CaptureSurface | undefined
   private recorder: VideoRecorder | null = null
   private recording: VideoRecording | null = null
+  private recordingBar: RecordingBar | null = null
   private user: { email?: string; name?: string }
   private themeQuery: MediaQueryList | null = null
   private themeHandler: ((e: MediaQueryListEvent) => void) | null = null
@@ -219,6 +221,8 @@ export class Widget {
     }
     this.recorder?.cancel()
     this.recorder = null
+    this.recordingBar?.destroy()
+    this.recordingBar = null
     this.freezer.destroy()
     this.teardownPickMode()
     this.picker = null
@@ -451,9 +455,11 @@ export class Widget {
   private handleEscape(e: KeyboardEvent): void {
     if (this.state === 'closed') return
     e.stopPropagation()
-    // The widget is hidden mid-recording, so Esc is the only control it owns.
+    // Esc STOPS AND KEEPS (PULSE-399). It used to discard, which meant the
+    // reflex keystroke destroyed up to two minutes of capture with no undo.
+    // Dropping a recording is now a deliberate click on Discard in the bar.
     if (this.state === 'recording') {
-      this.cancelRecording()
+      void this.collectRecording()
     } else if (this.popup?.isOpen) {
       this.handlePopupCancel()
     } else if (this.state === 'picking' && this.multi.size > 0) {
@@ -470,12 +476,14 @@ export class Widget {
   /**
    * getDisplayMedia is called with the user activation from this click still
    * live — nothing may be awaited before it, or the browser silently refuses to
-   * prompt. Hiding the host is synchronous, so it is safe to do first, and it
-   * has to happen first: the widget must not appear in its own recording.
+   * prompt. Hiding the panel and trigger is synchronous, so it is safe to do
+   * first. The host itself now stays visible: it carries the recording bar,
+   * which is the only stop control the widget owns (PULSE-399).
    */
   private startRecording(): void {
     if (this.state !== 'open') return
     this.panel.setVideoError(null)
+    this.panel.setVideoNotice(null)
     this.hideForRecording()
 
     let stream: Promise<MediaStream>
@@ -488,9 +496,15 @@ export class Widget {
     }
 
     this.state = 'recording'
+    this.recordingBar = new RecordingBar(this.shadow, {
+      onStop: () => void this.collectRecording(),
+      onDiscard: () => this.cancelRecording(),
+    })
+    this.recordingBar.focusStop()
     this.recorder = createVideoRecorder({
       // Fetched only once a WebM recording finishes; see capture/webm-duration.
       postProcess: webmDurationPostProcess(this.config.apiUrl),
+      onProgress: (progress) => this.recordingBar?.update(progress),
       onEnd: () => this.collectRecording(),
     })
     void this.beginRecording(stream)
@@ -499,6 +513,9 @@ export class Widget {
   private async beginRecording(stream: Promise<MediaStream>): Promise<void> {
     try {
       await this.recorder?.start(stream)
+      // Already resolved by the line above; the recorder keeps the stream, so
+      // this is the only place the surface can be read.
+      this.applyDisplaySurface(await stream)
     } catch (e) {
       const recorder = this.recorder
       this.recorder = null
@@ -524,19 +541,40 @@ export class Widget {
     }
   }
 
+  /** Only ever reached by a deliberate click on Discard in the bar. */
   private cancelRecording(): void {
     this.recorder?.cancel()
     this.recorder = null
     this.restoreAfterRecording()
   }
 
+  /**
+   * Sharing *this tab* means the bar is composited into the video — nothing in
+   * the page can opt out of its own capture. Shrink it, and say so afterwards.
+   * `displaySurface` is Chromium-only; where it is missing we do not know, and
+   * we do not claim to. Never allowed to fail a live recording.
+   */
+  private applyDisplaySurface(stream: MediaStream): void {
+    let surface: string | undefined
+    try {
+      surface = stream.getVideoTracks?.()[0]?.getSettings?.().displaySurface
+    } catch {
+      return
+    }
+    if (surface !== 'browser') return
+    this.recordingBar?.setSlim(true)
+    this.panel.setVideoNotice(BAR_IN_RECORDING_NOTICE)
+  }
+
+  /** The host stays visible: it carries the recording bar. */
   private hideForRecording(): void {
     this.panel.hide()
     this.trigger.hide()
-    this.host.style.display = 'none'
   }
 
   private restoreAfterRecording(): void {
+    this.recordingBar?.destroy()
+    this.recordingBar = null
     this.host.style.display = ''
     this.state = 'open'
     this.panel.setState('open')

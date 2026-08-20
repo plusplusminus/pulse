@@ -438,6 +438,13 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
       font-variant-numeric: tabular-nums;
     }
 
+    /* Sits inside the preview card, so it needs the card's padding and a rule
+       to separate it from the action row above (PULSE-399). */
+    .pulse-video__note {
+      padding: 6px 8px;
+      border-top: 1px solid ${c.border};
+    }
+
     .pulse-record-btn:hover {
       border-color: ${c.error};
       color: ${c.error};
@@ -1036,6 +1043,128 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
 
     .pulse-pick-btn {
       width: 100%;
+    }
+
+    /* Recording bar (PULSE-399) — bottom-left, out of the usual content
+       column, because it IS composited into the recording when this tab is
+       the shared surface. Dark chrome in both themes: it must read against
+       whatever page it is floating over. */
+    .pulse-recbar {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      z-index: 2147483647;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 8px 7px 12px;
+      background: rgba(20, 20, 28, 0.94);
+      color: #f4f4f5;
+      border-radius: 999px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3), 0 6px 20px rgba(0,0,0,0.25);
+      font-family: inherit;
+      font-size: 12px;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .pulse-recbar__dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ef4444;
+      animation: pulse-recdot 1.4s ease-in-out infinite;
+    }
+
+    @keyframes pulse-recdot {
+      50% { opacity: 0.25; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .pulse-recbar__dot { animation: none; }
+    }
+
+    .pulse-recbar__label {
+      font-weight: 500;
+    }
+
+    /* tabular-nums so the readouts keep their width as the digits change. */
+    .pulse-recbar__time,
+    .pulse-recbar__size,
+    .pulse-recbar__countdown {
+      font-variant-numeric: tabular-nums;
+      font-feature-settings: 'tnum' 1;
+    }
+
+    .pulse-recbar__size {
+      color: rgba(244, 244, 245, 0.65);
+    }
+
+    .pulse-recbar__countdown {
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: rgba(239, 68, 68, 0.18);
+      color: #fca5a5;
+      font-weight: 500;
+    }
+
+    .pulse-recbar__btn {
+      padding: 5px 10px;
+      border: none;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.12);
+      color: #f4f4f5;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      line-height: 1;
+      cursor: pointer;
+      outline: none;
+      transition: background 0.12s ease, color 0.12s ease;
+    }
+
+    .pulse-recbar__btn--stop {
+      background: #ffffff;
+      color: #14141c;
+    }
+
+    .pulse-recbar__btn--stop:hover {
+      background: rgba(255, 255, 255, 0.88);
+    }
+
+    .pulse-recbar__btn--discard:hover {
+      background: rgba(239, 68, 68, 0.85);
+      color: #ffffff;
+    }
+
+    .pulse-recbar__btn:focus-visible {
+      box-shadow: 0 0 0 2px #14141c, 0 0 0 4px ${c.primary};
+    }
+
+    /* Slim: this tab is the shared surface, so spend fewer pixels. */
+    .pulse-recbar--slim {
+      gap: 6px;
+      padding: 5px 6px 5px 10px;
+      font-size: 11px;
+      opacity: 0.9;
+    }
+
+    .pulse-recbar--slim:hover,
+    .pulse-recbar--slim:focus-within {
+      opacity: 1;
+    }
+
+    .pulse-recbar--slim .pulse-recbar__label {
+      display: none;
+    }
+
+    .pulse-recbar--slim .pulse-recbar__btn {
+      padding: 4px 8px;
+      font-size: 11px;
+    }
+
+    .pulse-recbar--ending .pulse-recbar__dot {
+      animation-duration: 0.7s;
     }
   `
 }
