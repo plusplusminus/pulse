@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import type {
+  OutputDetailLevel,
   WidgetCaptureConfig,
   WidgetConfig,
   WidgetConfigCreateResponse,
@@ -23,6 +24,8 @@ import type {
   WidgetUIConfig,
 } from "@/lib/widget-types";
 import { BOOTSTRAP_DEFAULTS } from "@/lib/widget-bootstrap";
+import { isOutputDetailLevel } from "@/lib/widget-picks";
+import { OUTPUT_LEVEL_COPY, outputLevelCopy } from "@/lib/widget-output-levels";
 
 interface WidgetConfigFormProps {
   hubId: string;
@@ -50,6 +53,14 @@ function captureFromConfig(config: WidgetUIConfig): Record<CaptureToggleKey, boo
     console: c.console ?? d.console,
     sentry: c.sentry ?? d.sentry,
   };
+}
+
+/** Rows written before the column existed read as undefined; they are 'standard'. */
+const DEFAULT_OUTPUT_LEVEL: OutputDetailLevel = "standard";
+
+function outputLevelFromConfig(config: WidgetConfig | null): OutputDetailLevel {
+  const stored = config?.output_detail_level;
+  return isOutputDetailLevel(stored) ? stored : DEFAULT_OUTPUT_LEVEL;
 }
 
 function maskTextFromConfig(config: WidgetUIConfig): string {
@@ -93,6 +104,7 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
     captureFromConfig({})
   );
   const [maskText, setMaskText] = useState("");
+  const [outputLevel, setOutputLevel] = useState<OutputDetailLevel>(DEFAULT_OUTPUT_LEVEL);
   const [dirty, setDirty] = useState(false);
 
   // Sync state from fetched config
@@ -105,6 +117,7 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
       setOrigins(activeConfig.allowed_origins ?? []);
       setCapture(captureFromConfig(activeConfig.config));
       setMaskText(maskTextFromConfig(activeConfig.config));
+      setOutputLevel(outputLevelFromConfig(activeConfig));
       setDirty(false);
     }
   }, [activeConfig]);
@@ -120,9 +133,10 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
       JSON.stringify(origins) !== JSON.stringify(activeConfig.allowed_origins ?? []) ||
       JSON.stringify(capture) !== JSON.stringify(captureFromConfig(activeConfig.config)) ||
       JSON.stringify(parseMaskText(maskText)) !==
-        JSON.stringify(activeConfig.config.privacy?.maskSelectors ?? []);
+        JSON.stringify(activeConfig.config.privacy?.maskSelectors ?? []) ||
+      outputLevel !== outputLevelFromConfig(activeConfig);
     setDirty(isDirty);
-  }, [widgetName, theme, position, triggerText, origins, capture, maskText, activeConfig]);
+  }, [widgetName, theme, position, triggerText, origins, capture, maskText, outputLevel, activeConfig]);
 
   const generateKey = useCallback(() => {
     startTransition(async () => {
@@ -225,6 +239,10 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
 
   const saveConfig = useCallback(() => {
     if (!activeConfig) return;
+    if (!isOutputDetailLevel(outputLevel)) {
+      toast.error("Pick a valid output detail level");
+      return;
+    }
     startTransition(async () => {
       try {
         const res = await fetch(`/api/widget/config/${activeConfig.id}`, {
@@ -233,6 +251,8 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
           body: JSON.stringify({
             name: widgetName.trim(),
             allowed_origins: origins,
+            // Own column, not part of the config JSONB.
+            output_detail_level: outputLevel,
             // Merge so fields owned by other slices (e.g. replay) survive a save.
             config: {
               ...activeConfig.config,
@@ -255,7 +275,7 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
         toast.error(e instanceof Error ? e.message : "Failed to save");
       }
     });
-  }, [activeConfig, widgetName, theme, position, triggerText, origins, capture, maskText, refetch]);
+  }, [activeConfig, widgetName, theme, position, triggerText, origins, capture, maskText, outputLevel, refetch]);
 
   const addOrigin = () => {
     const raw = originInput.trim();
@@ -494,6 +514,39 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
                 </label>
               ))}
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium mb-1.5">
+              Output detail
+            </label>
+            <p className="text-[11px] text-muted-foreground mb-2">
+              How much detail each element pick contributes to the Linear issue body.
+            </p>
+            <div className="inline-flex rounded-md border border-border overflow-hidden">
+              {OUTPUT_LEVEL_COPY.map((o) => (
+                <button
+                  key={o.level}
+                  type="button"
+                  aria-pressed={outputLevel === o.level}
+                  onClick={() => setOutputLevel(o.level)}
+                  className={cn(
+                    "px-3 py-1.5 text-xs font-medium transition-colors",
+                    outputLevel === o.level
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-background text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                  )}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              {outputLevelCopy(outputLevel).help}
+            </p>
+            <pre className="mt-2 overflow-x-auto rounded-md border border-border bg-muted/40 px-3 py-2 font-mono text-[11px] leading-relaxed text-muted-foreground">
+              {outputLevelCopy(outputLevel).preview.join("\n")}
+            </pre>
           </div>
 
           <div>
