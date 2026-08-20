@@ -13,6 +13,8 @@ export default defineConfig(({ mode }) => {
     test: {
       globals: true,
       environment: "node",
+      // Widget package has its own vitest config (pnpm widget:test)
+      exclude: ["**/node_modules/**", "packages/**", ".claude/**"],
       env: {
         NEXT_PUBLIC_SUPABASE_URL:
           env.NEXT_PUBLIC_SUPABASE_URL || "http://localhost:54321",

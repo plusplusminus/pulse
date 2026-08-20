@@ -1,0 +1,55 @@
+{
+  "team": {
+    "id": "64b7c9cf-5b9c-4b53-b97f-a7f1f79c0eb7",
+    "name": "Pulse"
+  },
+  "states": {
+    "grounding": "Todo",
+    "in_progress": "In Progress",
+    "in_proof": "In Review",
+    "done": "Done",
+    "blocked": "Blocked"
+  },
+  "labels": {
+    "spec": "spec",
+    "slice": "slice",
+    "bug": "type:bug",
+    "task": "type:task",
+    "blocked": "Discuss Internal",
+    "frontend": "component:frontend",
+    "backend": "component:api",
+    "infrastructure": "component:infrastructure",
+    "p1": "priority:critical",
+    "p2": "priority:high",
+    "p3": "priority:medium",
+    "p4": "priority:low"
+  },
+  "estimates": {
+    "slice": ["small", "medium", "large"]
+  },
+  "families": {
+    "1": "spec-first",
+    "2": "visual-feedback",
+    "3": "approval-gated"
+  },
+  "sla": {
+    "P1": { "response": "1h", "resolution": "same day" },
+    "P2": { "response": "4h", "resolution": "48h" },
+    "P3": { "response": "next business day", "resolution": "current cycle" },
+    "P4": { "response": "acknowledged", "resolution": "next available" }
+  },
+  "branch_prefix": {
+    "feature": "feature",
+    "fix": "fix",
+    "chore": "chore"
+  },
+  "commands": {
+    "install": "pnpm install",
+    "build": "pnpm build",
+    "typecheck": "pnpm exec tsc --noEmit",
+    "lint": "pnpm lint",
+    "test": "pnpm exec vitest run",
+    "widget:build": "pnpm widget:build",
+    "widget:typecheck": "pnpm widget:typecheck"
+  }
+}

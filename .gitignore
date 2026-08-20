@@ -50,3 +50,13 @@ next-env.d.ts
 # opennext build output
 .open-next
 .env*.local
+
+# widget bundles copied from packages/feedback-widget/dist by scripts/publish-widget.mjs
+/public/widget/
+
+# Agent-OS
+specs/
+agent-os/.env.local
+
+# linear-loop journals
+.claude/linear-loop/
