@@ -34,7 +34,6 @@ export class FeedbackPanel {
       onAnnotate: () => void
       onRetakeScreenshot: () => void
       onCaptureScreenshot: () => void
-      onCaptureFullScreen: () => void
       onPickElement: () => void
       onEditPick: (id: string) => void
       onDeletePick: (id: string) => void
@@ -377,49 +376,28 @@ export class FeedbackPanel {
     const container = document.createElement('div')
     container.className = 'pulse-screenshot-options'
 
-    // Select Area button
-    const areaBtn = document.createElement('button')
-    areaBtn.className = 'pulse-add-screenshot'
-    areaBtn.type = 'button'
-    const areaSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-    areaSvg.setAttribute('viewBox', '0 0 16 16')
-    areaSvg.setAttribute('fill', 'none')
-    const areaPath = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-    areaPath.setAttribute('d', 'M2 5V3.5A1.5 1.5 0 0 1 3.5 2H5M11 2h1.5A1.5 1.5 0 0 1 14 3.5V5M14 11v1.5a1.5 1.5 0 0 1-1.5 1.5H11M5 14H3.5A1.5 1.5 0 0 1 2 12.5V11')
-    areaPath.setAttribute('stroke', 'currentColor')
-    areaPath.setAttribute('stroke-width', '1.25')
-    areaPath.setAttribute('stroke-linecap', 'round')
-    areaSvg.appendChild(areaPath)
-    areaBtn.appendChild(areaSvg)
-    const areaLabel = document.createElement('span')
-    areaLabel.textContent = 'Select Area'
-    areaBtn.appendChild(areaLabel)
-    areaBtn.addEventListener('click', () => this.config.onCaptureScreenshot())
-    container.appendChild(areaBtn)
-
-    // Full Screen button
-    const fullBtn = document.createElement('button')
-    fullBtn.className = 'pulse-add-screenshot'
-    fullBtn.type = 'button'
-    const fullSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-    fullSvg.setAttribute('viewBox', '0 0 16 16')
-    fullSvg.setAttribute('fill', 'none')
-    const fullPath = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-    fullPath.setAttribute('d', 'M2 3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3Z')
-    fullPath.setAttribute('stroke', 'currentColor')
-    fullPath.setAttribute('stroke-width', '1.25')
-    fullSvg.appendChild(fullPath)
-    const fullLine = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-    fullLine.setAttribute('d', 'M2 5h12')
-    fullLine.setAttribute('stroke', 'currentColor')
-    fullLine.setAttribute('stroke-width', '1.25')
-    fullSvg.appendChild(fullLine)
-    fullBtn.appendChild(fullSvg)
-    const fullLabel = document.createElement('span')
-    fullLabel.textContent = 'Full Screen'
-    fullBtn.appendChild(fullLabel)
-    fullBtn.addEventListener('click', () => this.config.onCaptureFullScreen())
-    container.appendChild(fullBtn)
+    const btn = document.createElement('button')
+    btn.className = 'pulse-add-screenshot'
+    btn.type = 'button'
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+    svg.setAttribute('viewBox', '0 0 16 16')
+    svg.setAttribute('fill', 'none')
+    const frame = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+    frame.setAttribute('d', 'M2 3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3Z')
+    frame.setAttribute('stroke', 'currentColor')
+    frame.setAttribute('stroke-width', '1.25')
+    svg.appendChild(frame)
+    const bar = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+    bar.setAttribute('d', 'M2 5h12')
+    bar.setAttribute('stroke', 'currentColor')
+    bar.setAttribute('stroke-width', '1.25')
+    svg.appendChild(bar)
+    btn.appendChild(svg)
+    const label = document.createElement('span')
+    label.textContent = 'Add screenshot'
+    btn.appendChild(label)
+    btn.addEventListener('click', () => this.config.onCaptureScreenshot())
+    container.appendChild(btn)
 
     return container
   }

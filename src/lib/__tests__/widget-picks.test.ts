@@ -3,6 +3,9 @@ import {
   widgetPickSchema,
   picksSchema,
   isOutputDetailLevel,
+  screenshotAnnotationSchema,
+  screenshotAnnotationsSchema,
+  MAX_ANNOTATIONS,
   MAX_PICKS,
 } from "../widget-picks";
 import type { WidgetPick } from "../widget-types";
@@ -76,6 +79,35 @@ describe("picksSchema", () => {
     expect(picksSchema.parse(undefined)).toEqual([]);
     expect(picksSchema.safeParse(Array.from({ length: MAX_PICKS }, () => basePick)).success).toBe(true);
     expect(picksSchema.safeParse(Array.from({ length: MAX_PICKS + 1 }, () => basePick)).success).toBe(false);
+  });
+});
+
+describe("screenshotAnnotationsSchema", () => {
+  const rect = { kind: "highlight", x: 10, y: 20, w: 100, h: 50 };
+
+  it("defaults to [] and caps at MAX_ANNOTATIONS", () => {
+    expect(screenshotAnnotationsSchema.parse(undefined)).toEqual([]);
+    expect(
+      screenshotAnnotationsSchema.safeParse(Array.from({ length: MAX_ANNOTATIONS }, () => rect)).success
+    ).toBe(true);
+    expect(
+      screenshotAnnotationsSchema.safeParse(Array.from({ length: MAX_ANNOTATIONS + 1 }, () => rect)).success
+    ).toBe(false);
+  });
+
+  it("accepts both kinds and rejects anything else", () => {
+    expect(screenshotAnnotationSchema.safeParse({ ...rect, kind: "hide" }).success).toBe(true);
+    expect(screenshotAnnotationSchema.safeParse({ ...rect, kind: "redact" }).success).toBe(false);
+  });
+
+  it("rejects negative extents but allows negative origins (a rect may start off-canvas)", () => {
+    expect(screenshotAnnotationSchema.safeParse({ ...rect, w: -1 }).success).toBe(false);
+    expect(screenshotAnnotationSchema.safeParse({ ...rect, h: -1 }).success).toBe(false);
+    expect(screenshotAnnotationSchema.safeParse({ ...rect, x: -5, y: -5 }).success).toBe(true);
+  });
+
+  it("rejects a missing dimension", () => {
+    expect(screenshotAnnotationSchema.safeParse({ kind: "hide", x: 0, y: 0, w: 1 }).success).toBe(false);
   });
 });
 

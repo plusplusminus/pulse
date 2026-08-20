@@ -1,84 +1,135 @@
-export type AnnotationTool = 'draw' | 'highlight' | 'redact'
+import type { AnnotationKind, ScreenshotAnnotation } from '../types'
 
-interface DrawAnnotation {
-  tool: 'draw'
-  points: Array<{ x: number; y: number }>
+/** Export/preview appearance, shared so the editor is WYSIWYG. */
+const HIGHLIGHT_STROKE = '#5e6ad2'
+const HIGHLIGHT_WIDTH = 3
+const DIM_FILL = 'rgba(0, 0, 0, 0.45)'
+const HIDE_FILL = '#000000'
+/** Rects smaller than this (in image pixels) are treated as a stray click. */
+const MIN_RECT = 4
+
+export interface Point {
+  x: number
+  y: number
 }
 
-interface RectAnnotation {
-  tool: 'highlight' | 'redact'
-  rect: { x: number; y: number; width: number; height: number }
+export function normaliseRect(a: Point, b: Point, kind: AnnotationKind): ScreenshotAnnotation {
+  return {
+    kind,
+    x: Math.round(Math.min(a.x, b.x)),
+    y: Math.round(Math.min(a.y, b.y)),
+    w: Math.round(Math.abs(b.x - a.x)),
+    h: Math.round(Math.abs(b.y - a.y)),
+  }
 }
 
-type Annotation = DrawAnnotation | RectAnnotation
+/**
+ * Paints the annotation layer at the bitmap's native resolution. Highlights dim
+ * everything outside them (one even-odd fill for the whole set) and get a 3 px
+ * outline; hides are solid fills. Used for both the live preview and the export,
+ * so what the user sees is what ships.
+ */
+export function paintAnnotations(
+  ctx: CanvasRenderingContext2D,
+  annotations: readonly ScreenshotAnnotation[],
+  size: { width: number; height: number }
+): void {
+  const highlights = annotations.filter((a) => a.kind === 'highlight')
 
-const MAX_CANVAS_WIDTH = 600
+  if (highlights.length > 0) {
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(0, 0, size.width, size.height)
+    for (const r of highlights) ctx.rect(r.x, r.y, r.w, r.h)
+    ctx.fillStyle = DIM_FILL
+    ctx.fill('evenodd')
+    ctx.restore()
 
+    ctx.save()
+    ctx.strokeStyle = HIGHLIGHT_STROKE
+    ctx.lineWidth = HIGHLIGHT_WIDTH
+    for (const r of highlights) {
+      ctx.strokeRect(r.x, r.y, r.w, r.h)
+    }
+    ctx.restore()
+  }
+
+  ctx.save()
+  ctx.fillStyle = HIDE_FILL
+  for (const r of annotations) {
+    if (r.kind === 'hide') ctx.fillRect(r.x, r.y, r.w, r.h)
+  }
+  ctx.restore()
+}
+
+const TOOLS: Array<{ kind: AnnotationKind; label: string; icon: string }> = [
+  { kind: 'highlight', label: 'Highlight', icon: 'M3 3h14v14H3zM7 7h6v6H7z' },
+  { kind: 'hide', label: 'Hide', icon: 'M3 5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5Z' },
+]
+
+/**
+ * Screenshot annotation overlay. The captured bitmap is never resampled: both
+ * canvases are sized to its natural pixels and scaled down with CSS only, so the
+ * exported PNG matches the capture exactly and rects stay valid across resizes.
+ */
 export class AnnotationCanvas {
   private container: HTMLElement | null = null
-  private canvas!: HTMLCanvasElement
-  private ctx!: CanvasRenderingContext2D
-  private bgCanvas!: HTMLCanvasElement
-  private bgCtx!: CanvasRenderingContext2D
-  private annotations: Annotation[] = []
-  private currentTool: AnnotationTool = 'draw'
-  private isDrawing = false
-  private currentDrawPoints: Array<{ x: number; y: number }> = []
-  private startPoint: { x: number; y: number } | null = null
-  private lastPoint: { x: number; y: number } | null = null
+  private canvas: HTMLCanvasElement | null = null
+  private ctx: CanvasRenderingContext2D | null = null
+  private bgCanvas: HTMLCanvasElement | null = null
+  private annotations: ScreenshotAnnotation[] = []
+  private tool: AnnotationKind = 'highlight'
+  private start: Point | null = null
+  private current: Point | null = null
   private image: HTMLImageElement | null = null
 
-  private boundMouseDown = (e: MouseEvent) => this.startDraw(e)
-  private boundMouseMove = (e: MouseEvent) => this.continueDraw(e)
-  private boundMouseUp = () => this.endDraw()
+  private onPointerDown = (e: PointerEvent) => this.beginRect(e)
+  private onPointerMove = (e: PointerEvent) => this.extendRect(e)
+  private onPointerUp = (e: PointerEvent) => this.endRect(e)
 
   constructor(
-    private _shadowRoot: ShadowRoot,
+    private shadowRoot: ShadowRoot,
     private config: {
-      onSave: (blob: Blob) => void
+      onSave: (blob: Blob, annotations: ScreenshotAnnotation[]) => void
       onCancel: () => void
     }
   ) {}
 
-  async show(screenshotBlob: Blob): Promise<void> {
-    this.annotations = []
-    this.image = await this.loadImage(screenshotBlob)
-
-    const scale = Math.min(1, MAX_CANVAS_WIDTH / this.image.naturalWidth)
-    const width = Math.round(this.image.naturalWidth * scale)
-    const height = Math.round(this.image.naturalHeight * scale)
+  async show(screenshotBlob: Blob, existing: ScreenshotAnnotation[] = []): Promise<void> {
+    this.annotations = existing.map((a) => ({ ...a }))
+    this.image = await loadImage(screenshotBlob)
+    const width = this.image.naturalWidth
+    const height = this.image.naturalHeight
 
     this.container = document.createElement('div')
     this.container.className = 'pulse-annotation'
+    this.container.appendChild(this.renderToolbar())
 
-    const toolbar = this.renderToolbar()
-    this.container.appendChild(toolbar)
-
-    const canvasWrap = document.createElement('div')
-    canvasWrap.className = 'pulse-annotation__canvas-wrap'
+    const wrap = document.createElement('div')
+    wrap.className = 'pulse-annotation__canvas-wrap'
+    // CSS-only downscale: intrinsic ratio keeps the two canvases aligned.
+    wrap.style.aspectRatio = `${width} / ${height}`
 
     this.bgCanvas = document.createElement('canvas')
     this.bgCanvas.width = width
     this.bgCanvas.height = height
-    this.bgCtx = this.bgCanvas.getContext('2d')!
-    this.bgCtx.drawImage(this.image, 0, 0, width, height)
-    canvasWrap.appendChild(this.bgCanvas)
+    this.bgCanvas.getContext('2d')?.drawImage(this.image, 0, 0)
+    wrap.appendChild(this.bgCanvas)
 
     this.canvas = document.createElement('canvas')
+    this.canvas.className = 'pulse-annotation__layer'
     this.canvas.width = width
     this.canvas.height = height
-    this.canvas.style.position = 'absolute'
-    this.canvas.style.top = '0'
-    this.canvas.style.left = '0'
-    this.ctx = this.canvas.getContext('2d')!
-    canvasWrap.appendChild(this.canvas)
+    this.ctx = this.canvas.getContext('2d')
+    this.canvas.addEventListener('pointerdown', this.onPointerDown)
+    this.canvas.addEventListener('pointermove', this.onPointerMove)
+    this.canvas.addEventListener('pointerup', this.onPointerUp)
+    this.canvas.addEventListener('pointercancel', this.onPointerUp)
+    wrap.appendChild(this.canvas)
 
-    this.canvas.addEventListener('mousedown', this.boundMouseDown)
-    this.canvas.addEventListener('mousemove', this.boundMouseMove)
-    this.canvas.addEventListener('mouseup', this.boundMouseUp)
-
-    this.container.appendChild(canvasWrap)
-    this._shadowRoot.appendChild(this.container)
+    this.container.appendChild(wrap)
+    this.shadowRoot.appendChild(this.container)
+    this.redraw()
   }
 
   hide(): void {
@@ -89,219 +140,113 @@ export class AnnotationCanvas {
     this.cleanup()
   }
 
+  getAnnotations(): ScreenshotAnnotation[] {
+    return this.annotations.map((a) => ({ ...a }))
+  }
+
   private cleanup(): void {
     if (this.canvas) {
-      this.canvas.removeEventListener('mousedown', this.boundMouseDown)
-      this.canvas.removeEventListener('mousemove', this.boundMouseMove)
-      this.canvas.removeEventListener('mouseup', this.boundMouseUp)
+      this.canvas.removeEventListener('pointerdown', this.onPointerDown)
+      this.canvas.removeEventListener('pointermove', this.onPointerMove)
+      this.canvas.removeEventListener('pointerup', this.onPointerUp)
+      this.canvas.removeEventListener('pointercancel', this.onPointerUp)
     }
     this.container?.remove()
     this.container = null
+    this.canvas = null
+    this.ctx = null
+    this.bgCanvas = null
     this.image = null
     this.annotations = []
+    this.start = null
+    this.current = null
   }
 
   private renderToolbar(): HTMLElement {
     const toolbar = document.createElement('div')
     toolbar.className = 'pulse-annotation__toolbar'
 
-    const tools: Array<{ tool: AnnotationTool; label: string; icon: string }> = [
-      { tool: 'draw', label: 'Draw', icon: 'M3 13.5l8.5-8.5a1.5 1.5 0 0 1 2 0l1.5 1.5a1.5 1.5 0 0 1 0 2L6.5 17H3v-3.5Z' },
-      { tool: 'highlight', label: 'Highlight', icon: 'M3 3h10v10H3zM7 13v3M13 7h3' },
-      { tool: 'redact', label: 'Redact', icon: 'M3 5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5Z' },
-    ]
-
-    for (const t of tools) {
-      const btn = this.createToolButton(
-        t.icon,
-        t.label,
-        `pulse-annotation__tool-btn${this.currentTool === t.tool ? ' pulse-annotation__tool-btn--active' : ''}`
-      )
+    for (const t of TOOLS) {
+      const btn = toolButton(t.icon, t.label)
+      btn.dataset.tool = t.kind
       btn.addEventListener('click', () => {
-        this.currentTool = t.tool
-        this.refreshToolbar(toolbar, tools)
+        this.tool = t.kind
+        this.applyToolState(toolbar)
       })
       toolbar.appendChild(btn)
     }
 
-    toolbar.appendChild(this.createDivider())
+    toolbar.appendChild(divider())
 
-    const undoBtn = this.createToolButton('M3 10h7a4 4 0 0 1 0 8H7', 'Undo', 'pulse-annotation__tool-btn')
+    const undoBtn = toolButton('M3 10h7a4 4 0 0 1 0 8H7', 'Undo')
     undoBtn.addEventListener('click', () => this.undo())
     toolbar.appendChild(undoBtn)
 
-    const clearBtn = this.createToolButton('M4 4l12 12M16 4L4 16', 'Clear', 'pulse-annotation__tool-btn')
+    const clearBtn = toolButton('M4 4l12 12M16 4L4 16', 'Clear')
     clearBtn.addEventListener('click', () => this.clearAll())
     toolbar.appendChild(clearBtn)
 
-    toolbar.appendChild(this.createDivider())
+    toolbar.appendChild(divider())
 
-    const cancelBtn = document.createElement('button')
-    cancelBtn.className = 'pulse-annotation__action-btn'
-    cancelBtn.type = 'button'
-    cancelBtn.textContent = 'Cancel'
-    cancelBtn.addEventListener('click', () => {
+    const cancel = document.createElement('button')
+    cancel.className = 'pulse-annotation__action-btn'
+    cancel.type = 'button'
+    cancel.textContent = 'Cancel'
+    cancel.addEventListener('click', () => {
       this.hide()
       this.config.onCancel()
     })
-    toolbar.appendChild(cancelBtn)
+    toolbar.appendChild(cancel)
 
-    const saveBtn = document.createElement('button')
-    saveBtn.className = 'pulse-annotation__action-btn pulse-annotation__action-btn--primary'
-    saveBtn.type = 'button'
-    saveBtn.textContent = 'Save'
-    saveBtn.addEventListener('click', async () => {
-      const blob = await this.exportImage()
-      this.hide()
-      this.config.onSave(blob)
-    })
-    toolbar.appendChild(saveBtn)
+    const save = document.createElement('button')
+    save.className = 'pulse-annotation__action-btn pulse-annotation__action-btn--primary'
+    save.type = 'button'
+    save.textContent = 'Save'
+    save.addEventListener('click', () => void this.save())
+    toolbar.appendChild(save)
 
+    this.applyToolState(toolbar)
     return toolbar
   }
 
-  private refreshToolbar(
-    toolbar: HTMLElement,
-    tools: Array<{ tool: AnnotationTool; label: string; icon: string }>
-  ): void {
-    const btns = toolbar.querySelectorAll('.pulse-annotation__tool-btn')
-    tools.forEach((t, i) => {
-      const btn = btns[i]
-      if (btn) {
-        if (this.currentTool === t.tool) {
-          btn.classList.add('pulse-annotation__tool-btn--active')
-        } else {
-          btn.classList.remove('pulse-annotation__tool-btn--active')
-        }
-      }
-    })
-  }
-
-  private createToolButton(iconPath: string, label: string, className: string): HTMLButtonElement {
-    const btn = document.createElement('button')
-    btn.className = className
-    btn.type = 'button'
-    btn.title = label
-    btn.setAttribute('aria-label', label)
-
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-    svg.setAttribute('viewBox', '0 0 20 20')
-    svg.setAttribute('fill', 'none')
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-    path.setAttribute('d', iconPath)
-    path.setAttribute('stroke', 'currentColor')
-    path.setAttribute('stroke-width', '1.5')
-    path.setAttribute('stroke-linecap', 'round')
-    path.setAttribute('stroke-linejoin', 'round')
-    svg.appendChild(path)
-    btn.appendChild(svg)
-
-    return btn
-  }
-
-  private createDivider(): HTMLElement {
-    const div = document.createElement('div')
-    div.className = 'pulse-annotation__divider'
-    return div
-  }
-
-  private getCanvasPoint(e: MouseEvent): { x: number; y: number } {
-    const rect = this.canvas.getBoundingClientRect()
-    return {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
+  private applyToolState(toolbar: HTMLElement): void {
+    for (const btn of toolbar.querySelectorAll<HTMLButtonElement>('[data-tool]')) {
+      const active = btn.dataset.tool === this.tool
+      btn.classList.toggle('pulse-annotation__tool-btn--active', active)
+      btn.setAttribute('aria-pressed', String(active))
     }
   }
 
-  private startDraw(e: MouseEvent): void {
-    this.isDrawing = true
-    const point = this.getCanvasPoint(e)
-    this.startPoint = point
-    this.lastPoint = point
-
-    if (this.currentTool === 'draw') {
-      this.currentDrawPoints = [point]
-    }
+  /** Client point -> image-pixel point, undoing the CSS downscale. */
+  private toImagePoint(e: PointerEvent): Point {
+    const canvas = this.canvas
+    if (!canvas) return { x: 0, y: 0 }
+    const box = canvas.getBoundingClientRect()
+    const scaleX = box.width === 0 ? 1 : canvas.width / box.width
+    const scaleY = box.height === 0 ? 1 : canvas.height / box.height
+    return { x: (e.clientX - box.left) * scaleX, y: (e.clientY - box.top) * scaleY }
   }
 
-  private continueDraw(e: MouseEvent): void {
-    if (!this.isDrawing || !this.startPoint) return
-    const point = this.getCanvasPoint(e)
-    this.lastPoint = point
-
-    if (this.currentTool === 'draw') {
-      this.currentDrawPoints.push(point)
-      this.redraw()
-      this.drawFreehand(this.currentDrawPoints)
-    } else {
-      this.redraw()
-      const rect = this.makeRect(this.startPoint, point)
-      this.drawRect(rect, this.currentTool)
-    }
+  private beginRect(e: PointerEvent): void {
+    this.canvas?.setPointerCapture(e.pointerId)
+    this.start = this.toImagePoint(e)
+    this.current = this.start
   }
 
-  private endDraw(): void {
-    if (!this.isDrawing || !this.startPoint) return
-    this.isDrawing = false
-
-    if (this.currentTool === 'draw') {
-      if (this.currentDrawPoints.length > 1) {
-        this.annotations.push({ tool: 'draw', points: [...this.currentDrawPoints] })
-      }
-    } else if (this.lastPoint) {
-      const rect = this.makeRect(this.startPoint, this.lastPoint)
-      if (rect.width > 2 && rect.height > 2) {
-        this.annotations.push({ tool: this.currentTool, rect })
-      }
-    }
-
-    this.currentDrawPoints = []
-    this.startPoint = null
-    this.lastPoint = null
+  private extendRect(e: PointerEvent): void {
+    if (!this.start) return
+    this.current = this.toImagePoint(e)
     this.redraw()
   }
 
-  private makeRect(a: { x: number; y: number }, b: { x: number; y: number }) {
-    return {
-      x: Math.min(a.x, b.x),
-      y: Math.min(a.y, b.y),
-      width: Math.abs(b.x - a.x),
-      height: Math.abs(b.y - a.y),
-    }
-  }
-
-  private drawFreehand(points: Array<{ x: number; y: number }>): void {
-    if (points.length < 2) return
-    this.ctx.beginPath()
-    this.ctx.strokeStyle = '#FF0000'
-    this.ctx.lineWidth = 3
-    this.ctx.lineCap = 'round'
-    this.ctx.lineJoin = 'round'
-    this.ctx.moveTo(points[0].x, points[0].y)
-    for (let i = 1; i < points.length; i++) {
-      this.ctx.lineTo(points[i].x, points[i].y)
-    }
-    this.ctx.stroke()
-  }
-
-  private drawRect(rect: { x: number; y: number; width: number; height: number }, tool: 'highlight' | 'redact'): void {
-    if (tool === 'highlight') {
-      this.ctx.fillStyle = 'rgba(255, 255, 0, 0.3)'
-    } else {
-      this.ctx.fillStyle = '#000000'
-    }
-    this.ctx.fillRect(rect.x, rect.y, rect.width, rect.height)
-  }
-
-  private redraw(): void {
-    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
-    for (const ann of this.annotations) {
-      if (ann.tool === 'draw') {
-        this.drawFreehand(ann.points)
-      } else {
-        this.drawRect(ann.rect, ann.tool)
-      }
-    }
+  private endRect(e: PointerEvent): void {
+    if (!this.start) return
+    const end = this.toImagePoint(e)
+    const rect = normaliseRect(this.start, end, this.tool)
+    this.start = null
+    this.current = null
+    if (rect.w >= MIN_RECT && rect.h >= MIN_RECT) this.annotations.push(rect)
+    this.redraw()
   }
 
   private undo(): void {
@@ -314,35 +259,79 @@ export class AnnotationCanvas {
     this.redraw()
   }
 
-  private async exportImage(): Promise<Blob> {
-    const offscreen = document.createElement('canvas')
-    offscreen.width = this.bgCanvas.width
-    offscreen.height = this.bgCanvas.height
-    const offCtx = offscreen.getContext('2d')!
-    offCtx.drawImage(this.bgCanvas, 0, 0)
-    offCtx.drawImage(this.canvas, 0, 0)
-
-    return new Promise<Blob>((resolve, reject) => {
-      offscreen.toBlob((blob) => {
-        if (blob) resolve(blob)
-        else reject(new Error('Failed to export annotated image'))
-      }, 'image/png')
-    })
+  private redraw(): void {
+    const canvas = this.canvas
+    const ctx = this.ctx
+    if (!canvas || !ctx) return
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    const pending =
+      this.start && this.current ? [normaliseRect(this.start, this.current, this.tool)] : []
+    paintAnnotations(ctx, [...this.annotations, ...pending], canvas)
   }
 
-  private loadImage(blob: Blob): Promise<HTMLImageElement> {
-    return new Promise((resolve, reject) => {
-      const img = new Image()
-      const url = URL.createObjectURL(blob)
-      img.onload = () => {
-        URL.revokeObjectURL(url)
-        resolve(img)
-      }
-      img.onerror = () => {
-        URL.revokeObjectURL(url)
-        reject(new Error('Failed to load screenshot'))
-      }
-      img.src = url
+  private async save(): Promise<void> {
+    const annotations = this.getAnnotations()
+    const blob = await this.exportImage()
+    this.hide()
+    if (blob) this.config.onSave(blob, annotations)
+    else this.config.onCancel()
+  }
+
+  /** Flattens the rects onto the untouched bitmap at its native resolution. */
+  private async exportImage(): Promise<Blob | null> {
+    const image = this.image
+    if (!image) return null
+    const out = document.createElement('canvas')
+    out.width = image.naturalWidth
+    out.height = image.naturalHeight
+    const ctx = out.getContext('2d')
+    if (!ctx) return null
+    ctx.drawImage(image, 0, 0)
+    paintAnnotations(ctx, this.annotations, out)
+    return new Promise<Blob | null>((resolve) => {
+      out.toBlob((blob) => resolve(blob), 'image/png')
     })
   }
+}
+
+function toolButton(iconPath: string, label: string): HTMLButtonElement {
+  const btn = document.createElement('button')
+  btn.className = 'pulse-annotation__tool-btn'
+  btn.type = 'button'
+  btn.title = label
+  btn.setAttribute('aria-label', label)
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  svg.setAttribute('viewBox', '0 0 20 20')
+  svg.setAttribute('fill', 'none')
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+  path.setAttribute('d', iconPath)
+  path.setAttribute('stroke', 'currentColor')
+  path.setAttribute('stroke-width', '1.5')
+  path.setAttribute('stroke-linecap', 'round')
+  path.setAttribute('stroke-linejoin', 'round')
+  svg.appendChild(path)
+  btn.appendChild(svg)
+  return btn
+}
+
+function divider(): HTMLElement {
+  const div = document.createElement('div')
+  div.className = 'pulse-annotation__divider'
+  return div
+}
+
+function loadImage(blob: Blob): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    const url = URL.createObjectURL(blob)
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      resolve(img)
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      reject(new Error('Failed to load screenshot'))
+    }
+    img.src = url
+  })
 }

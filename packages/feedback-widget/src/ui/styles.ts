@@ -637,17 +637,28 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
       color: #ffffff;
     }
 
+    /* The bitmap keeps its native pixels; only CSS scales it to fit the viewport. */
     .pulse-annotation__canvas-wrap {
+      position: relative;
+      max-width: min(92vw, 1100px);
+      max-height: 76vh;
       border-radius: 8px;
       overflow: hidden;
       box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-      position: relative;
       cursor: crosshair;
       background: #ffffff;
+      touch-action: none;
     }
 
     .pulse-annotation__canvas-wrap canvas {
       display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .pulse-annotation__layer {
+      position: absolute;
+      inset: 0;
     }
 
     /* Element pick: hover overlay + label (pointer-events none so the page stays hittable) */

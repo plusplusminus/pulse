@@ -1,9 +1,14 @@
-import type { RuntimeConfig, SubmitResult, WidgetState, WidgetPick } from './types'
+import type {
+  RuntimeConfig,
+  ScreenshotAnnotation,
+  SubmitResult,
+  WidgetState,
+  WidgetPick,
+} from './types'
 import { getWidgetStyles } from './ui/styles'
 import { TriggerButton } from './ui/trigger'
 import { FeedbackPanel, type PanelFormData } from './ui/panel'
 import { AnnotationCanvas } from './ui/annotation'
-import { AreaSelector } from './ui/crop'
 import { ElementPicker, type Point } from './capture/pick-mode'
 import { buildPick, buildMultiPick } from './capture/pick-builder'
 import { MultiSelection } from './capture/multi-select'
@@ -21,9 +26,9 @@ export interface PulseCore {
     name?: string
     screenshot?: Blob | null
     picks?: WidgetPick[]
+    screenshotAnnotations?: ScreenshotAnnotation[]
   }): Promise<SubmitResult>
   captureScreenshot(): Promise<Blob | null>
-  cropScreenshot(blob: Blob, rect: { x: number; y: number; width: number; height: number }): Promise<Blob>
   setWidgetHost(host: HTMLElement): void
   getRuntimeConfig(): RuntimeConfig
   getUser(): { email?: string; name?: string }
@@ -49,6 +54,9 @@ export class Widget {
   private lastModifierPoint: Point | null = null
   private state: WidgetState = 'closed'
   private currentScreenshot: Blob | null = null
+  /** Bitmap as captured, so re-annotating never stacks rects onto a flattened export. */
+  private originalScreenshot: Blob | null = null
+  private annotations: ScreenshotAnnotation[] = []
   private user: { email?: string; name?: string }
   private themeQuery: MediaQueryList | null = null
   private themeHandler: ((e: MediaQueryListEvent) => void) | null = null
@@ -88,8 +96,7 @@ export class Widget {
       onClose: () => this.close(),
       onAnnotate: () => this.startAnnotation(),
       onRetakeScreenshot: () => this.retakeScreenshot(),
-      onCaptureScreenshot: () => this.startScreenshotCapture(),
-      onCaptureFullScreen: () => this.captureFullScreen(),
+      onCaptureScreenshot: () => this.captureFullScreen(),
       onPickElement: () => this.startPick(),
       onEditPick: (id) => this.startEditPick(id),
       onDeletePick: (id) => this.deletePick(id),
@@ -128,8 +135,7 @@ export class Widget {
     if (this.state !== 'closed') return
     this.state = 'open'
     this.trigger.hide()
-    this.currentScreenshot = null
-    this.panel.setScreenshot(null)
+    this.setScreenshot(null)
     this.picks = []
     this.markersById.clear()
     this.markers?.clear()
@@ -368,67 +374,42 @@ export class Widget {
     this.themeQuery.addEventListener('change', this.themeHandler)
   }
 
-  private async startScreenshotCapture(): Promise<void> {
-    // Hide widget so it doesn't appear in the screenshot or block the selector
-    this.host.style.display = 'none'
-
-    try {
-      // Step 1: Let user select an area on the page
-      const selector = new AreaSelector()
-      const selectedRect = await selector.select()
-
-      // Step 2: Capture the full viewport (widget hidden by us + captureScreenshot)
-      const fullBlob = await this.pulse.captureScreenshot()
-      if (!fullBlob) {
-        this.host.style.display = ''
-        this.panel.setScreenshot(null)
-        this.state = 'open'
-        this.panel.setState('open')
-        return
-      }
-
-      // Step 3: Crop to selection if user dragged an area
-      if (selectedRect) {
-        const cropped = await this.pulse.cropScreenshot(fullBlob, selectedRect)
-        this.currentScreenshot = cropped
-      } else {
-        this.currentScreenshot = fullBlob
-      }
-    } catch {
-      this.currentScreenshot = null
-    }
-
-    // Restore widget visibility and update panel
-    this.host.style.display = ''
-    this.panel.setScreenshot(this.currentScreenshot)
-    this.state = 'open'
-    this.panel.setState('open')
+  /** Captured bitmap + its annotations move together; null clears both. */
+  private setScreenshot(blob: Blob | null): void {
+    this.originalScreenshot = blob
+    this.currentScreenshot = blob
+    this.annotations = []
+    this.panel.setScreenshot(blob)
   }
 
   private async captureFullScreen(): Promise<void> {
     this.host.style.display = 'none'
+    let blob: Blob | null = null
     try {
-      const blob = await this.pulse.captureScreenshot()
-      this.currentScreenshot = blob
+      blob = await this.pulse.captureScreenshot()
     } catch {
-      this.currentScreenshot = null
+      blob = null
     }
     this.host.style.display = ''
-    this.panel.setScreenshot(this.currentScreenshot)
+    this.setScreenshot(blob)
     this.state = 'open'
     this.panel.setState('open')
   }
 
   private startAnnotation(): void {
-    if (!this.currentScreenshot) return
+    // Always annotate the ORIGINAL capture: rects are re-applied from scratch,
+    // so re-opening the editor never bakes the previous pass into the bitmap.
+    const source = this.originalScreenshot
+    if (!source) return
     this.state = 'annotating'
 
     this.host.classList.add('pulse-annotating')
 
     this.annotation = new AnnotationCanvas(this.shadow, {
-      onSave: (blob) => {
+      onSave: (blob, annotations) => {
         this.host.classList.remove('pulse-annotating')
         this.currentScreenshot = blob
+        this.annotations = annotations
         this.panel.setScreenshot(blob)
         this.state = 'open'
         this.annotation = null
@@ -440,11 +421,11 @@ export class Widget {
       },
     })
 
-    this.annotation.show(this.currentScreenshot)
+    void this.annotation.show(source, this.annotations)
   }
 
   private async retakeScreenshot(): Promise<void> {
-    await this.startScreenshotCapture()
+    await this.captureFullScreen()
   }
 
   private async handleSubmit(formData: PanelFormData): Promise<SubmitResult> {
@@ -458,11 +439,14 @@ export class Widget {
       name: formData.name,
       screenshot: this.currentScreenshot,
       picks: this.picks,
+      screenshotAnnotations: this.annotations,
     })
 
     if (result.status === 'created') {
       this.state = 'success'
+      this.originalScreenshot = null
       this.currentScreenshot = null
+      this.annotations = []
       this.picks = []
       this.markersById.clear()
       this.markers?.clear()

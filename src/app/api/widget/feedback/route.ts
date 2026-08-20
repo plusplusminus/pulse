@@ -14,7 +14,7 @@ import {
 } from "@/lib/widget-linear";
 import type { WidgetFeedbackResponse } from "@/lib/widget-types";
 import { STORAGE_PATH_PATTERN } from "@/lib/widget-upload";
-import { picksSchema } from "@/lib/widget-picks";
+import { picksSchema, screenshotAnnotationsSchema } from "@/lib/widget-picks";
 
 // In-memory rate limiter: apiKeyPrefix -> timestamps
 const rateLimitMap = new Map<string, number[]>();
@@ -90,6 +90,8 @@ const feedbackSchema = z.object({
     .optional(),
   // Element picks (PULSE-329); rendered into the Linear body per output_detail_level.
   picks: picksSchema,
+  // Screenshot annotation rects (PULSE-333), in the captured bitmap's pixel space.
+  screenshotAnnotations: screenshotAnnotationsSchema,
 });
 
 export async function POST(request: Request) {
@@ -176,6 +178,7 @@ export async function POST(request: Request) {
         screenshot_storage_path: data.screenshotStoragePath ?? null,
         metadata: data.metadata,
         picks: data.picks,
+        screenshot_annotations: data.screenshotAnnotations,
         reporter_email: data.reporter.email,
         reporter_name: data.reporter.name ?? null,
         page_url: data.metadata.url,

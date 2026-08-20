@@ -61,6 +61,22 @@ export interface FeedbackPayload {
   screenshotStoragePath?: string
   /** Element picks (PULSE-329); max 50 */
   picks?: WidgetPick[]
+  /** Screenshot annotation rects (PULSE-333); max 50 */
+  screenshotAnnotations?: ScreenshotAnnotation[]
+}
+
+// -- Screenshot annotations: mirror of ScreenshotAnnotation in src/lib/widget-types.ts --
+
+export const ANNOTATION_KINDS = ['highlight', 'hide'] as const
+export type AnnotationKind = (typeof ANNOTATION_KINDS)[number]
+
+/** One rect in the captured bitmap's own pixel space (never viewport or panel space). */
+export interface ScreenshotAnnotation {
+  kind: AnnotationKind
+  x: number
+  y: number
+  w: number
+  h: number
 }
 
 // -- Element picks: mirror of WidgetPick in src/lib/widget-types.ts (Pulse app) ----------

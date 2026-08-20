@@ -34,7 +34,6 @@ function makePanel(allowElementPick = true): FeedbackPanel {
     onAnnotate: vi.fn(),
     onRetakeScreenshot: vi.fn(),
     onCaptureScreenshot: vi.fn(),
-    onCaptureFullScreen: vi.fn(),
     ...config,
   })
 }

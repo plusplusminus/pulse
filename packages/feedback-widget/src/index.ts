@@ -1,8 +1,8 @@
-import type { PulseConfig, RuntimeConfig, SubmitResult, WidgetPick } from './types'
+import type { PulseConfig, RuntimeConfig, ScreenshotAnnotation, SubmitResult, WidgetPick } from './types'
 import { ConsoleInterceptor } from './console'
 import { detectSentry } from './sentry'
 import { collectContext } from './context'
-import { captureScreenshot, cropBlob } from './screenshot'
+import { captureScreenshot } from './screenshot'
 import { submitFeedback } from './api'
 import { uploadBlob } from './transport/upload'
 import { Widget } from './widget'
@@ -113,6 +113,7 @@ export class Pulse implements PulseInstance {
     name?: string
     screenshot?: Blob | null
     picks?: WidgetPick[]
+    screenshotAnnotations?: ScreenshotAnnotation[]
   }): Promise<SubmitResult> {
     const sentryContext = this.runtime.capture.sentry ? detectSentry() : null
 
@@ -144,6 +145,9 @@ export class Pulse implements PulseInstance {
       },
       screenshotStoragePath,
       picks: this.runtime.capture.elementPick && formData.picks?.length ? formData.picks : undefined,
+      screenshotAnnotations: formData.screenshotAnnotations?.length
+        ? formData.screenshotAnnotations
+        : undefined,
     })
 
     this.runtime.onSubmit?.(result)
@@ -171,7 +175,4 @@ export class Pulse implements PulseInstance {
     return captureScreenshot(this.widgetHost, this.runtime.privacy.maskSelectors)
   }
 
-  async cropScreenshot(blob: Blob, rect: { x: number; y: number; width: number; height: number }): Promise<Blob> {
-    return cropBlob(blob, rect)
-  }
 }

@@ -1,8 +1,10 @@
 import { z } from "zod";
 import {
+  ANNOTATION_KINDS,
   OUTPUT_DETAIL_LEVELS,
   PICK_INTENTS,
   type OutputDetailLevel,
+  type ScreenshotAnnotation,
   type WidgetPick,
 } from "@/lib/widget-types";
 
@@ -64,6 +66,22 @@ export const widgetPickSchema = z.object({
 }) satisfies z.ZodType<WidgetPick>;
 
 export const picksSchema = z.array(widgetPickSchema).max(MAX_PICKS).default([]);
+
+// Screenshot annotations (PULSE-333): vector rects in image-pixel space.
+export const MAX_ANNOTATIONS = 50;
+
+export const screenshotAnnotationSchema = z.object({
+  kind: z.enum(ANNOTATION_KINDS),
+  x: z.number(),
+  y: z.number(),
+  w: z.number().nonnegative(),
+  h: z.number().nonnegative(),
+}) satisfies z.ZodType<ScreenshotAnnotation>;
+
+export const screenshotAnnotationsSchema = z
+  .array(screenshotAnnotationSchema)
+  .max(MAX_ANNOTATIONS)
+  .default([]);
 
 export const outputDetailLevelSchema = z.enum(OUTPUT_DETAIL_LEVELS);
 

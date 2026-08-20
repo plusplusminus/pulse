@@ -85,6 +85,8 @@ export type WidgetSubmission = {
   metadata: WidgetMetadata
   /** Element picks (PULSE-329). Defaults to [] for rows created before the column existed. */
   picks: WidgetPick[]
+  /** Screenshot annotation rects (PULSE-333), in image-pixel space. */
+  screenshot_annotations: ScreenshotAnnotation[]
   reporter_email: string
   reporter_name: string | null
   linear_issue_id: string | null
@@ -149,6 +151,24 @@ export type WidgetPick = {
   relocation?: PickRelocation
 }
 
+// -- Screenshot annotations (PULSE-333) -----------------------------------
+
+export const ANNOTATION_KINDS = ['highlight', 'hide'] as const
+export type AnnotationKind = (typeof ANNOTATION_KINDS)[number]
+
+/**
+ * One annotation rect, in the captured bitmap's own pixel space (never viewport
+ * or panel space), so it survives panel resize and re-renders against the
+ * full-resolution screenshot.
+ */
+export type ScreenshotAnnotation = {
+  kind: AnnotationKind
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
 // -- Metadata types -------------------------------------------------------
 
 export type WidgetMetadata = {
@@ -189,6 +209,8 @@ export type WidgetFeedbackRequest = {
   screenshotStoragePath?: string
   /** Element picks; max 50 (PULSE-329) */
   picks?: WidgetPick[]
+  /** Screenshot annotation rects; max 50 (PULSE-333) */
+  screenshotAnnotations?: ScreenshotAnnotation[]
 }
 
 export type WidgetFeedbackResponse = {
