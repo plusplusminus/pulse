@@ -13,7 +13,7 @@ instances; Upstash is reachable from both Node and edge runtimes.
 | --- | --- |
 | `checkRateLimit({ key, limit, windowMs }, deps?)` | `{ allowed, remaining, retryAfterMs }`. `deps.limiter` is an injected `Ratelimit`-like instance (tests use an in-memory fake + fake clock); omitted in routes. |
 | `siteKey(prefix)` | `widget:{siteKeyPrefix}` |
-| `reporterKey(prefix, reporterIdOrIp)` | `widget:{siteKeyPrefix}:{reporterEmail \| ip}` |
+| `reporterKey(prefix, reporterIdOrIp)` | `widget:{siteKeyPrefix}:{reporterId \| ip}` |
 | `bootstrapKey(ip)` | `widget:bootstrap:{ip}` |
 
 Redis keys carry the library prefix `pulse:` in front of the identifiers above.
@@ -26,7 +26,7 @@ round-trip.
 | Route | Key | Limit |
 | --- | --- | --- |
 | `POST /api/widget/feedback` | `siteKey(api_key_prefix)` | 60 / min |
-| `POST /api/widget/feedback` | `reporterKey(api_key_prefix, reporter.email \| ip)` | 10 / min |
+| `POST /api/widget/feedback` | `reporterKey(api_key_prefix, reporter.email)` (schema requires an email, so always identified) | 10 / min |
 | `POST /api/widget/upload` | `siteKey(api_key_prefix)` | 60 / min |
 | `POST /api/widget/upload` | `reporterKey(api_key_prefix, ip)` | 10 / min |
 | `GET /api/widget/v1/bootstrap/:siteKey` | `bootstrapKey(ip)` | 60 / min |
@@ -34,7 +34,14 @@ round-trip.
 Either check denying yields `429` with `Retry-After` (seconds, rounded up,
 minimum 1) derived from the limiter's `reset` timestamp. The client IP is the
 first hop of `x-forwarded-for` (Vercel), falling back to `x-real-ip`, then
-`"unknown"`.
+`"unknown"` (`readClientIp` in `src/lib/widget-origin.ts`). Feedback/upload
+check the site budget right after auth and the reporter/IP budget next, so a
+429 there carries the matched origin's CORS headers. Bootstrap checks before
+the site lookup (the database never sees a flood), so its 429 has no CORS
+headers — the widget sees a failed fetch, which is the intended outcome.
+
+Reporter emails appear lower-cased in Redis keys for the length of the window
+(60 s). Acceptable for an internal tool; hash them if that changes.
 
 ## Fail-open
 

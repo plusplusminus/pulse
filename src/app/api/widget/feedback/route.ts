@@ -8,6 +8,12 @@ import {
   stripUrlForStorage,
 } from "@/lib/widget-origin";
 import {
+  checkRateLimit,
+  reporterKey,
+  siteKey,
+  type RateLimitResult,
+} from "@/lib/widget-rate-limit";
+import {
   buildWidgetIssueDescription,
   createWidgetLinearIssue,
   widgetMediaUrl,
@@ -15,22 +21,21 @@ import {
 import type { WidgetFeedbackResponse } from "@/lib/widget-types";
 import { STORAGE_PATH_PATTERN } from "@/lib/widget-upload";
 
-// In-memory rate limiter: apiKeyPrefix -> timestamps
-const rateLimitMap = new Map<string, number[]>();
-const RATE_LIMIT_WINDOW = 60_000;
-const RATE_LIMIT_MAX = 10;
+// Distributed budgets (PULSE-313): per site, then per reporter; either denies.
+const SITE_BUDGET = { limit: 60, windowMs: 60_000 };
+const REPORTER_BUDGET = { limit: 10, windowMs: 60_000 };
 
-function isRateLimited(keyPrefix: string): boolean {
-  const now = Date.now();
-  const timestamps = rateLimitMap.get(keyPrefix) ?? [];
-  const recent = timestamps.filter((t) => now - t < RATE_LIMIT_WINDOW);
-  if (recent.length >= RATE_LIMIT_MAX) {
-    rateLimitMap.set(keyPrefix, recent);
-    return true;
-  }
-  recent.push(now);
-  rateLimitMap.set(keyPrefix, recent);
-  return false;
+function tooManyRequests(verdict: RateLimitResult, headers: Record<string, string>) {
+  return NextResponse.json(
+    { error: "Rate limit exceeded. Try again later." },
+    {
+      status: 429,
+      headers: {
+        ...headers,
+        "Retry-After": String(Math.max(1, Math.ceil(verdict.retryAfterMs / 1000))),
+      },
+    }
+  );
 }
 
 // CORS is only ever granted to an allowlisted origin (PULSE-392); no "*" fallback.
@@ -109,13 +114,12 @@ export async function POST(request: Request) {
     const { config } = authResult;
     headers = corsHeaders(origin, true);
 
-    // Rate limit
-    if (isRateLimited(config.api_key_prefix)) {
-      return NextResponse.json(
-        { error: "Rate limit exceeded. Try again later." },
-        { status: 429, headers }
-      );
-    }
+    // Site budget before touching the body; reporter budget once we know who it is.
+    const siteVerdict = await checkRateLimit({
+      key: siteKey(config.api_key_prefix),
+      ...SITE_BUDGET,
+    });
+    if (!siteVerdict.allowed) return tooManyRequests(siteVerdict, headers);
 
     // Parse + validate body
     const body = await request.json();
@@ -127,6 +131,14 @@ export async function POST(request: Request) {
       );
     }
     const data = parsed.data;
+
+    // The schema requires reporter.email, so feedback is always budgeted per
+    // reporter; upload (no reporter in the body) uses the IP instead.
+    const reporterVerdict = await checkRateLimit({
+      key: reporterKey(config.api_key_prefix, data.reporter.email.trim().toLowerCase()),
+      ...REPORTER_BUDGET,
+    });
+    if (!reporterVerdict.allowed) return tooManyRequests(reporterVerdict, headers);
 
     // metadata.url must be on the requesting origin; strip query/hash before storage/Linear.
     if (!pageUrlMatchesOrigin(data.metadata.url, origin)) {

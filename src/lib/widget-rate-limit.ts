@@ -145,33 +145,6 @@ function failOpen(key: string, reason: string, now: () => number): void {
   });
 }
 
-/**
- * @deprecated PULSE-327 replaces the last caller (upload route); removed there.
- */
-export type SlidingWindowLimiter = {
-  isRateLimited(key: string, now?: number): boolean;
-};
-
-/** @deprecated see SlidingWindowLimiter. */
-export function createSlidingWindowLimiter(options: {
-  windowMs: number;
-  max: number;
-}): SlidingWindowLimiter {
-  const hits = new Map<string, number[]>();
-  return {
-    isRateLimited(key, now = Date.now()) {
-      const recent = (hits.get(key) ?? []).filter((t) => now - t < options.windowMs);
-      if (recent.length >= options.max) {
-        hits.set(key, recent);
-        return true;
-      }
-      recent.push(now);
-      hits.set(key, recent);
-      return false;
-    },
-  };
-}
-
 let redis: Redis | null | undefined;
 const limiters = new Map<string, Ratelimit>();
 

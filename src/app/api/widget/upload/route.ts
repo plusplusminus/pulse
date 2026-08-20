@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { validateWidgetRequest, isKnownWidgetOrigin } from "@/lib/widget-auth";
-import { corsHeaders as originCorsHeaders } from "@/lib/widget-origin";
-import { createSlidingWindowLimiter } from "@/lib/widget-rate-limit";
+import { corsHeaders as originCorsHeaders, readClientIp } from "@/lib/widget-origin";
+import {
+  checkRateLimit,
+  reporterKey,
+  siteKey,
+  type RateLimitResult,
+} from "@/lib/widget-rate-limit";
 import {
   WIDGET_MEDIA_CONTENT_TYPES,
   WIDGET_MEDIA_KINDS,
@@ -11,10 +16,23 @@ import {
 } from "@/lib/widget-upload";
 
 // Widget media upload tickets (PULSE-323). The API only mints signed URLs;
-// bytes go browser -> Supabase Storage directly. Budget is separate from the
-// feedback route's: one submission may need several tickets (screenshot,
-// video, replay) plus retries.
-const limiter = createSlidingWindowLimiter({ windowMs: 60_000, max: 30 });
+// bytes go browser -> Supabase Storage directly. Budgets are distributed
+// (PULSE-313): per site, then per IP (the ticket body carries no reporter).
+const SITE_BUDGET = { limit: 60, windowMs: 60_000 };
+const IP_BUDGET = { limit: 10, windowMs: 60_000 };
+
+function tooManyRequests(verdict: RateLimitResult, headers: Record<string, string>) {
+  return NextResponse.json(
+    { error: "Rate limit exceeded. Try again later." },
+    {
+      status: 429,
+      headers: {
+        ...headers,
+        "Retry-After": String(Math.max(1, Math.ceil(verdict.retryAfterMs / 1000))),
+      },
+    }
+  );
+}
 
 // CORS follows the PULSE-392 origin policy (src/lib/widget-origin.ts): headers
 // only for an allowlisted origin, never "*".
@@ -56,12 +74,17 @@ export async function POST(request: Request) {
     const { config } = authResult;
     headers = corsHeaders(origin, true);
 
-    if (limiter.isRateLimited(config.api_key_prefix)) {
-      return NextResponse.json(
-        { error: "Rate limit exceeded. Try again later." },
-        { status: 429, headers }
-      );
-    }
+    const siteVerdict = await checkRateLimit({
+      key: siteKey(config.api_key_prefix),
+      ...SITE_BUDGET,
+    });
+    if (!siteVerdict.allowed) return tooManyRequests(siteVerdict, headers);
+
+    const ipVerdict = await checkRateLimit({
+      key: reporterKey(config.api_key_prefix, readClientIp(request)),
+      ...IP_BUDGET,
+    });
+    if (!ipVerdict.allowed) return tooManyRequests(ipVerdict, headers);
 
     const body = await request.json().catch(() => null);
     const parsed = uploadSchema.safeParse(body);
