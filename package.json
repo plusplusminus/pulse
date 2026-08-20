@@ -35,6 +35,8 @@
 		"@supabase/supabase-js": "^2.57.4",
 		"@tailwindcss/typography": "^0.5.19",
 		"@types/crypto-js": "^4.2.2",
+		"@upstash/ratelimit": "^2.0.8",
+		"@upstash/redis": "^1.38.2",
 		"@workos-inc/authkit-nextjs": "^2.17.0",
 		"@workos-inc/node": "^8.8.0",
 		"bcryptjs": "^3.0.2",

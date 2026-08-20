@@ -7,6 +7,7 @@ import {
   canActivate,
   corsHeaders,
   pageUrlMatchesOrigin,
+  readClientIp,
   stripUrlForStorage,
 } from "../widget-origin";
 
@@ -93,5 +94,24 @@ describe("pageUrlMatchesOrigin / stripUrlForStorage", () => {
     expect(stripUrlForStorage("https://acme.example/app/page?token=abc#frag")).toBe("https://acme.example/app/page");
     expect(stripUrlForStorage("https://acme.example")).toBe("https://acme.example/");
     expect(stripUrlForStorage("relative/path?x=1")).toBe("relative/path");
+  });
+});
+
+describe("readClientIp", () => {
+  const req = (headers: Record<string, string>) =>
+    new Request("http://localhost/x", { headers });
+
+  it("takes the first hop of x-forwarded-for", () => {
+    expect(readClientIp(req({ "x-forwarded-for": "203.0.113.9, 10.0.0.1, 10.0.0.2" }))).toBe(
+      "203.0.113.9"
+    );
+    expect(readClientIp(req({ "x-forwarded-for": " 203.0.113.9 " }))).toBe("203.0.113.9");
+  });
+  it("falls back to x-real-ip, then unknown", () => {
+    expect(readClientIp(req({ "x-real-ip": "198.51.100.1" }))).toBe("198.51.100.1");
+    expect(readClientIp(req({ "x-forwarded-for": "" , "x-real-ip": "198.51.100.1" }))).toBe(
+      "198.51.100.1"
+    );
+    expect(readClientIp(req({}))).toBe("unknown");
   });
 });

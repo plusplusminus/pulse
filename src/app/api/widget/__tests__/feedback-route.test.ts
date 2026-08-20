@@ -43,6 +43,34 @@ vi.mock("@/lib/widget-auth", () => ({
   isKnownWidgetOrigin: vi.fn(async () => true),
 }));
 
+vi.mock("@sentry/nextjs", () => ({ captureMessage: vi.fn() }));
+
+// Real checkRateLimit over an injected in-memory limiter (one per budget).
+const rateLimit = vi.hoisted(() => ({
+  fakes: null as null | { get(limit: number, windowMs: number): unknown; reset(): void },
+  backendDown: false,
+}));
+vi.mock("@/lib/widget-rate-limit", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/widget-rate-limit")>(
+    "@/lib/widget-rate-limit"
+  );
+  const { createFakeRateLimiterFactory } = await import("@/lib/__tests__/fake-rate-limiter");
+  const fakes = createFakeRateLimiterFactory(() => Date.now());
+  rateLimit.fakes = fakes;
+  const down = {
+    async limit() {
+      throw new Error("upstash down");
+    },
+  };
+  return {
+    ...actual,
+    checkRateLimit: (input: Parameters<typeof actual.checkRateLimit>[0]) =>
+      actual.checkRateLimit(input, {
+        limiter: rateLimit.backendDown ? down : fakes.get(input.limit, input.windowMs),
+      }),
+  };
+});
+
 vi.mock("@/lib/widget-linear", async () => {
   const actual =
     await vi.importActual<typeof import("@/lib/widget-linear")>(
@@ -58,6 +86,7 @@ vi.mock("@/lib/widget-linear", async () => {
   };
 });
 
+import * as Sentry from "@sentry/nextjs";
 import { validateWidgetRequest } from "@/lib/widget-auth";
 import { createWidgetLinearIssue } from "@/lib/widget-linear";
 import { POST } from "../feedback/route";
@@ -65,13 +94,13 @@ import { POST } from "../feedback/route";
 const mockedValidate = vi.mocked(validateWidgetRequest);
 const mockedCreateIssue = vi.mocked(createWidgetLinearIssue);
 
-function authOk(hubId = HUB_A) {
+function authOk(hubId = HUB_A, prefix = `wk_${Math.random().toString(36).slice(2)}`) {
   mockedValidate.mockResolvedValue({
     config: {
       id: "cfg-1",
       hub_id: hubId,
       api_key_hash: "h",
-      api_key_prefix: `wk_${Math.random().toString(36).slice(2)}`,
+      api_key_prefix: prefix,
       name: "Default",
       is_active: true,
       config: {},
@@ -100,7 +129,7 @@ function payload(extra: Record<string, unknown> = {}) {
   };
 }
 
-function post(body: unknown) {
+function post(body: unknown, extraHeaders: Record<string, string> = {}) {
   return POST(
     new Request("http://localhost/api/widget/feedback", {
       method: "POST",
@@ -108,6 +137,7 @@ function post(body: unknown) {
         "content-type": "application/json",
         "x-widget-key": "wk_abc",
         origin: "https://customer.example",
+        ...extraHeaders,
       },
       body: JSON.stringify(body),
     })
@@ -119,7 +149,52 @@ beforeEach(() => {
   updates.length = 0;
   mockedValidate.mockReset();
   mockedCreateIssue.mockClear();
+  rateLimit.fakes?.reset();
+  rateLimit.backendDown = false;
+  vi.mocked(Sentry.captureMessage).mockClear();
+  vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://pulse.test");
+});
+
+describe("POST /api/widget/feedback (rate limiting)", () => {
+  it("lets a reporter submit 10 per minute, then 429 with Retry-After; another reporter is unaffected", async () => {
+    authOk(HUB_A, "wk_site1");
+    for (let i = 0; i < 10; i++) {
+      expect((await post(payload())).status).toBe(201);
+    }
+    const denied = await post(payload());
+    expect(denied.status).toBe(429);
+    expect(Number(denied.headers.get("Retry-After"))).toBeGreaterThanOrEqual(1);
+    expect(denied.headers.get("Access-Control-Allow-Origin")).toBe("https://customer.example");
+    expect(inserts).toHaveLength(10);
+
+    const other = await post(payload({ reporter: { email: "someone-else@example.com" } }));
+    expect(other.status).toBe(201);
+  });
+
+  it("enforces the per-site budget across reporters", async () => {
+    authOk(HUB_A, "wk_site3");
+    for (let i = 0; i < 60; i++) {
+      const res = await post(payload({ reporter: { email: `r${i}@example.com` } }));
+      expect(res.status).toBe(201);
+    }
+    const denied = await post(payload({ reporter: { email: "fresh@example.com" } }));
+    expect(denied.status).toBe(429);
+    expect(denied.headers.get("Retry-After")).toBeTruthy();
+  });
+
+  it("fails open with one Sentry warning when the backend is down", async () => {
+    authOk(HUB_A, "wk_site4");
+    rateLimit.backendDown = true;
+    for (let i = 0; i < 12; i++) {
+      expect((await post(payload())).status).toBe(201);
+    }
+    expect(vi.mocked(Sentry.captureMessage)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(Sentry.captureMessage).mock.calls[0][1]).toMatchObject({
+      level: "warning",
+      tags: { area: "widget-rate-limit" },
+    });
+  });
 });
 
 describe("POST /api/widget/feedback (storage path cut-over)", () => {
