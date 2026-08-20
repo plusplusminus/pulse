@@ -1,0 +1,126 @@
+# Standards Index — Agent-OS v4 (PPM v4)
+# Maps file patterns to relevant standards for auto-injection.
+# Tailored to the Pulse repo: Next.js 15 App Router (src/app), Supabase, Linear SDK,
+# OpenNext on Cloudflare, plus the embeddable widget in packages/feedback-widget.
+
+version: 4
+updated: 2026-08-20
+
+standards:
+  code-style:
+    path: agent-os/standards/code-style.md
+    domain: global
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+    auto_inject: true
+    priority: 1
+
+  clean-code:
+    path: agent-os/standards/clean-code.md
+    domain: global
+    applies_to:
+      - "**/*"
+    auto_inject: true
+    priority: 1
+
+  testing:
+    path: agent-os/standards/testing.md
+    domain: global
+    applies_to:
+      - "__tests__/**/*.ts"
+      - "**/*.test.ts"
+      - "**/*.test.tsx"
+      - "**/*.spec.ts"
+    auto_inject: true
+    priority: 1
+
+  backend:
+    path: agent-os/standards/backend.md
+    domain: backend
+    applies_to:
+      - "src/app/api/**/*.ts"
+      - "src/lib/**/*.ts"
+      - "supabase/**/*.sql"
+      - "scripts/**/*"
+    auto_inject: true
+    priority: 2
+
+  frontend:
+    path: agent-os/standards/frontend.md
+    domain: frontend
+    applies_to:
+      - "src/app/**/*.tsx"
+      - "src/components/**/*.tsx"
+      - "packages/feedback-widget/src/ui/**/*.ts"
+    auto_inject: true
+    priority: 2
+
+  react-best-practices:
+    path: agent-os/standards/react-best-practices.md
+    domain: frontend
+    applies_to:
+      - "**/*.tsx"
+      - "src/hooks/**/*.ts"
+    auto_inject: true
+    priority: 3
+
+  batch-jobs:
+    path: agent-os/standards/batch-jobs.md
+    domain: backend
+    applies_to:
+      - "src/app/api/cron/**/*.ts"
+      - "src/app/api/sync/**/*.ts"
+      - "src/app/api/webhooks/**/*.ts"
+    auto_inject: true
+    trigger_on:
+      - "cron"
+      - "sync"
+      - "webhook"
+      - "digest"
+      - "scheduled"
+    priority: 2
+
+  linear:
+    path: agent-os/standards/linear.md
+    domain: process
+    applies_to: []
+    auto_inject: false
+    trigger_on:
+      - "linear"
+      - "issue"
+      - "spec"
+      - "epic"
+      - "bug"
+    priority: 2
+
+  estimation-standards:
+    path: agent-os/standards/estimation-standards.md
+    domain: process
+    applies_to: []
+    auto_inject: false
+    trigger_on:
+      - "estimate"
+      - "spec"
+      - "epic"
+      - "decompose"
+    priority: 2
+
+  ppm-v4-process:
+    path: agent-os/standards/ppm-v4-process.md
+    domain: process
+    applies_to: []
+    auto_inject: false
+    trigger_on:
+      - "grounding"
+      - "proof"
+      - "delivery note"
+      - "slice"
+      - "family"
+      - "spec"
+    priority: 1
+
+injection:
+  max_standards_per_slice: 4
+  prefer_quick_reference: true
+  load_order: priority_asc

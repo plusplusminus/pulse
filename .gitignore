@@ -50,3 +50,7 @@ next-env.d.ts
 # opennext build output
 .open-next
 .env*.local
+
+# Agent-OS
+specs/
+agent-os/.env.local
