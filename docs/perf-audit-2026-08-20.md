@@ -194,7 +194,35 @@ Longer term: stop treating `data` as the schema. Add generated columns on `synce
 
 Not yet done (next tier, see §2.5–2.9): webhook partial-update merge + non-200 on failure, `fetchHubMetadata` / `fetchHubCycleIssues` / `fetchHubProjects` SQL-side filtering, sync loop hoisting + comment batching, bounded fan-out in notification delivery.
 
-## 6. Suggested sequencing (original)
+## 6. Measured baseline (prod, 2026-08-20, before the code deploy)
+
+Captured from an authenticated browser session against `pulse.plusplusminus.co.za`, sequential `fetch(..., {cache:'no-store'})`, full body read. **The new indexes were already applied when these were taken**, so this is "old code, new indexes, iad1" — not the original worst case.
+
+| Path | p50 | p95 | max |
+|---|---:|---:|---:|
+| `/hub/54-collective/542` (team page) | 3,663 ms | 6,070 ms | 6,070 ms |
+| `/hub/54-collective/542/cycles/<id>` | 1,862 ms | 2,506 ms | 2,506 ms |
+| `GET /api/hub/<id>/notifications/unread-count` | 579 ms | 656 ms | 656 ms |
+| `GET /api/hub/<id>/last-sync` | 545 ms | 867 ms | 867 ms |
+| `GET /api/hub/<id>/status` | — | — | 404 (not deployed yet) |
+
+Per 30 s poll tick, per open tab: 1,124 ms of server time across 2 requests.
+
+Query-layer comparison through PostgREST (from a client in South Africa, so ~300 ms of each figure is client→eu-west-1 RTT; the payload column is the durable signal):
+
+| Call | Latency p50 | Response bytes |
+|---|---:|---:|
+| OLD cycle stats — `select=data` full JSONB | 1,053 ms | **2,630,428** |
+| NEW `rpc/get_cycle_stats` | 368 ms | **247** |
+| OLD unread — `count=exact` head request | 353 ms | 0 |
+| OLD unread — read-list join (second round trip) | 661 ms | 140,998 |
+| NEW `rpc/notification_unread_count` (one round trip) | 376 ms | 4 |
+
+Cycle stats: 10,650× less data over the wire. Unread: two round trips and 141 KB become one round trip and 4 bytes.
+
+Re-run the same measurements after the PR deploys to compare like-for-like (`scripts/load/hub-responsiveness.js`, or the browser snippet above).
+
+## 7. Suggested sequencing (original)
 
 | Step | Effort | Expected effect |
 |---|---|---|
