@@ -36,6 +36,8 @@ export class FeedbackPanel {
       onCaptureScreenshot: () => void
       onCaptureFullScreen: () => void
       onPickElement: () => void
+      onEditPick: (id: string) => void
+      onDeletePick: (id: string) => void
     }
   ) {
     this.user = { ...config.user }
@@ -328,6 +330,16 @@ export class FeedbackPanel {
     intent.className = `pulse-picks__intent pulse-picks__intent--${pick.intent}`
     intent.textContent = pick.intent
     main.appendChild(intent)
+    main.appendChild(
+      this.renderPickAction('Edit', `Edit ${pick.name}`, 'M11.5 2.5a1.5 1.5 0 0 1 2 2L6 12l-3 1 1-3 7.5-7.5Z', () =>
+        this.config.onEditPick(pick.id)
+      )
+    )
+    main.appendChild(
+      this.renderPickAction('Delete', `Remove ${pick.name}`, 'M3 4.5h10M6.5 4.5V3h3v1.5M5 4.5l.5 8h5l.5-8', () =>
+        this.config.onDeletePick(pick.id)
+      )
+    )
     row.appendChild(main)
 
     if (pick.comment) {
@@ -338,6 +350,27 @@ export class FeedbackPanel {
     }
 
     return row
+  }
+
+  private renderPickAction(label: string, ariaLabel: string, icon: string, onClick: () => void): HTMLElement {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = `pulse-picks__action pulse-picks__action--${label.toLowerCase()}`
+    btn.setAttribute('aria-label', ariaLabel)
+    btn.title = label
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+    svg.setAttribute('viewBox', '0 0 16 16')
+    svg.setAttribute('fill', 'none')
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+    path.setAttribute('d', icon)
+    path.setAttribute('stroke', 'currentColor')
+    path.setAttribute('stroke-width', '1.25')
+    path.setAttribute('stroke-linecap', 'round')
+    path.setAttribute('stroke-linejoin', 'round')
+    svg.appendChild(path)
+    btn.appendChild(svg)
+    btn.addEventListener('click', () => onClick())
+    return btn
   }
 
   private renderAddScreenshotButtons(): HTMLElement {

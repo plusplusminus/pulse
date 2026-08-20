@@ -5,9 +5,12 @@ import { FeedbackPanel, type PanelFormData } from './ui/panel'
 import { AnnotationCanvas } from './ui/annotation'
 import { AreaSelector } from './ui/crop'
 import { ElementPicker, type Point } from './capture/pick-mode'
-import { buildPick } from './capture/pick-builder'
+import { buildPick, buildMultiPick } from './capture/pick-builder'
+import { MultiSelection } from './capture/multi-select'
 import { PickPopup, type PickPopupResult } from './ui/pick-popup'
 import { PickMarkers, type Marker } from './ui/pick-markers'
+import { PickOutlines } from './ui/pick-outlines'
+import { PickStatus } from './ui/pick-status'
 
 export interface PulseCore {
   submitFeedback(data: {
@@ -36,8 +39,14 @@ export class Widget {
   private picker: ElementPicker | null = null
   private popup: PickPopup | null = null
   private markers: PickMarkers | null = null
+  private outlines: PickOutlines | null = null
+  private status: PickStatus | null = null
   private picks: WidgetPick[] = []
+  private markersById = new Map<string, Marker>()
   private pendingPick: { pick: WidgetPick; marker: Marker } | null = null
+  private editingPickId: string | null = null
+  private multi = new MultiSelection()
+  private lastModifierPoint: Point | null = null
   private state: WidgetState = 'closed'
   private currentScreenshot: Blob | null = null
   private user: { email?: string; name?: string }
@@ -82,16 +91,23 @@ export class Widget {
       onCaptureScreenshot: () => this.startScreenshotCapture(),
       onCaptureFullScreen: () => this.captureFullScreen(),
       onPickElement: () => this.startPick(),
+      onEditPick: (id) => this.startEditPick(id),
+      onDeletePick: (id) => this.deletePick(id),
     })
 
     if (this.config.capture.elementPick) {
       this.markers = new PickMarkers(this.shadow)
+      this.outlines = new PickOutlines(this.shadow)
+      this.status = new PickStatus(this.shadow)
       this.popup = new PickPopup(this.shadow, {
-        onSave: (result) => this.commitPendingPick(result),
-        onCancel: () => this.cancelPendingPick(),
+        onSave: (result) => this.handlePopupSave(result),
+        onCancel: () => this.handlePopupCancel(),
       })
       this.picker = new ElementPicker(this.shadow, this.host, {
         onPick: (target, point) => this.handlePick(target, point),
+        onModifierEnter: () => this.handleModifierEnter(),
+        onModifierClick: (target, point) => this.handleModifierClick(target, point),
+        onModifierRelease: () => this.handleModifierRelease(),
       })
     }
 
@@ -115,6 +131,7 @@ export class Widget {
     this.currentScreenshot = null
     this.panel.setScreenshot(null)
     this.picks = []
+    this.markersById.clear()
     this.markers?.clear()
     this.markers?.show()
     this.panel.setPicks(this.picks)
@@ -145,6 +162,8 @@ export class Widget {
     this.picker = null
     this.popup?.destroy()
     this.markers?.destroy()
+    this.outlines?.destroy()
+    this.status?.destroy()
     this.trigger.destroy()
     this.panel.destroy()
     this.annotation?.destroy()
@@ -176,14 +195,20 @@ export class Widget {
   private teardownPickMode(): void {
     this.popup?.close()
     this.pendingPick = null
+    this.editingPickId = null
     this.markers?.setPending(null)
+    this.clearMultiSelect()
     this.picker?.stop()
   }
 
   private handlePick(target: Element, point: Point): void {
     if (!this.picker || !this.popup || !this.markers) return
     this.picker.pause()
-    const pick = buildPick(target)
+    this.openPickPopup(buildPick(target), point)
+  }
+
+  /** Stage a fresh pick: pending marker at `point`, comment popup anchored on it. */
+  private openPickPopup(pick: WidgetPick, point: Point): void {
     const marker: Marker = {
       id: pick.id,
       xPercent: (point.x / window.innerWidth) * 100,
@@ -191,8 +216,76 @@ export class Widget {
       isFixed: pick.isFixed,
     }
     this.pendingPick = { pick, marker }
-    this.markers.setPending(marker)
-    this.popup.open({ xPercent: marker.xPercent, y: point.y }, { title: pick.name })
+    this.markers?.setPending(marker)
+    this.popup?.open({ xPercent: marker.xPercent, y: point.y }, { title: pick.name })
+  }
+
+  // -- multi-select (Cmd/Ctrl+Shift+click) -------------------------------------
+
+  private handleModifierEnter(): void {
+    if (this.state !== 'picking') return
+    this.status?.show('Multi-select — click elements, release to comment')
+  }
+
+  /** Returns true when the click was consumed as a multi-select toggle. */
+  private handleModifierClick(target: Element, point: Point): boolean {
+    if (this.state !== 'picking') return false
+    this.multi.toggle(target)
+    this.lastModifierPoint = point
+    this.outlines?.set(this.multi.items)
+    this.status?.show(
+      this.multi.size === 0
+        ? 'Multi-select — click elements, release to comment'
+        : `${this.multi.size} selected — release to comment`
+    )
+    return true
+  }
+
+  /**
+   * Either modifier released: commit the pending set as one annotation. A single
+   * element is a normal pick (no multi wrapper); an empty set is a no-op that
+   * leaves the user in pick mode.
+   */
+  private handleModifierRelease(): void {
+    const elements = this.multi.items
+    const point = this.lastModifierPoint
+    this.clearMultiSelect()
+    if (elements.length === 0 || !point) return
+    if (!this.picker || !this.popup || !this.markers) return
+    this.picker.pause()
+    this.openPickPopup(buildMultiPick(elements), point)
+  }
+
+  private clearMultiSelect(): void {
+    this.multi.clear()
+    this.lastModifierPoint = null
+    this.outlines?.clear()
+    this.status?.hide()
+  }
+
+  // -- popup save/cancel -------------------------------------------------------
+
+  private handlePopupSave(result: PickPopupResult): void {
+    if (this.editingPickId) {
+      const pick = this.picks.find((p) => p.id === this.editingPickId)
+      this.editingPickId = null
+      if (pick) {
+        pick.comment = result.comment
+        pick.intent = result.intent
+      }
+      this.panel.setPicks(this.picks)
+      return
+    }
+    this.commitPendingPick(result)
+  }
+
+  private handlePopupCancel(): void {
+    if (this.editingPickId) {
+      this.editingPickId = null
+      this.popup?.close()
+      return
+    }
+    this.cancelPendingPick()
   }
 
   private commitPendingPick(result: PickPopupResult): void {
@@ -202,6 +295,7 @@ export class Widget {
       pending.pick.comment = result.comment
       pending.pick.intent = result.intent
       this.picks.push(pending.pick)
+      this.markersById.set(pending.pick.id, pending.marker)
       this.markers?.add(pending.marker)
     }
     this.exitPickMode()
@@ -215,11 +309,41 @@ export class Widget {
     this.picker?.resume()
   }
 
+  // -- picks list (panel) ------------------------------------------------------
+
+  /** Reopen the comment popup for an existing pick, anchored on its marker. */
+  private startEditPick(id: string): void {
+    const pick = this.picks.find((p) => p.id === id)
+    if (!pick || !this.popup) return
+    this.editingPickId = id
+    const marker = this.markersById.get(id)
+    const rawY = marker ? (marker.isFixed ? marker.y : marker.y - window.scrollY) : window.innerHeight / 2
+    // A marker scrolled out of view would put the popup off-screen; centre instead.
+    const y = rawY < 0 || rawY > window.innerHeight ? window.innerHeight / 2 : rawY
+    this.popup.open(
+      { xPercent: marker?.xPercent ?? 50, y },
+      { title: pick.name, comment: pick.comment, intent: pick.intent }
+    )
+  }
+
+  private deletePick(id: string): void {
+    this.picks = this.picks.filter((p) => p.id !== id)
+    this.markersById.delete(id)
+    this.markers?.remove(id)
+    if (this.editingPickId === id) {
+      this.editingPickId = null
+      this.popup?.close()
+    }
+    this.panel.setPicks(this.picks)
+  }
+
   private handleEscape(e: KeyboardEvent): void {
     if (this.state === 'closed') return
     e.stopPropagation()
     if (this.popup?.isOpen) {
-      this.cancelPendingPick()
+      this.handlePopupCancel()
+    } else if (this.state === 'picking' && this.multi.size > 0) {
+      this.clearMultiSelect()
     } else if (this.state === 'picking') {
       this.exitPickMode()
     } else {
@@ -340,6 +464,7 @@ export class Widget {
       this.state = 'success'
       this.currentScreenshot = null
       this.picks = []
+      this.markersById.clear()
       this.markers?.clear()
       this.panel.setPicks(this.picks)
     } else {

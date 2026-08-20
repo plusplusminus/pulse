@@ -25,6 +25,7 @@ beforeEach(() => {
     onDragStart: vi.fn<NonNullable<PickerEvents['onDragStart']>>(),
     onDragMove: vi.fn<NonNullable<PickerEvents['onDragMove']>>(),
     onDragEnd: vi.fn<NonNullable<PickerEvents['onDragEnd']>>(),
+    onModifierEnter: vi.fn<NonNullable<PickerEvents['onModifierEnter']>>(),
     onModifierClick: vi.fn<NonNullable<PickerEvents['onModifierClick']>>(() => false),
     onModifierRelease: vi.fn<NonNullable<PickerEvents['onModifierRelease']>>(),
   }
@@ -119,6 +120,24 @@ describe('ElementPicker', () => {
     expect(events.onPick).not.toHaveBeenCalled()
     document.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', bubbles: true }))
     expect(events.onModifierRelease).toHaveBeenCalledTimes(1)
+  })
+
+  it('announces multi-select once when both modifiers go down', () => {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Meta', metaKey: true, bubbles: true }))
+    expect(events.onModifierEnter).not.toHaveBeenCalled()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', metaKey: true, shiftKey: true, bubbles: true }))
+    expect(events.onModifierEnter).toHaveBeenCalledTimes(1)
+    // still held: no repeat
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', metaKey: true, shiftKey: true, bubbles: true }))
+    expect(events.onModifierEnter).toHaveBeenCalledTimes(1)
+
+    document.dispatchEvent(new KeyboardEvent('keyup', { key: 'Meta', bubbles: true }))
+    expect(events.onModifierRelease).toHaveBeenCalledTimes(1)
+  })
+
+  it('ignores a modifier keyup when multi-select was never armed', () => {
+    document.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', bubbles: true }))
+    expect(events.onModifierRelease).not.toHaveBeenCalled()
   })
 })
 

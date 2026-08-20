@@ -33,8 +33,11 @@ export interface PickerEvents {
   onDragMove?: (rect: DragRect, event: MouseEvent) => void
   /** Drag released. The next click event is swallowed by the picker. */
   onDragEnd?: (rect: DragRect, event: MouseEvent) => void
+  /** Meta/Ctrl+Shift became held during pick mode (multi-select armed). */
+  onModifierEnter?: () => void
   /** Modifier-aware click while Meta/Ctrl+Shift are held (multi-select); return true to consume. */
   onModifierClick?: (target: Element, point: Point, event: MouseEvent) => boolean
+  /** Either modifier went up after a multi-select interaction started. */
   onModifierRelease?: (event: KeyboardEvent) => void
 }
 
@@ -61,11 +64,13 @@ export class ElementPicker {
   private downPoint: Point | null = null
   private isDragging = false
   private justFinishedDrag = false
+  private multiActive = false
 
   private onMouseMove = (e: MouseEvent) => this.handleMouseMove(e)
   private onMouseDown = (e: MouseEvent) => this.handleMouseDown(e)
   private onMouseUp = (e: MouseEvent) => this.handleMouseUp(e)
   private onClick = (e: MouseEvent) => this.handleClick(e)
+  private onKeyDown = (e: KeyboardEvent) => this.handleKeyDown(e)
   private onKeyUp = (e: KeyboardEvent) => this.handleKeyUp(e)
   private onScroll = () => this.refreshOverlay()
 
@@ -99,6 +104,7 @@ export class ElementPicker {
     document.addEventListener('mousedown', this.onMouseDown, true)
     document.addEventListener('mouseup', this.onMouseUp, true)
     document.addEventListener('click', this.onClick, true)
+    document.addEventListener('keydown', this.onKeyDown, true)
     document.addEventListener('keyup', this.onKeyUp, true)
     window.addEventListener('scroll', this.onScroll, true)
   }
@@ -110,6 +116,7 @@ export class ElementPicker {
     document.removeEventListener('mousedown', this.onMouseDown, true)
     document.removeEventListener('mouseup', this.onMouseUp, true)
     document.removeEventListener('click', this.onClick, true)
+    document.removeEventListener('keydown', this.onKeyDown, true)
     document.removeEventListener('keyup', this.onKeyUp, true)
     window.removeEventListener('scroll', this.onScroll, true)
     this.overlay?.remove()
@@ -121,6 +128,7 @@ export class ElementPicker {
     this.downPoint = null
     this.isDragging = false
     this.justFinishedDrag = false
+    this.multiActive = false
   }
 
   /** Keep listeners but ignore the page (e.g. while the comment popup is open). */
@@ -204,13 +212,28 @@ export class ElementPicker {
     const point = { x: e.clientX, y: e.clientY }
     const target = this.elementAt(point.x, point.y)
     if (!target) return
-    if (isMultiSelectModifier(e) && this.events.onModifierClick?.(target, point, e)) return
+    if (isMultiSelectModifier(e) && this.events.onModifierClick?.(target, point, e)) {
+      // A consumed modifier click arms release-to-commit even without a keydown
+      // (the user may have been holding the keys before pick mode started).
+      this.multiActive = true
+      return
+    }
     this.events.onPick(target, point, e)
   }
 
+  private handleKeyDown(e: KeyboardEvent): void {
+    if (this.paused || this.multiActive) return
+    if (!isMultiSelectModifier(e)) return
+    this.multiActive = true
+    this.events.onModifierEnter?.()
+  }
+
+  /** Either modifier going up commits — matches the "release to commit" model. */
   private handleKeyUp(e: KeyboardEvent): void {
-    if (this.paused) return
-    if (e.key === 'Meta' || e.key === 'Control' || e.key === 'Shift') this.events.onModifierRelease?.(e)
+    if (this.paused || !this.multiActive) return
+    if (e.key !== 'Meta' && e.key !== 'Control' && e.key !== 'Shift') return
+    this.multiActive = false
+    this.events.onModifierRelease?.(e)
   }
 
   private hideOverlay(): void {

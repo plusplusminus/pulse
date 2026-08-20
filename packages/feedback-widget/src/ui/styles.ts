@@ -717,6 +717,54 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
       opacity: 0.85;
     }
 
+    /* Multi-select: outline per pending element + a live status pill */
+    .pulse-outlines {
+      position: fixed;
+      inset: 0;
+      z-index: 2147483646;
+      pointer-events: none;
+    }
+
+    .pulse-outline {
+      position: absolute;
+      box-sizing: border-box;
+      border: 2px dashed ${c.primary};
+      background: ${c.primary}1f;
+      border-radius: 3px;
+    }
+
+    .pulse-outline__badge {
+      position: absolute;
+      top: -9px;
+      left: -9px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: ${c.primary};
+      color: #ffffff;
+      font-size: 10px;
+      font-weight: 600;
+      line-height: 18px;
+      text-align: center;
+    }
+
+    .pulse-pick-status {
+      position: fixed;
+      z-index: 2147483647;
+      top: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 6px 12px;
+      background: ${c.text};
+      color: ${c.bg};
+      font-size: 12px;
+      font-weight: 500;
+      border-radius: 999px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+      pointer-events: none;
+      white-space: nowrap;
+    }
+
     /* Comment + intent popup */
     .pulse-pick-popup {
       position: fixed;
@@ -860,6 +908,35 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
     .pulse-picks__intent--question { background: #f59e0b1f; color: #b45309; }
     .pulse-picks__intent--approve { background: ${c.success}1f; color: ${c.success}; }
     .pulse-picks__intent--change { background: #0ea5e91f; color: #0369a1; }
+
+    .pulse-picks__action {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px;
+      height: 22px;
+      padding: 0;
+      border: none;
+      border-radius: 5px;
+      background: transparent;
+      color: ${c.muted};
+      cursor: pointer;
+    }
+
+    .pulse-picks__action svg {
+      width: 13px;
+      height: 13px;
+    }
+
+    .pulse-picks__action:hover {
+      background: ${c.inputBg};
+      color: ${c.text};
+    }
+
+    .pulse-picks__action--delete:hover {
+      color: ${c.error};
+    }
 
     .pulse-picks__comment {
       margin-top: 2px;

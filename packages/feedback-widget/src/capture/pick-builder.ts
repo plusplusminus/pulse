@@ -1,4 +1,5 @@
 import type { PickIntent, PickRect, WidgetPick } from '../types'
+import { aggregateRect, multiPickName } from './multi-select'
 import {
   getAccessibilityInfo,
   getDetailedComputedStyles,
@@ -60,4 +61,26 @@ export function buildPick(el: Element, options: BuildPickOptions = {}): WidgetPi
     relocation: getRelocationHints(el),
   }
   return pick
+}
+
+/**
+ * One annotation spanning several elements (PULSE-331). Metadata (path, classes,
+ * computed styles, accessibility) comes from the FIRST element only — a
+ * multi-pick is a selection of related elements, not an aggregation of their
+ * data. Every rect is projected into the first element's coordinate frame so the
+ * aggregate box stays in one coordinate space.
+ */
+export function buildMultiPick(elements: Element[], options: BuildPickOptions = {}): WidgetPick {
+  const [first] = elements
+  const base = buildPick(first, options)
+  if (elements.length < 2) return base
+
+  const boxes = elements.map((el) => pageRect(el.getBoundingClientRect(), base.isFixed))
+  return {
+    ...base,
+    name: multiPickName(elements.map((el) => identifyElement(el).name)),
+    isMultiSelect: true,
+    boundingBox: aggregateRect(boxes),
+    elementBoundingBoxes: boxes,
+  }
 }
