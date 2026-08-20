@@ -27,6 +27,26 @@ vi.mock("@/lib/widget-auth", () => ({
   isKnownWidgetOrigin: vi.fn(),
 }));
 
+vi.mock("@sentry/nextjs", () => ({ captureMessage: vi.fn() }));
+
+// Real checkRateLimit over an injected in-memory limiter (one per budget).
+const rateLimit = vi.hoisted(() => ({
+  fakes: null as null | { reset(): void },
+}));
+vi.mock("@/lib/widget-rate-limit", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/widget-rate-limit")>(
+    "@/lib/widget-rate-limit"
+  );
+  const { createFakeRateLimiterFactory } = await import("@/lib/__tests__/fake-rate-limiter");
+  const fakes = createFakeRateLimiterFactory(() => Date.now());
+  rateLimit.fakes = fakes;
+  return {
+    ...actual,
+    checkRateLimit: (input: Parameters<typeof actual.checkRateLimit>[0]) =>
+      actual.checkRateLimit(input, { limiter: fakes.get(input.limit, input.windowMs) }),
+  };
+});
+
 import { isKnownWidgetOrigin, validateWidgetRequest } from "@/lib/widget-auth";
 import { OPTIONS, POST } from "../upload/route";
 
@@ -67,7 +87,11 @@ function readJson(res: Response): Promise<TicketBody> {
   return res.json() as Promise<TicketBody>;
 }
 
-function post(body: unknown, origin = "https://customer.example") {
+function post(
+  body: unknown,
+  origin = "https://customer.example",
+  extraHeaders: Record<string, string> = {}
+) {
   return POST(
     new Request("http://localhost/api/widget/upload", {
       method: "POST",
@@ -75,6 +99,7 @@ function post(body: unknown, origin = "https://customer.example") {
         "content-type": "application/json",
         "x-widget-key": "wk_abc123",
         origin,
+        ...extraHeaders,
       },
       body: typeof body === "string" ? body : JSON.stringify(body),
     })
@@ -86,6 +111,7 @@ beforeEach(() => {
   mockedValidate.mockReset();
   mockedKnownOrigin.mockReset();
   mockedKnownOrigin.mockResolvedValue(true);
+  rateLimit.fakes?.reset();
 });
 
 function preflight(origin: string) {
@@ -234,14 +260,32 @@ describe("POST /api/widget/upload", () => {
     expect((await readJson(res)).storagePath).toMatch(/\/videos\/.+\.mp4$/);
   });
 
-  it("rate-limits a site key after 30 tickets per minute", async () => {
+  it("rate-limits an IP after 10 tickets per minute; another IP still gets tickets", async () => {
     authOk("wk_ratelimited");
     const body = { kind: "screenshot", contentType: "image/png", sizeBytes: 1 };
-    for (let i = 0; i < 30; i++) {
-      expect((await post(body)).status).toBe(200);
+    const ipA = { "x-forwarded-for": "198.51.100.4, 10.0.0.1" };
+    for (let i = 0; i < 10; i++) {
+      expect((await post(body, undefined, ipA)).status).toBe(200);
     }
-    const res = await post(body);
+    const res = await post(body, undefined, ipA);
     expect(res.status).toBe(429);
-    expect(signedUploads).toHaveLength(30);
+    expect(Number(res.headers.get("Retry-After"))).toBeGreaterThanOrEqual(1);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://customer.example");
+    expect(signedUploads).toHaveLength(10);
+
+    const other = await post(body, undefined, { "x-forwarded-for": "198.51.100.5" });
+    expect(other.status).toBe(200);
+  });
+
+  it("rate-limits a site after 60 tickets per minute across IPs", async () => {
+    authOk("wk_sitelimited");
+    const body = { kind: "screenshot", contentType: "image/png", sizeBytes: 1 };
+    for (let i = 0; i < 60; i++) {
+      const res = await post(body, undefined, { "x-forwarded-for": `10.1.${i}.1` });
+      expect(res.status).toBe(200);
+    }
+    const res = await post(body, undefined, { "x-forwarded-for": "10.9.9.9" });
+    expect(res.status).toBe(429);
+    expect(signedUploads).toHaveLength(60);
   });
 });

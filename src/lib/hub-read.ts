@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { supabaseAdmin, type HubTeamMapping, type HubMemberRole } from "./supabase";
 import { getWorkspaceToken } from "./workspace";
 import { isIssueProjectVisible } from "./hub-visibility-rules";
@@ -405,8 +406,12 @@ export async function verifyHubAccess(
 
 /**
  * Fetch active team mappings for a hub, including visibility arrays.
+ * Memoised per server request (React.cache): a single hub page render calls
+ * 8+ fetchHub* helpers that all need the same mappings.
  */
-async function getHubMappings(hubId: string): Promise<HubTeamMapping[]> {
+const getHubMappings = cache(async function getHubMappings(
+  hubId: string
+): Promise<HubTeamMapping[]> {
   const { data, error } = await supabaseAdmin
     .from("hub_team_mappings")
     .select("*")
@@ -419,7 +424,7 @@ async function getHubMappings(hubId: string): Promise<HubTeamMapping[]> {
   }
 
   return (data as HubTeamMapping[]) ?? [];
-}
+});
 
 /**
  * Get allowed team IDs for a hub.
@@ -1104,7 +1109,8 @@ export async function fetchHubTeamStats(hubId: string) {
   }
 
   // Count open issues and track latest activity per team
-  const completedTypes = new Set(["completed", "cancelled"]);
+  // Linear spells it "canceled"; keep both so older/other payloads still match.
+  const completedTypes = new Set(["completed", "canceled", "cancelled"]);
   for (const issue of issues || []) {
     const teamStat = stats.get(issue.team_id);
     if (!teamStat) continue;
@@ -1529,12 +1535,15 @@ export async function fetchHubCycleStats(
   const teamIds = mappings.map((m) => m.linear_team_id);
   const overviewOnlyIds = getOverviewOnlyProjectIds(mappings);
 
-  const { data, error } = await supabaseAdmin
-    .from("synced_issues")
-    .select("data")
-    .eq("user_id", WORKSPACE_USER_ID)
-    .in("team_id", teamIds)
-    .not("data->cycle", "is", null);
+  // Aggregated in SQL (supabase/migrations/20260820_perf_rpcs.sql). The previous
+  // implementation pulled the full JSONB of every issue in the hub's teams
+  // (~14MB per render) and counted in JS, which hit the 8s statement timeout.
+  const { data, error } = await supabaseAdmin.rpc("get_cycle_stats", {
+    p_user_id: WORKSPACE_USER_ID,
+    p_team_ids: teamIds,
+    p_cycle_ids: cycleLinearIds,
+    p_excluded_project_ids: Array.from(overviewOnlyIds),
+  });
 
   if (error) {
     console.error("fetchHubCycleStats error:", error);
@@ -1546,21 +1555,16 @@ export async function fetchHubCycleStats(
     stats[id] = { total: 0, completed: 0 };
   }
 
-  const completedTypes = new Set(["completed", "cancelled"]);
-
-  for (const row of data || []) {
-    const d = row.data as Record<string, unknown>;
-    const cycle = d.cycle as { id?: string } | undefined;
-    if (!cycle?.id || !stats[cycle.id]) continue;
-
-    const projectId = (d.project as Record<string, unknown> | undefined)?.id as string | undefined;
-    if (projectId && overviewOnlyIds.has(projectId)) continue;
-
-    stats[cycle.id].total++;
-    const stateType = (d.state as Record<string, unknown> | undefined)?.type as string | undefined;
-    if (stateType && completedTypes.has(stateType)) {
-      stats[cycle.id].completed++;
-    }
+  for (const row of (data ?? []) as Array<{
+    cycle_id: string;
+    total: number | string;
+    completed: number | string;
+  }>) {
+    if (!stats[row.cycle_id]) continue;
+    stats[row.cycle_id] = {
+      total: Number(row.total),
+      completed: Number(row.completed),
+    };
   }
 
   return stats;
