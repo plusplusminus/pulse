@@ -212,6 +212,8 @@ export type WidgetFeedbackRequest = {
   }
   /** Object key in the private widget-media bucket, minted by POST /api/widget/upload */
   screenshotStoragePath?: string
+  /** Screen recording object key under {hubId}/videos/ (PULSE-337) */
+  videoStoragePath?: string
   /** Element picks; max 50 (PULSE-329) */
   picks?: WidgetPick[]
   /** Screenshot annotation rects; max 50 (PULSE-333) */

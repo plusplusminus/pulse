@@ -61,6 +61,8 @@ export interface FeedbackPayload {
   }
   /** Object key in the private widget-media bucket (from uploadBlob) */
   screenshotStoragePath?: string
+  /** Screen recording object key under {hubId}/videos/ (PULSE-337) */
+  videoStoragePath?: string
   /** Element picks (PULSE-329); max 50 */
   picks?: WidgetPick[]
   /** Screenshot annotation rects (PULSE-333); max 50 */
