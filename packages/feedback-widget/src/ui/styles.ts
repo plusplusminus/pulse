@@ -421,6 +421,28 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
       flex-shrink: 0;
     }
 
+    /* Video preview (PULSE-338) */
+    .pulse-video__player {
+      width: 100%;
+      display: block;
+      max-height: 160px;
+      background: #000000;
+    }
+
+    .pulse-video__meta {
+      padding: 6px 8px;
+      border-top: 1px solid ${c.border};
+      font-size: 11px;
+      font-weight: 500;
+      color: ${c.muted};
+      font-variant-numeric: tabular-nums;
+    }
+
+    .pulse-record-btn:hover {
+      border-color: ${c.error};
+      color: ${c.error};
+    }
+
     /* Submit button */
     .pulse-submit {
       width: 100%;

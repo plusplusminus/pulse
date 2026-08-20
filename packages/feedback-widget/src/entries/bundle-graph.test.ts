@@ -72,6 +72,11 @@ describe('embed entry', () => {
     expect([...graph.packages]).not.toContain('fix-webm-duration')
     expect([...graph.files]).not.toContain(WEBM_DURATION_ENTRY)
   })
+
+  it('still reaches the recorder and the duration-fixer loader', () => {
+    expect([...graph.files]).toContain(resolve(SRC, 'capture/video.ts'))
+    expect([...graph.files]).toContain(resolve(SRC, 'capture/webm-duration.ts'))
+  })
 })
 
 describe('sdk entry', () => {

@@ -132,7 +132,16 @@ export interface WidgetPick {
   relocation?: PickRelocation
 }
 
-export type WidgetState = 'closed' | 'open' | 'picking' | 'capturing' | 'annotating' | 'submitting' | 'success' | 'error'
+export type WidgetState =
+  | 'closed'
+  | 'open'
+  | 'picking'
+  | 'capturing'
+  | 'recording'
+  | 'annotating'
+  | 'submitting'
+  | 'success'
+  | 'error'
 
 /** Shape of `window.PulseConfig` for the script-tag / loader install path. */
 export type PulseGlobalConfig = Partial<PulseConfig> & {

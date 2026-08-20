@@ -25,9 +25,14 @@ let config: {
   onPickElement: Mock<() => void>
   onTogglePause: Mock<() => void>
   onCaptureTab: Mock<() => void>
+  onRecordVideo: Mock<() => void>
+  onRemoveVideo: Mock<() => void>
 }
 
-function makePanel(allowElementPick = true, extra: { allowScreenshot?: boolean; allowCaptureTab?: boolean } = {}): FeedbackPanel {
+function makePanel(
+  allowElementPick = true,
+  extra: { allowScreenshot?: boolean; allowCaptureTab?: boolean; allowVideo?: boolean } = {}
+): FeedbackPanel {
   return new FeedbackPanel(shadow, {
     position: 'bottom-right',
     allowElementPick,
@@ -51,6 +56,8 @@ beforeEach(() => {
     onPickElement: vi.fn<() => void>(),
     onTogglePause: vi.fn<() => void>(),
     onCaptureTab: vi.fn<() => void>(),
+    onRecordVideo: vi.fn<() => void>(),
+    onRemoveVideo: vi.fn<() => void>(),
   }
 })
 
@@ -174,5 +181,152 @@ describe('capture controls', () => {
     // The panel is back in its resting state, not spinning, and the fallback
     // that needs no engine is still one click away.
     expect(labels()).toContain('Capture tab')
+  })
+})
+
+describe('video recording controls (PULSE-338)', () => {
+  const recordBtn = () => shadow.querySelector('.pulse-record-btn') as HTMLButtonElement | null
+
+  /** jsdom has no blob URL registry; keep it deterministic and revocable. */
+  function stubObjectUrls() {
+    const created: string[] = []
+    const revoked: string[] = []
+    URL.createObjectURL = vi.fn(() => {
+      const url = `blob:pulse/${created.length}`
+      created.push(url)
+      return url
+    })
+    URL.revokeObjectURL = vi.fn((url: string) => revoked.push(url))
+    return { created, revoked }
+  }
+
+  function clip(size = 2048) {
+    return new Blob(['x'.repeat(size)], { type: 'video/webm;codecs=vp9' })
+  }
+
+  it('shows the record button only when the site and browser allow video', () => {
+    const off = makePanel(false, { allowVideo: false })
+    off.setState('open')
+    expect(recordBtn()).toBeNull()
+
+    document.body.innerHTML = '<div id="host2"></div>'
+    shadow = document.getElementById('host2')!.attachShadow({ mode: 'open' })
+    const on = makePanel(false, { allowVideo: true })
+    on.setState('open')
+    expect(recordBtn()?.querySelector('span')?.textContent).toBe('Record video')
+  })
+
+  it('routes the record click straight through, with nothing awaited first', () => {
+    const panel = makePanel(false, { allowVideo: true })
+    panel.setState('open')
+    recordBtn()!.click()
+    expect(config.onRecordVideo).toHaveBeenCalledTimes(1)
+  })
+
+  it('explains that the widget hides itself, since there is no in-page stop button', () => {
+    const panel = makePanel(false, { allowVideo: true })
+    panel.setState('open')
+    const notes = Array.from(shadow.querySelectorAll('.pulse-capture-note')).map((n) => n.textContent)
+    expect(notes.some((n) => n?.includes('Stop sharing'))).toBe(true)
+  })
+
+  it('swaps the button for a <video controls> preview with duration and size', () => {
+    stubObjectUrls()
+    const panel = makePanel(false, { allowVideo: true })
+    panel.setState('open')
+
+    panel.setVideo(clip(2048), 83_000)
+
+    const video = shadow.querySelector('.pulse-video__player') as HTMLVideoElement
+    expect(video).not.toBeNull()
+    expect(video.controls).toBe(true)
+    expect(video.src).toBe('blob:pulse/0')
+    expect(shadow.querySelector('.pulse-video__meta')?.textContent).toBe('1:23 · 2 KB')
+    expect(recordBtn()).toBeNull()
+    expect(panel.getVideo()?.size).toBe(2048)
+  })
+
+  it('re-record reopens the prompt and replaces the previous blob', () => {
+    const urls = stubObjectUrls()
+    const panel = makePanel(false, { allowVideo: true })
+    panel.setState('open')
+    panel.setVideo(clip(1024), 5_000)
+
+    const rerecord = Array.from(shadow.querySelectorAll('.pulse-screenshot__btn')).find(
+      (b) => b.textContent === 'Re-record'
+    ) as HTMLButtonElement
+    rerecord.click()
+    expect(config.onRecordVideo).toHaveBeenCalledTimes(1)
+
+    panel.setVideo(clip(4096), 9_000)
+    // The superseded blob URL is released rather than leaked.
+    expect(urls.revoked).toContain('blob:pulse/0')
+    expect(shadow.querySelector('.pulse-video__meta')?.textContent).toBe('0:09 · 4 KB')
+  })
+
+  it('remove clears the recording and brings the record button back', () => {
+    const urls = stubObjectUrls()
+    const panel = makePanel(false, { allowVideo: true })
+    panel.setState('open')
+    panel.setVideo(clip(), 3_000)
+
+    const remove = shadow.querySelector('.pulse-screenshot__btn--danger') as HTMLButtonElement
+    remove.click()
+    expect(config.onRemoveVideo).toHaveBeenCalledTimes(1)
+
+    // The widget owns the blob, so the panel only clears on setVideo(null).
+    panel.setVideo(null)
+    expect(shadow.querySelector('.pulse-video__player')).toBeNull()
+    expect(recordBtn()).not.toBeNull()
+    expect(panel.getVideo()).toBeNull()
+    expect(urls.revoked).toContain('blob:pulse/0')
+  })
+
+  it('keeps showing a finished recording even if the site later disallows video', () => {
+    stubObjectUrls()
+    const panel = makePanel(false, { allowVideo: false })
+    panel.setState('open')
+    panel.setVideo(clip(), 1_000)
+    expect(shadow.querySelector('.pulse-video__player')).not.toBeNull()
+  })
+
+  it('surfaces a recording error above the notice', () => {
+    const panel = makePanel(false, { allowVideo: true })
+    panel.setState('open')
+    expect(shadow.querySelector('.pulse-capture-note--error')).toBeNull()
+
+    panel.setVideoError('This browser cannot record video')
+    expect(shadow.querySelector('.pulse-capture-note--error')?.textContent).toBe(
+      'This browser cannot record video'
+    )
+
+    panel.setVideoError(null)
+    expect(shadow.querySelector('.pulse-capture-note--error')).toBeNull()
+  })
+
+  it('formats durations and sizes for the readout', () => {
+    expect(FeedbackPanel.formatDuration(0)).toBe('0:00')
+    expect(FeedbackPanel.formatDuration(7_400)).toBe('0:07')
+    expect(FeedbackPanel.formatDuration(83_000)).toBe('1:23')
+    expect(FeedbackPanel.formatDuration(120_000)).toBe('2:00')
+
+    expect(FeedbackPanel.formatBytes(512)).toBe('512 B')
+    expect(FeedbackPanel.formatBytes(2048)).toBe('2 KB')
+    expect(FeedbackPanel.formatBytes(5 * 1024 * 1024)).toBe('5.0 MB')
+  })
+
+  it('reports upload progress on the submit button, then falls back to submitting', () => {
+    const panel = makePanel(false, { allowVideo: true })
+    panel.setState('open')
+    panel.setState('submitting')
+
+    const label = () => shadow.querySelector('.pulse-submit span')?.textContent
+
+    panel.setUploadProgress(25, 100)
+    expect(label()).toBe('Uploading 25%')
+    panel.setUploadProgress(90, 100)
+    expect(label()).toBe('Uploading 90%')
+    panel.setUploadProgress(100, 100)
+    expect(label()).toBe('Submitting...')
   })
 })
