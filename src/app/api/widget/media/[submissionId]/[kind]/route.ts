@@ -6,6 +6,7 @@ import {
   signWidgetRead,
   type WidgetMediaKind,
 } from "@/lib/widget-upload";
+import { RETENTION_PATH_COLUMNS } from "@/lib/widget-retention";
 
 /**
  * Pulse media proxy (PULSE-324). The Linear issue body and the admin detail
@@ -16,12 +17,6 @@ import {
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-const PATH_COLUMN = {
-  screenshot: "screenshot_storage_path",
-  video: "video_storage_path",
-  replay: "replay_storage_path",
-} as const satisfies Record<WidgetMediaKind, string>;
 
 const NO_STORE = { "Cache-Control": "private, no-store" };
 
@@ -84,7 +79,7 @@ export async function GET(
       return notFound();
     }
 
-    const storagePath = submission[PATH_COLUMN[kind as WidgetMediaKind]];
+    const storagePath = submission[RETENTION_PATH_COLUMNS[kind as WidgetMediaKind]];
     if (!storagePath) {
       if (submission.media_purged_at) {
         return NextResponse.json(

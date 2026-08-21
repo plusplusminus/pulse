@@ -132,15 +132,6 @@ export interface ElementIdentity {
   path: string
 }
 
-function closestSvg(el: Element): Element | null {
-  let p = el.parentElement
-  while (p) {
-    if (tag(p) === 'svg') return p
-    p = p.parentElement
-  }
-  return null
-}
-
 function closestTag(el: Element, t: string): Element | null {
   let p = el.parentElement
   while (p) {
@@ -162,7 +153,7 @@ function elementName(el: Element): string {
   const text = textOf(el)
 
   if (SVG_GRAPHIC_TAGS.has(t)) {
-    const svg = closestSvg(el)
+    const svg = closestTag(el, 'svg')
     return svg ? `graphic in ${elementName(svg)}` : 'graphic element'
   }
 
@@ -286,13 +277,6 @@ const DETAILED_PROPS = [
   'align-items', 'grid-template-columns', 'box-shadow', 'cursor',
 ] as const
 
-const FORENSIC_PROPS = [
-  'display', 'position', 'top', 'left', 'width', 'height', 'margin', 'padding', 'border',
-  'border-radius', 'box-sizing', 'background-color', 'color', 'font-family', 'font-size',
-  'font-weight', 'line-height', 'letter-spacing', 'text-align', 'opacity', 'z-index',
-  'overflow', 'transform', 'visibility',
-] as const
-
 const GENERIC_DEFAULTS = new Set(['', 'none', 'auto', '0', '0px', 'transparent', 'normal', 'static', 'visible', 'rgba(0, 0, 0, 0)'])
 
 const PROP_DEFAULTS: Record<string, string> = {
@@ -340,17 +324,6 @@ export function getDetailedComputedStyles(el: Element): Record<string, string> {
     if (!isDefaultValue(t, prop, value)) out[prop] = value
   }
   return out
-}
-
-/** Wider 24-property set as `key: value; key: value` (forensic level). */
-export function getForensicComputedStyles(el: Element): string {
-  const cs = getComputedStyle(el)
-  const parts: string[] = []
-  for (const prop of FORENSIC_PROPS) {
-    const value = cs.getPropertyValue(prop).trim()
-    if (value) parts.push(`${prop}: ${value}`)
-  }
-  return parts.join('; ')
 }
 
 // -- accessibility ---------------------------------------------------------
