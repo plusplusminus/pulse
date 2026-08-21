@@ -369,16 +369,205 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
       color: ${c.primary};
     }
 
-    /* Screenshot option buttons */
-    .pulse-screenshot-options {
+    /* Attach row (PULSE-402) — one row, options under their own action. */
+    .pulse-attach {
       display: flex;
-      gap: 8px;
+      flex-direction: column;
+      gap: 6px;
       margin-bottom: 12px;
     }
 
-    .pulse-screenshot-row {
+    .pulse-attach__row {
       display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .pulse-attach__caption {
+      font-size: 11px;
+      font-weight: 500;
+      color: ${c.muted};
+      flex-shrink: 0;
+      margin-right: 2px;
+    }
+
+    /* Action and caret read as one control; the caret is always drawn. */
+    .pulse-attach__split {
+      display: flex;
+      align-items: stretch;
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
+    .pulse-attach__btn {
+      flex: 1 1 auto;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      height: 30px;
+      padding: 0 8px;
+      border: 1px solid ${c.border};
+      border-radius: 7px;
+      background: transparent;
+      color: ${c.text};
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      white-space: nowrap;
+      cursor: pointer;
+      outline: none;
+      transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+    }
+
+    .pulse-attach__split .pulse-attach__btn {
+      border-top-right-radius: 0;
+      border-bottom-right-radius: 0;
+      border-right: none;
+    }
+
+    .pulse-attach__btn svg {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+      color: ${c.muted};
+    }
+
+    .pulse-attach__btn:hover {
+      background: ${c.inputBg};
+      border-color: ${c.muted}59;
+    }
+
+    .pulse-attach__btn:hover svg,
+    .pulse-attach__btn--record:hover svg {
+      color: inherit;
+    }
+
+    .pulse-attach__btn--record:hover {
+      color: ${c.error};
+      border-color: ${c.error};
+    }
+
+    .pulse-attach__btn:focus-visible,
+    .pulse-caret:focus-visible {
+      border-color: ${c.primary};
+      box-shadow: 0 0 0 2px ${c.primary}33;
+      z-index: 1;
+    }
+
+    .pulse-caret {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px;
+      flex-shrink: 0;
+      padding: 0;
+      border: 1px solid ${c.border};
+      border-top-left-radius: 0;
+      border-bottom-left-radius: 0;
+      border-top-right-radius: 7px;
+      border-bottom-right-radius: 7px;
+      background: transparent;
+      color: ${c.muted};
+      cursor: pointer;
+      outline: none;
+      transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+    }
+
+    .pulse-caret svg {
+      width: 12px;
+      height: 12px;
+    }
+
+    .pulse-caret:hover,
+    .pulse-caret[aria-expanded='true'] {
+      background: ${c.inputBg};
+      color: ${c.text};
+      border-color: ${c.muted}59;
+    }
+
+    /* Popover surface — floats in the shadow root so the panel never reflows. */
+    .pulse-pop {
+      position: fixed;
+      z-index: 2147483647;
+      width: 244px;
+      padding: 4px;
+      background: ${c.bg};
+      border: 1px solid ${c.border};
+      border-radius: 10px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.06), 0 8px 24px -6px rgba(0,0,0,0.18);
+      font-family: inherit;
+    }
+
+    .pulse-pop__list {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .pulse-pop__item {
+      display: flex;
+      align-items: flex-start;
       gap: 8px;
+      width: 100%;
+      padding: 7px 8px;
+      border: none;
+      border-radius: 6px;
+      background: transparent;
+      color: ${c.text};
+      font-family: inherit;
+      text-align: left;
+      cursor: pointer;
+      outline: none;
+      transition: background 0.1s ease;
+    }
+
+    .pulse-pop__item svg {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+      margin-top: 1px;
+      color: ${c.muted};
+    }
+
+    .pulse-pop__item:hover,
+    .pulse-pop__item:focus-visible {
+      background: ${c.inputBg};
+    }
+
+    .pulse-pop__item:focus-visible {
+      box-shadow: inset 0 0 0 1px ${c.primary};
+    }
+
+    .pulse-pop__text {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      min-width: 0;
+    }
+
+    .pulse-pop__name {
+      font-size: 12.5px;
+      font-weight: 500;
+      line-height: 1.3;
+    }
+
+    .pulse-pop__hint,
+    .pulse-pop__note {
+      font-size: 11px;
+      line-height: 1.4;
+      color: ${c.muted};
+    }
+
+    .pulse-pop__note {
+      padding: 6px 8px 4px;
+    }
+
+    .pulse-pop__list .pulse-pop__item + .pulse-pop__note {
+      margin-top: 2px;
+      border-top: 1px solid ${c.border};
+      padding-top: 7px;
     }
 
     .pulse-capture-note {
@@ -389,6 +578,10 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
 
     .pulse-capture-note--error {
       color: ${c.error};
+    }
+
+    .pulse-capture-note--status {
+      color: ${c.muted};
     }
 
     /* Voice-over opt-in (PULSE-400). Inherits .pulse-add-screenshot chrome. */
@@ -475,11 +668,6 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
     .pulse-video__note {
       padding: 6px 8px;
       border-top: 1px solid ${c.border};
-    }
-
-    .pulse-record-btn:hover {
-      border-color: ${c.error};
-      color: ${c.error};
     }
 
     /* Submit button */
@@ -1071,10 +1259,6 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
       margin-top: 2px;
       color: ${c.muted};
       font-size: 11px;
-    }
-
-    .pulse-pick-btn {
-      width: 100%;
     }
 
     /* Recording bar (PULSE-399) — bottom-left, out of the usual content

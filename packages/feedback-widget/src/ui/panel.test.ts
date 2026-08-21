@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest'
 import { BAR_IN_RECORDING_NOTICE, FeedbackPanel, VOICE_OVER_NOTICE } from './panel'
-import { ENGINE_LOAD_ERROR } from '../screenshot'
+import { CROSS_ORIGIN_NOTICE, ENGINE_LOAD_ERROR } from '../screenshot'
 import type { WidgetPick } from '../types'
 
 function pick(id: string, name: string, comment: string, intent: WidgetPick['intent'] = 'fix'): WidgetPick {
@@ -25,6 +25,7 @@ let config: {
   onPickElement: Mock<() => void>
   onTogglePause: Mock<() => void>
   onCaptureTab: Mock<() => void>
+  onCaptureScreenshot: Mock<() => void>
   onRecordVideo: Mock<() => void>
   onRemoveVideo: Mock<() => void>
   onToggleVoiceOver: Mock<() => void>
@@ -48,7 +49,6 @@ function makePanel(
     onClose: vi.fn(),
     onAnnotate: vi.fn(),
     onRetakeScreenshot: vi.fn(),
-    onCaptureScreenshot: vi.fn(),
     ...config,
   })
 }
@@ -62,6 +62,7 @@ beforeEach(() => {
     onPickElement: vi.fn<() => void>(),
     onTogglePause: vi.fn<() => void>(),
     onCaptureTab: vi.fn<() => void>(),
+    onCaptureScreenshot: vi.fn<() => void>(),
     onRecordVideo: vi.fn<() => void>(),
     onRemoveVideo: vi.fn<() => void>(),
     onToggleVoiceOver: vi.fn<() => void>(),
@@ -97,12 +98,14 @@ describe('picks list', () => {
     expect(config.onDeletePick).toHaveBeenCalledWith('a')
   })
 
-  it('labels the pick button "Pick another element" once picks exist', () => {
+  // PULSE-402: the pick control is a fixed cell in the attach row now, so its
+  // label no longer counts picks — it is a mode, and the row must not reflow.
+  it('keeps one steady Element control in the attach row whether or not picks exist', () => {
     const panel = makePanel()
     panel.setState('open')
-    expect(shadow.querySelector('.pulse-pick-btn span')?.textContent).toBe('Pick element')
+    expect(shadow.querySelector('.pulse-pick-btn span')?.textContent).toBe('Element')
     panel.setPicks([pick('a', 'button "Save"', '')])
-    expect(shadow.querySelector('.pulse-pick-btn span')?.textContent).toBe('Pick another element')
+    expect(shadow.querySelector('.pulse-pick-btn span')?.textContent).toBe('Element')
     ;(shadow.querySelector('.pulse-pick-btn') as HTMLButtonElement).click()
     expect(config.onPickElement).toHaveBeenCalled()
   })
@@ -112,6 +115,46 @@ describe('picks list', () => {
     panel.setState('open')
     panel.setPicks([pick('a', 'button "Save"', '')])
     expect(shadow.querySelector('.pulse-picks')).toBeNull()
+    expect(shadow.querySelector('.pulse-pick-btn')).toBeNull()
+  })
+})
+
+// PULSE-402/399: the row's composition follows the site's capture gates and
+// nothing else, so evidence arriving can never make Record slide under a
+// pointer that was aiming at Screenshot.
+describe('attach row layout', () => {
+  const rowShape = () =>
+    Array.from(shadow.querySelectorAll('.pulse-attach__row > *'))
+      .map((el) => el.className)
+      .join('|')
+
+  it('is identical before and after a screenshot, a video and picks arrive', () => {
+    URL.createObjectURL = vi.fn(() => 'blob:pulse/0')
+    URL.revokeObjectURL = vi.fn()
+    const panel = makePanel(true, { allowScreenshot: true, allowCaptureTab: true, allowVideo: true })
+    panel.setState('open')
+    const before = rowShape()
+
+    panel.setScreenshot(new Blob(['png'], { type: 'image/png' }))
+    panel.setVideo(new Blob(['x'.repeat(2048)], { type: 'video/webm' }), 12_000)
+    panel.setPicks([pick('a', 'button "Save"', ''), pick('b', 'nav', '')])
+
+    expect(shadow.querySelector('.pulse-video__player')).not.toBeNull()
+    expect(shadow.querySelector('.pulse-screenshot__img')).not.toBeNull()
+    expect(rowShape()).toBe(before)
+  })
+
+  it('survives an error and a voice-over note without reshuffling', () => {
+    const panel = makePanel(true, { allowScreenshot: true, allowVideo: true, allowVoiceOver: true })
+    panel.setState('open')
+    const before = rowShape()
+
+    panel.setCaptureError('Screenshot capture timed out')
+    panel.setVideoError('Recording failed')
+    panel.setVoiceOverNote('No microphone was available')
+
+    expect(shadow.querySelectorAll('.pulse-attach .pulse-capture-note').length).toBe(3)
+    expect(rowShape()).toBe(before)
   })
 })
 
@@ -142,39 +185,75 @@ describe('pause toggle', () => {
 })
 
 describe('capture controls', () => {
-  const labels = () =>
-    Array.from(shadow.querySelectorAll('.pulse-add-screenshot span')).map((el) => el.textContent)
+  /** Opens a split button's popover the way a pointer or Enter would. */
+  const openOptions = (label: string) => {
+    const caret = shadow.querySelector(`.pulse-caret[aria-label="${label}"]`) as HTMLButtonElement
+    caret.click()
+    return caret
+  }
+  const optionLabels = () =>
+    Array.from(shadow.querySelectorAll('.pulse-pop__name')).map((el) => el.textContent)
+  const attachLabels = () =>
+    Array.from(shadow.querySelectorAll('.pulse-attach__btn span')).map((el) => el.textContent)
 
-  it('shows Capture tab beside the screenshot button only when allowed', () => {
+  it('offers one Screenshot action in the row and its modes under the caret', () => {
     const panel = makePanel(false, { allowScreenshot: true, allowCaptureTab: true })
     panel.setState('open')
-    expect(labels()).toEqual(['Add screenshot', 'Capture tab'])
+    expect(attachLabels()).toEqual(['Screenshot'])
+    expect(optionLabels()).toEqual([])
+    openOptions('Screenshot options')
+    expect(optionLabels()).toEqual(['This viewport', 'Capture tab'])
   })
 
   it('hides Capture tab where the browser or the site does not allow it', () => {
     const panel = makePanel(false, { allowScreenshot: true, allowCaptureTab: false })
     panel.setState('open')
-    expect(labels()).toEqual(['Add screenshot'])
+    openOptions('Screenshot options')
+    // Absent, never a disabled control advertising a feature the site turned off.
+    expect(optionLabels()).toEqual(['This viewport'])
+    expect(shadow.querySelector('.pulse-pop__item[disabled]')).toBeNull()
   })
 
   it('routes the Capture tab click straight through, with nothing awaited first', () => {
     const panel = makePanel(false, { allowScreenshot: true, allowCaptureTab: true })
     panel.setState('open')
-    const tabBtn = Array.from(shadow.querySelectorAll('.pulse-add-screenshot')).find(
-      (b) => b.querySelector('span')?.textContent === 'Capture tab'
+    openOptions('Screenshot options')
+    const tabItem = Array.from(shadow.querySelectorAll('.pulse-pop__item')).find(
+      (b) => b.querySelector('.pulse-pop__name')?.textContent === 'Capture tab'
     ) as HTMLButtonElement
-    tabBtn.click()
+    tabItem.click()
     expect(config.onCaptureTab).toHaveBeenCalledTimes(1)
   })
 
-  it('shows a capture error and always shows the cross-origin notice', () => {
+  it('takes a viewport screenshot from the row untouched, and from the popover', () => {
+    const panel = makePanel(false, { allowScreenshot: true, allowCaptureTab: true })
+    panel.setState('open')
+    ;(shadow.querySelector('.pulse-attach__btn--shot') as HTMLButtonElement).click()
+    expect(config.onCaptureScreenshot).toHaveBeenCalledTimes(1)
+
+    openOptions('Screenshot options')
+    ;(shadow.querySelector('.pulse-pop__item') as HTMLButtonElement).click()
+    expect(config.onCaptureScreenshot).toHaveBeenCalledTimes(2)
+  })
+
+  it('carries the cross-origin notice inside the popover, where it is relevant', () => {
+    const panel = makePanel(false, { allowScreenshot: true })
+    panel.setState('open')
+    expect(shadow.textContent).not.toContain(CROSS_ORIGIN_NOTICE)
+    openOptions('Screenshot options')
+    expect(
+      Array.from(shadow.querySelectorAll('.pulse-pop__note')).map((n) => n.textContent)
+    ).toContain(CROSS_ORIGIN_NOTICE)
+  })
+
+  it('keeps a capture error in the panel, never behind a caret', () => {
     const panel = makePanel(false, { allowScreenshot: true })
     panel.setState('open')
     expect(shadow.querySelector('.pulse-capture-note--error')).toBeNull()
     panel.setCaptureError('Screenshot capture timed out')
-    const error = shadow.querySelector('.pulse-capture-note--error')
+    const error = shadow.querySelector('.pulse-attach .pulse-capture-note--error')
     expect(error?.textContent).toBe('Screenshot capture timed out')
-    expect(shadow.querySelectorAll('.pulse-capture-note').length).toBe(2)
+    expect(error?.getAttribute('role')).toBe('alert')
     panel.setCaptureError(null)
     expect(shadow.querySelector('.pulse-capture-note--error')).toBeNull()
   })
@@ -187,7 +266,15 @@ describe('capture controls', () => {
     expect(shadow.querySelector('.pulse-capture-note--error')?.textContent).toBe(ENGINE_LOAD_ERROR)
     // The panel is back in its resting state, not spinning, and the fallback
     // that needs no engine is still one click away.
-    expect(labels()).toContain('Capture tab')
+    openOptions('Screenshot options')
+    expect(optionLabels()).toContain('Capture tab')
+  })
+
+  it('hides the screenshot control and its caret when the site turns screenshots off', () => {
+    const panel = makePanel(false, { allowScreenshot: false })
+    panel.setState('open')
+    expect(shadow.querySelector('.pulse-attach__btn--shot')).toBeNull()
+    expect(shadow.querySelector('.pulse-caret[aria-label="Screenshot options"]')).toBeNull()
   })
 })
 
@@ -220,7 +307,7 @@ describe('video recording controls (PULSE-338)', () => {
     shadow = document.getElementById('host2')!.attachShadow({ mode: 'open' })
     const on = makePanel(false, { allowVideo: true })
     on.setState('open')
-    expect(recordBtn()?.querySelector('span')?.textContent).toBe('Record video')
+    expect(recordBtn()?.querySelector('span')?.textContent).toBe('Record')
   })
 
   it('routes the record click straight through, with nothing awaited first', () => {
@@ -233,7 +320,9 @@ describe('video recording controls (PULSE-338)', () => {
   it('points at the in-page control bar and says only Discard drops a recording', () => {
     const panel = makePanel(false, { allowVideo: true })
     panel.setState('open')
-    const notes = Array.from(shadow.querySelectorAll('.pulse-capture-note')).map((n) => n.textContent)
+    // PULSE-402: the copy moved under the caret it describes.
+    ;(shadow.querySelector('.pulse-caret[aria-label="Recording options"]') as HTMLButtonElement).click()
+    const notes = Array.from(shadow.querySelectorAll('.pulse-pop__note')).map((n) => n.textContent)
     expect(notes.some((n) => n?.includes('control bar stays on the page'))).toBe(true)
     // Esc stops and KEEPS now (PULSE-399); the copy must not send anyone to
     // the browser's Stop sharing bar as if it were the only way out.
@@ -257,7 +346,7 @@ describe('video recording controls (PULSE-338)', () => {
     expect(shadow.textContent).not.toContain(BAR_IN_RECORDING_NOTICE)
   })
 
-  it('swaps the button for a <video controls> preview with duration and size', () => {
+  it('adds a <video controls> preview with duration and size, leaving the row alone', () => {
     stubObjectUrls()
     const panel = makePanel(false, { allowVideo: true })
     panel.setState('open')
@@ -269,7 +358,8 @@ describe('video recording controls (PULSE-338)', () => {
     expect(video.controls).toBe(true)
     expect(video.src).toBe('blob:pulse/0')
     expect(shadow.querySelector('.pulse-video__meta')?.textContent).toBe('1:23 · 2 KB')
-    expect(recordBtn()).toBeNull()
+    // PULSE-402/399: attaching evidence must not move the attach row.
+    expect(recordBtn()).not.toBeNull()
     expect(panel.getVideo()?.size).toBe(2048)
   })
 
@@ -382,16 +472,17 @@ describe('voice-over opt-in (PULSE-400)', () => {
     expect(config.onToggleVoiceOver).not.toHaveBeenCalled()
   })
 
-  it('sits above the record control, so the choice comes before the picker', () => {
+  it('sits with the record control, so the choice comes before the picker', () => {
     const panel = makePanel(false, { allowVideo: true, allowVoiceOver: true })
     panel.setState('open')
 
     const body = shadow.querySelector('.pulse-body')!
     const order = Array.from(body.children).map((c) => c.className)
     const voiceOver = order.findIndex((c) => c.includes('pulse-voiceover'))
-    const record = order.findIndex((c) => c.includes('pulse-screenshot-options'))
+    const record = order.findIndex((c) => c.includes('pulse-attach'))
     expect(voiceOver).toBeGreaterThanOrEqual(0)
-    expect(voiceOver).toBeLessThan(record)
+    expect(record).toBeGreaterThanOrEqual(0)
+    expect(record).toBeLessThan(voiceOver)
   })
 
   it('routes the click straight through — getUserMedia needs that activation', () => {

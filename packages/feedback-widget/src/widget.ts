@@ -481,6 +481,10 @@ export class Widget {
     // Dropping a recording is now a deliberate click on Discard in the bar.
     if (this.state === 'recording') {
       void this.collectRecording()
+      // An attach-row popover is the innermost thing open, so Escape backs out
+      // of the options and stops there — it must never close the panel too.
+    } else if (this.panel.closePopovers(true)) {
+      return
     } else if (this.popup?.isOpen) {
       this.handlePopupCancel()
     } else if (this.state === 'picking' && this.multi.size > 0) {
