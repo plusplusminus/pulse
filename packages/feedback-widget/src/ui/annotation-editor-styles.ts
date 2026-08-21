@@ -245,6 +245,68 @@ export function editorStyles(theme: 'light' | 'dark'): string {
       height: 100%;
     }
 
+    .pulse-annotation__size-group[hidden],
+    .pulse-annotation__stroke-group[hidden] {
+      display: none;
+    }
+
+    .pulse-annotation__size {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border: none;
+      border-radius: 6px;
+      background: transparent;
+      color: ${c.muted};
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-weight: 600;
+      line-height: 1;
+      cursor: pointer;
+      outline: none;
+      transition: background 0.12s ease, color 0.12s ease;
+    }
+
+    .pulse-annotation__size:hover {
+      background: ${c.inputBg};
+      color: ${c.text};
+    }
+
+    .pulse-annotation__size--active {
+      background: ${c.primary}1a;
+      color: ${c.primary};
+    }
+
+    /*
+     * The label being typed. Every typographic property is declared: the widget
+     * runs inside host pages whose body font varies wildly, and an inherited
+     * face here would disagree with the canvas, which sets ctx.font itself.
+     */
+    .pulse-annotation__text-input {
+      position: absolute;
+      z-index: 2;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      outline: 1px dashed ${c.primary};
+      outline-offset: 2px;
+      background: transparent;
+      resize: none;
+      overflow: hidden;
+      white-space: pre;
+      font-weight: 400;
+      font-style: normal;
+      letter-spacing: normal;
+      text-transform: none;
+      caret-color: ${c.primary};
+      min-width: 8ch;
+    }
+
+    .pulse-annotation__text-input::placeholder {
+      color: ${c.muted};
+    }
+
     .pulse-annotation__layer {
       position: absolute;
       inset: 0;

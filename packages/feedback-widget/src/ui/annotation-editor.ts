@@ -22,6 +22,8 @@ import type {
 import { ANNOTATION_COLORS } from '../types'
 import { icon } from './icon'
 import {
+  ANNOTATION_FONT_STACK,
+  LINE_HEIGHT,
   annotationBounds,
   hitTest,
   paintAnnotations,
@@ -45,8 +47,18 @@ const MIN_ARROW = 8
 const MIN_PEN_STEP = 2
 /** Logical stroke widths, scaled to image pixels when a mark is made. */
 export const STROKE_WIDTHS = [2, 4, 7] as const
-/** Tools that draw with the current colour and stroke; the rest have a fixed look. */
-const STYLED_TOOLS: ReadonlySet<EditorTool> = new Set(['arrow', 'rect', 'ellipse', 'pen'])
+/** Logical font sizes, scaled to image pixels when a label is placed. */
+export const TEXT_SIZES = [16, 24, 36] as const
+/** Tools that draw with the current colour; the rest have a fixed appearance. */
+const COLORED_TOOLS: ReadonlySet<EditorTool> = new Set([
+  'arrow',
+  'rect',
+  'ellipse',
+  'pen',
+  'text',
+])
+/** Tools that draw with the current stroke width. */
+const STROKE_TOOLS: ReadonlySet<EditorTool> = new Set(['arrow', 'rect', 'ellipse', 'pen'])
 
 export type EditorTool = 'select' | AnnotationKind
 
@@ -102,6 +114,13 @@ export class AnnotationEditor {
   private color: AnnotationColor = ANNOTATION_COLORS[0]
   /** Logical stroke width; multiplied by the capture's scale when a mark is made. */
   private stroke: number = STROKE_WIDTHS[1]
+  private textSize: number = TEXT_SIZES[1]
+  /** The live in-shadow input, while a label is being typed. */
+  private textInput: HTMLTextAreaElement | null = null
+  /** Index being re-edited, or null when the input is placing a new label. */
+  private editingIndex: number | null = null
+  /** Where a NEW label will land; ignored when re-editing an existing one. */
+  private pendingTextOrigin: Point = { x: 0, y: 0 }
   private selected: number | null = null
   private drag: Drag | null = null
   /** image px per CSS px — a 2x capture draws 2x strokes so marks stay legible. */
@@ -111,6 +130,7 @@ export class AnnotationEditor {
   private onPointerMove = (e: PointerEvent) => this.extendDrag(e)
   private onPointerUp = (e: PointerEvent) => this.endDrag(e)
   private onKeyDown = (e: KeyboardEvent) => this.handleKey(e)
+  private onDoubleClick = (e: MouseEvent) => this.editTextUnder(e)
 
   constructor(
     private shadowRoot: ShadowRoot,
@@ -158,6 +178,7 @@ export class AnnotationEditor {
     this.canvas.addEventListener('pointermove', this.onPointerMove)
     this.canvas.addEventListener('pointerup', this.onPointerUp)
     this.canvas.addEventListener('pointercancel', this.onPointerUp)
+    this.canvas.addEventListener('dblclick', this.onDoubleClick)
     wrap.appendChild(this.canvas)
 
     this.container.appendChild(wrap)
@@ -192,7 +213,11 @@ export class AnnotationEditor {
       this.canvas.removeEventListener('pointermove', this.onPointerMove)
       this.canvas.removeEventListener('pointerup', this.onPointerUp)
       this.canvas.removeEventListener('pointercancel', this.onPointerUp)
+      this.canvas.removeEventListener('dblclick', this.onDoubleClick)
     }
+    this.textInput?.remove()
+    this.textInput = null
+    this.editingIndex = null
     window.removeEventListener('keydown', this.onKeyDown, true)
     this.container?.remove()
     this.styleEl?.remove()
@@ -280,6 +305,19 @@ export class AnnotationEditor {
     const key = e.key.toLowerCase()
     const mod = e.metaKey || e.ctrlKey
 
+    // While a label is being typed the textarea owns its keys: undo, delete and
+    // backspace all mean something inside a text field. Only the two ways of
+    // finishing are intercepted, and both keep what was typed — losing a
+    // half-written label to a stray Escape is the worse failure.
+    if (this.textInput) {
+      if (key === 'escape' || (mod && key === 'enter')) {
+        e.preventDefault()
+        e.stopPropagation()
+        this.commitText()
+      }
+      return
+    }
+
     if (mod && key === 'z') {
       e.preventDefault()
       e.stopPropagation()
@@ -344,6 +382,7 @@ export class AnnotationEditor {
       { id: 'rect', label: 'Rectangle', icon: EDITOR_ICONS.rect },
       { id: 'ellipse', label: 'Ellipse', icon: EDITOR_ICONS.ellipse },
       { id: 'pen', label: 'Pen', icon: EDITOR_ICONS.pen },
+      { id: 'text', label: 'Text', icon: EDITOR_ICONS.text },
       { id: 'highlight', label: 'Highlight', icon: EDITOR_ICONS.highlight },
       { id: 'hide', label: 'Hide', icon: EDITOR_ICONS.hide },
     ]
@@ -373,6 +412,8 @@ export class AnnotationEditor {
       group.appendChild(btn)
     }
 
+    const strokes = document.createElement('div')
+    strokes.className = 'pulse-annotation__group pulse-annotation__stroke-group'
     for (const width of STROKE_WIDTHS) {
       const btn = document.createElement('button')
       btn.className = 'pulse-annotation__stroke'
@@ -386,16 +427,36 @@ export class AnnotationEditor {
         this.applyStyleToSelection()
         this.syncToolbarState()
       })
-      group.appendChild(btn)
+      strokes.appendChild(btn)
     }
+    group.appendChild(strokes)
+
+    const sizes = document.createElement('div')
+    sizes.className = 'pulse-annotation__group pulse-annotation__size-group'
+    for (const size of TEXT_SIZES) {
+      const btn = document.createElement('button')
+      btn.className = 'pulse-annotation__size'
+      btn.type = 'button'
+      btn.dataset.size = String(size)
+      btn.title = `Text size ${size}`
+      btn.setAttribute('aria-label', `Text size ${size}`)
+      btn.textContent = 'A'
+      btn.style.fontSize = `${10 + (size - TEXT_SIZES[0]) * 0.28}px`
+      btn.addEventListener('click', () => {
+        this.textSize = size
+        this.applyStyleToSelection()
+        this.syncToolbarState()
+      })
+      sizes.appendChild(btn)
+    }
+    group.appendChild(sizes)
 
     return group
   }
 
-  private selectionIsStyled(): boolean {
-    if (this.selected === null) return false
-    const mark = this.annotations[this.selected]
-    return !!mark && 'strokeWidth' in mark
+  private selectionKind(): ScreenshotAnnotation['kind'] | null {
+    if (this.selected === null) return null
+    return this.annotations[this.selected]?.kind ?? null
   }
 
   /**
@@ -406,13 +467,12 @@ export class AnnotationEditor {
   private applyStyleToSelection(): void {
     if (this.selected === null) return
     const mark = this.annotations[this.selected]
-    if (!mark || !('strokeWidth' in mark)) return
+    if (!mark || !('color' in mark)) return
     this.pushHistory()
-    this.annotations[this.selected] = {
-      ...mark,
-      color: this.color,
-      strokeWidth: this.strokeInImagePixels(),
-    }
+    this.annotations[this.selected] =
+      mark.kind === 'text'
+        ? { ...mark, color: this.color, fontSize: this.textSizeInImagePixels() }
+        : { ...mark, color: this.color, strokeWidth: this.strokeInImagePixels() }
     this.redraw()
   }
 
@@ -488,13 +548,22 @@ export class AnnotationEditor {
       btn.classList.toggle('pulse-annotation__stroke--active', active)
       btn.setAttribute('aria-pressed', String(active))
     }
-    const styleGroup = toolbar.querySelector<HTMLElement>('.pulse-annotation__style-group')
-    // Visible when the active tool draws with a style, and also whenever a
-    // styled mark is selected — otherwise selecting something would be the one
-    // state in which its colour cannot be changed.
-    if (styleGroup) {
-      styleGroup.hidden = !STYLED_TOOLS.has(this.tool) && !this.selectionIsStyled()
+    for (const btn of toolbar.querySelectorAll<HTMLButtonElement>('[data-size]')) {
+      const active = btn.dataset.size === String(this.textSize)
+      btn.classList.toggle('pulse-annotation__size--active', active)
+      btn.setAttribute('aria-pressed', String(active))
     }
+
+    // Each control is visible when the active tool uses it, and also whenever a
+    // mark that uses it is selected — otherwise selecting a mark would be the
+    // one state in which its own style could not be changed.
+    const kind = this.selectionKind()
+    const coloured = COLORED_TOOLS.has(this.tool) || (kind !== null && kind !== 'highlight' && kind !== 'hide')
+    const stroked = STROKE_TOOLS.has(this.tool) || (kind !== null && kind !== 'text' && coloured)
+    const sized = this.tool === 'text' || kind === 'text'
+    setHidden(toolbar, '.pulse-annotation__style-group', !coloured)
+    setHidden(toolbar, '.pulse-annotation__stroke-group', !stroked)
+    setHidden(toolbar, '.pulse-annotation__size-group', !sized)
 
     setDisabled(toolbar, 'undo', this.undoStack.length === 0)
     setDisabled(toolbar, 'redo', this.redoStack.length === 0)
@@ -528,9 +597,21 @@ export class AnnotationEditor {
   }
 
   private beginDrag(e: PointerEvent): void {
-    this.canvas?.setPointerCapture(e.pointerId)
     this.measureScale()
     const point = this.toImagePoint(e)
+
+    // A click anywhere commits whatever is being typed, so a label is never
+    // lost by clicking away from it. With the text tool still active the click
+    // then opens the next label, so several can be placed without going back to
+    // the toolbar between them.
+    if (this.textInput) this.commitText()
+
+    if (this.tool === 'text') {
+      this.openTextInput(point, null)
+      return
+    }
+
+    this.canvas?.setPointerCapture(e.pointerId)
 
     if (this.tool === 'select') {
       const index = hitTest(this.annotations, point, HIT_TOLERANCE * this.scale, this.ctx ?? undefined)
@@ -592,6 +673,119 @@ export class AnnotationEditor {
       this.annotations.push(mark)
     }
     this.afterMutation()
+  }
+
+  protected textSizeInImagePixels(): number {
+    return Math.max(1, Math.round(this.textSize * this.scale))
+  }
+
+  /**
+   * The label editor: a textarea in the shadow root, positioned over the canvas
+   * and sized so the on-screen type matches what will be baked into the export.
+   *
+   * Every typographic property is set explicitly. A host page's `body {
+   * font-family }` must never reach it — the widget runs on sites whose type
+   * choices vary wildly, and an inherited face would make the label disagree
+   * with the canvas, which sets `ctx.font` itself.
+   */
+  private openTextInput(at: Point, index: number | null): void {
+    const wrap = this.container?.querySelector<HTMLElement>('.pulse-annotation__canvas-wrap')
+    const canvas = this.canvas
+    if (!wrap || !canvas) return
+
+    const existing = index === null ? null : this.annotations[index]
+    const mark = existing && existing.kind === 'text' ? existing : null
+    if (mark) {
+      this.color = mark.color
+      // Re-editing keeps the label's own size rather than snapping to the toolbar.
+      this.textSize = Math.max(1, Math.round(mark.fontSize / this.scale))
+    }
+
+    const fontSize = mark ? mark.fontSize : this.textSizeInImagePixels()
+    const origin = mark ? { x: mark.x, y: mark.y } : at
+
+    this.pendingTextOrigin = origin
+
+    const input = document.createElement('textarea')
+    input.className = 'pulse-annotation__text-input'
+    input.rows = 1
+    input.spellcheck = false
+    input.value = mark?.text ?? ''
+    input.setAttribute('aria-label', 'Annotation label')
+    // CSS pixels, from image pixels: the canvas is the same box, scaled down.
+    input.style.left = `${origin.x / this.scale}px`
+    input.style.top = `${origin.y / this.scale}px`
+    input.style.fontFamily = ANNOTATION_FONT_STACK
+    input.style.fontSize = `${fontSize / this.scale}px`
+    input.style.lineHeight = String(LINE_HEIGHT)
+    input.style.color = mark ? mark.color : this.color
+    input.addEventListener('input', () => autoGrow(input))
+
+    wrap.appendChild(input)
+    this.textInput = input
+    this.editingIndex = index
+    autoGrow(input)
+    input.focus()
+    // Placing the caret at the end reads better than selecting the whole label.
+    input.setSelectionRange(input.value.length, input.value.length)
+
+    this.selected = null
+    this.redraw()
+    this.syncToolbarState()
+  }
+
+  /**
+   * Writes the typed label back. An empty label is not a mark: placing one and
+   * typing nothing leaves nothing behind, and emptying an existing one deletes it.
+   */
+  private commitText(): void {
+    const input = this.textInput
+    if (!input) return
+    const index = this.editingIndex
+    const text = input.value.replace(/\s+$/, '')
+
+    input.remove()
+    this.textInput = null
+    this.editingIndex = null
+
+    const previous = index === null ? null : this.annotations[index]
+    const wasText = previous && previous.kind === 'text' ? previous : null
+
+    if (text.length === 0) {
+      if (index !== null && wasText) {
+        this.pushHistory()
+        this.annotations.splice(index, 1)
+      }
+      this.afterMutation()
+      return
+    }
+    if (wasText && wasText.text === text) {
+      this.afterMutation()
+      return
+    }
+
+    this.pushHistory()
+    const placed: ScreenshotAnnotation = {
+      kind: 'text',
+      x: Math.round(wasText ? wasText.x : this.pendingTextOrigin.x),
+      y: Math.round(wasText ? wasText.y : this.pendingTextOrigin.y),
+      text,
+      color: this.color,
+      fontSize: wasText ? wasText.fontSize : this.textSizeInImagePixels(),
+    }
+    if (index !== null && wasText) this.annotations[index] = placed
+    else this.annotations.push(placed)
+    this.afterMutation()
+  }
+
+  /** Re-opens the label under a double-click, so a typo is fixable in place. */
+  private editTextUnder(e: MouseEvent): void {
+    if (this.textInput) return
+    this.measureScale()
+    const point = this.toImagePoint(e as unknown as PointerEvent)
+    const index = hitTest(this.annotations, point, HIT_TOLERANCE * this.scale, this.ctx ?? undefined)
+    if (index === null || this.annotations[index].kind !== 'text') return
+    this.openTextInput(point, index)
   }
 
   /** Samples the pointer path, dropping steps too small for anyone to see. */
@@ -678,8 +872,13 @@ export class AnnotationEditor {
 
     const drag = this.drag
     const pending = drag && drag.mode === 'draw' ? this.previewMark(drag) : null
+    // The label being typed lives in the textarea; painting it too would double it.
+    const committed =
+      this.editingIndex === null
+        ? this.annotations
+        : this.annotations.filter((_, i) => i !== this.editingIndex)
 
-    paintAnnotations(ctx, pending ? [...this.annotations, pending] : this.annotations, canvas)
+    paintAnnotations(ctx, pending ? [...committed, pending] : committed, canvas)
     this.paintChrome(ctx)
   }
 
@@ -706,6 +905,8 @@ export class AnnotationEditor {
   }
 
   private async save(): Promise<void> {
+    // Saving with a label still being typed must keep it.
+    this.commitText()
     const state = this.getState()
     const region = this.exportRegion()
     // What the admin renders must match the exported PNG, so persisted marks are
@@ -769,6 +970,7 @@ export const EDITOR_ICONS = {
   rect: 'M2.5 4h11v8h-11z',
   ellipse: 'M8 3.2c3 0 5.3 2.1 5.3 4.8S11 12.8 8 12.8 2.7 10.7 2.7 8 5 3.2 8 3.2Z',
   pen: 'M11.5 2.5a1.5 1.5 0 0 1 2 2L6 12l-3 1 1-3 7.5-7.5Z',
+  text: 'M3 4V3h10v1M8 3v10M6 13h4',
   highlight: ['M2 2.5h12v11H2z', 'M5.5 6h5v4h-5z'],
   hide: 'M2.5 4a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1V4Z',
   undo: 'M6 4.5L3 7.5l3 3M3 7.5h6.5a3.5 3.5 0 0 1 0 7H7',
@@ -776,6 +978,15 @@ export const EDITOR_ICONS = {
   trash: 'M3 4.5h10M6.5 4.5V3h3v1.5M5 4.5l.5 8h5l.5-8',
   clear: 'M3.5 3.5l9 9M12.5 3.5l-9 9',
 } as const
+
+/** Keeps the textarea exactly as tall as its content, so it never scrolls. */
+function autoGrow(input: HTMLTextAreaElement): void {
+  input.style.height = 'auto'
+  input.style.height = `${input.scrollHeight}px`
+  // Widen with the longest line rather than wrapping at an arbitrary width.
+  const longest = input.value.split('\n').reduce((n, l) => Math.max(n, l.length), 0)
+  input.style.width = `${Math.max(longest + 1, 8)}ch`
+}
 
 /** A filled circle sized to the stroke it selects, so the buttons read at a glance. */
 function dot(width: number): SVGSVGElement {
@@ -794,6 +1005,11 @@ function dot(width: number): SVGSVGElement {
 
 function cloneAnnotation<T extends ScreenshotAnnotation>(a: T): T {
   return a.kind === 'pen' ? { ...a, points: [...a.points] } : { ...a }
+}
+
+function setHidden(toolbar: HTMLElement, selector: string, hidden: boolean): void {
+  const el = toolbar.querySelector<HTMLElement>(selector)
+  if (el) el.hidden = hidden
 }
 
 function setDisabled(toolbar: HTMLElement, action: string, disabled: boolean): void {

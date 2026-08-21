@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   AnnotationEditor,
   STROKE_WIDTHS,
+  TEXT_SIZES,
   createAnnotationEditor,
   normaliseRect,
 } from './annotation-editor'
@@ -609,5 +610,187 @@ describe('shape tools', () => {
     tool(shadow, 'select').click()
     drag(layer, [150, 150], [160, 170])
     expect(marks(editor)[0]).toMatchObject({ x1: 110, y1: 120, x2: 210, y2: 220 })
+  })
+})
+
+describe('text tool', () => {
+  function typeInto(shadow: ShadowRoot, value: string): HTMLTextAreaElement {
+    const input = shadow.querySelector<HTMLTextAreaElement>('.pulse-annotation__text-input')
+    if (!input) throw new Error('no text input is open')
+    input.value = value
+    input.dispatchEvent(new Event('input'))
+    return input
+  }
+
+  function openInput(shadow: ShadowRoot): HTMLTextAreaElement | null {
+    return shadow.querySelector<HTMLTextAreaElement>('.pulse-annotation__text-input')
+  }
+
+  it('opens an input in the shadow root where the reporter clicked', async () => {
+    const { shadow, layer } = await mountEditor()
+    tool(shadow, 'text').click()
+    pointer(layer, 'pointerdown', 120, 240)
+    const input = openInput(shadow)
+    expect(input).not.toBeNull()
+    expect(input?.style.left).toBe('120px')
+    expect(input?.style.top).toBe('240px')
+  })
+
+  it('owns its font stack rather than inheriting the host page', async () => {
+    const { shadow, layer } = await mountEditor()
+    tool(shadow, 'text').click()
+    pointer(layer, 'pointerdown', 10, 10)
+    const input = openInput(shadow)
+    expect(input?.style.fontFamily).toContain('-apple-system')
+    expect(input?.style.fontFamily).not.toBe('')
+  })
+
+  it('is unaffected by a hostile host-page font, because it sets its own', async () => {
+    document.body.style.fontFamily = 'Comic Sans MS'
+    const { shadow, layer } = await mountEditor()
+    tool(shadow, 'text').click()
+    pointer(layer, 'pointerdown', 10, 10)
+    const input = openInput(shadow)
+    expect(input?.style.fontFamily).toContain('-apple-system')
+    expect(input?.style.fontFamily).not.toContain('Comic Sans')
+    document.body.style.fontFamily = ''
+  })
+
+  it('commits the typed label on Escape and keeps what was typed', async () => {
+    const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'text').click()
+    pointer(layer, 'pointerdown', 40, 50)
+    typeInto(shadow, 'this is broken')
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+
+    expect(openInput(shadow)).toBeNull()
+    expect(marks(editor)).toEqual([
+      {
+        kind: 'text',
+        x: 40,
+        y: 50,
+        text: 'this is broken',
+        color: '#ef4444',
+        fontSize: TEXT_SIZES[1],
+      },
+    ])
+  })
+
+  it('commits on Cmd+Enter as well', async () => {
+    const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'text').click()
+    pointer(layer, 'pointerdown', 10, 10)
+    typeInto(shadow, 'label')
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true }))
+    expect(marks(editor)).toHaveLength(1)
+  })
+
+  it('commits when the reporter clicks away', async () => {
+    const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'text').click()
+    pointer(layer, 'pointerdown', 10, 10)
+    typeInto(shadow, 'first')
+    pointer(layer, 'pointerdown', 300, 300)
+    expect(marks(editor)).toHaveLength(1)
+    expect(openInput(shadow)).not.toBeNull()
+  })
+
+  it('leaves nothing behind when the reporter types nothing', async () => {
+    const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'text').click()
+    pointer(layer, 'pointerdown', 10, 10)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(marks(editor)).toEqual([])
+  })
+
+  it('lets the textarea keep its own keys while typing', async () => {
+    const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'highlight').click()
+    drag(layer, [0, 0], [50, 50])
+    tool(shadow, 'text').click()
+    pointer(layer, 'pointerdown', 200, 200)
+    // Undo and delete belong to the text field while it is open.
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true }))
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace' }))
+    expect(marks(editor)).toHaveLength(1)
+  })
+
+  it('reopens a label on double-click and edits it in place', async () => {
+    const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'text').click()
+    pointer(layer, 'pointerdown', 60, 60)
+    typeInto(shadow, 'tpyo')
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+
+    tool(shadow, 'select').click()
+    layer.dispatchEvent(new MouseEvent('dblclick', { clientX: 65, clientY: 65, bubbles: true }))
+    const input = openInput(shadow)
+    expect(input?.value).toBe('tpyo')
+
+    typeInto(shadow, 'typo')
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(marks(editor)).toHaveLength(1)
+    expect(marks(editor)[0]).toMatchObject({ kind: 'text', text: 'typo', x: 60, y: 60 })
+  })
+
+  it('deletes a label that is emptied while being re-edited', async () => {
+    const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'text').click()
+    pointer(layer, 'pointerdown', 60, 60)
+    typeInto(shadow, 'gone')
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+
+    tool(shadow, 'select').click()
+    layer.dispatchEvent(new MouseEvent('dblclick', { clientX: 65, clientY: 65, bubbles: true }))
+    typeInto(shadow, '')
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(marks(editor)).toEqual([])
+  })
+
+  it('places a label at the chosen size and colour', async () => {
+    const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'text').click()
+    shadow.querySelector<HTMLButtonElement>(`[data-size="${TEXT_SIZES[2]}"]`)?.click()
+    shadow.querySelector<HTMLButtonElement>('[data-color="#3b82f6"]')?.click()
+    pointer(layer, 'pointerdown', 10, 10)
+    typeInto(shadow, 'big')
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(marks(editor)[0]).toMatchObject({ color: '#3b82f6', fontSize: TEXT_SIZES[2] })
+  })
+
+  it('offers sizes for text and stroke widths for shapes, never both', async () => {
+    const { shadow } = await mountEditor()
+    const strokes = shadow.querySelector<HTMLElement>('.pulse-annotation__stroke-group')
+    const sizes = shadow.querySelector<HTMLElement>('.pulse-annotation__size-group')
+    expect(strokes?.hidden).toBe(false)
+    expect(sizes?.hidden).toBe(true)
+    tool(shadow, 'text').click()
+    expect(strokes?.hidden).toBe(true)
+    expect(sizes?.hidden).toBe(false)
+  })
+
+  it('undoes a placed label', async () => {
+    const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'text').click()
+    pointer(layer, 'pointerdown', 10, 10)
+    typeInto(shadow, 'oops')
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(marks(editor)).toHaveLength(1)
+    action(shadow, 'undo').click()
+    expect(marks(editor)).toHaveLength(0)
+  })
+
+  it('keeps a label that was still being typed when Save was pressed', async () => {
+    const { shadow, layer, saved } = await mountEditor()
+    tool(shadow, 'text').click()
+    pointer(layer, 'pointerdown', 10, 10)
+    typeInto(shadow, 'unfinished')
+    const save = Array.from(
+      shadow.querySelectorAll<HTMLButtonElement>('.pulse-annotation__action-btn')
+    ).find((b) => b.textContent === 'Save')
+    save?.click()
+    await vi.waitFor(() => expect(saved.blob).not.toBeNull())
+    expect(saved.annotations).toHaveLength(1)
+    expect(saved.annotations[0]).toMatchObject({ kind: 'text', text: 'unfinished' })
   })
 })
