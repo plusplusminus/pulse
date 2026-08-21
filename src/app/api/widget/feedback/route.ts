@@ -319,12 +319,12 @@ export async function POST(request: Request) {
 
     return NextResponse.json(response, { status: 201, headers });
   } catch (error) {
+    // Public endpoint: the detail goes to the log, never to the caller. The
+    // reachable messages include Postgres error text, storage paths and Linear
+    // API errors carrying team IDs.
     console.error("POST /api/widget/feedback error:", error);
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Internal server error",
-      },
+      { error: "Internal server error" },
       { status: 500, headers }
     );
   }
