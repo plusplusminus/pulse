@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { AnnotationEditor, createAnnotationEditor, normaliseRect } from './annotation-editor'
+import {
+  AnnotationEditor,
+  STROKE_WIDTHS,
+  createAnnotationEditor,
+  normaliseRect,
+} from './annotation-editor'
 import type { AnnotationEditorState, ScreenshotAnnotation } from '../types'
 
 /**
@@ -197,8 +202,16 @@ describe('editor shell', () => {
     expect(css).toMatch(/font-family:\s*-apple-system/)
   })
 
-  it('starts on highlight, so the default drag behaves as it always has', async () => {
-    const { editor, layer } = await mountEditor()
+  it('opens on the arrow — the mark a bug report reaches for first', async () => {
+    const { editor, shadow, layer } = await mountEditor()
+    expect(tool(shadow, 'arrow').getAttribute('aria-pressed')).toBe('true')
+    drag(layer, [100, 100], [200, 180])
+    expect(marks(editor)[0].kind).toBe('arrow')
+  })
+
+  it('still draws highlights exactly as it did before the union', async () => {
+    const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'highlight').click()
     drag(layer, [100, 100], [200, 180])
     expect(marks(editor)).toEqual([{ kind: 'highlight', x: 100, y: 100, w: 100, h: 80 }])
   })
@@ -207,13 +220,14 @@ describe('editor shell', () => {
     const { editor, shadow, layer } = await mountEditor()
     tool(shadow, 'hide').click()
     expect(tool(shadow, 'hide').getAttribute('aria-pressed')).toBe('true')
-    expect(tool(shadow, 'highlight').getAttribute('aria-pressed')).toBe('false')
+    expect(tool(shadow, 'arrow').getAttribute('aria-pressed')).toBe('false')
     drag(layer, [10, 10], [60, 50])
     expect(marks(editor)[0].kind).toBe('hide')
   })
 
   it('discards a stray click that never became a rect', async () => {
-    const { editor, layer } = await mountEditor()
+    const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'highlight').click()
     drag(layer, [100, 100], [101, 101])
     expect(marks(editor)).toEqual([])
   })
@@ -226,7 +240,8 @@ describe('editor shell', () => {
 
   it('copies incoming marks rather than aliasing the array it was handed', async () => {
     const existing: ScreenshotAnnotation[] = [{ kind: 'hide', x: 1, y: 2, w: 3, h: 4 }]
-    const { editor, layer } = await mountEditor({ annotations: existing, crop: null })
+    const { editor, shadow, layer } = await mountEditor({ annotations: existing, crop: null })
+    tool(shadow, 'highlight').click()
     drag(layer, [10, 10], [90, 90])
     expect(existing).toHaveLength(1)
     expect(marks(editor)).toHaveLength(2)
@@ -236,6 +251,7 @@ describe('editor shell', () => {
 describe('undo and redo', () => {
   it('undoes and redoes by button', async () => {
     const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'highlight').click()
     drag(layer, [0, 0], [50, 50])
     drag(layer, [60, 60], [120, 120])
     expect(marks(editor)).toHaveLength(2)
@@ -252,7 +268,8 @@ describe('undo and redo', () => {
   })
 
   it('undoes and redoes by keyboard, with shift for redo', async () => {
-    const { editor, layer } = await mountEditor()
+    const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'highlight').click()
     drag(layer, [0, 0], [50, 50])
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true }))
@@ -265,7 +282,8 @@ describe('undo and redo', () => {
   })
 
   it('accepts ctrl+y as redo for Windows habits', async () => {
-    const { editor, layer } = await mountEditor()
+    const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'highlight').click()
     drag(layer, [0, 0], [50, 50])
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true }))
     expect(marks(editor)).toHaveLength(0)
@@ -275,6 +293,7 @@ describe('undo and redo', () => {
 
   it('drops the redo branch once a new mark is made', async () => {
     const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'highlight').click()
     drag(layer, [0, 0], [50, 50])
     action(shadow, 'undo').click()
     drag(layer, [60, 60], [120, 120])
@@ -290,6 +309,7 @@ describe('undo and redo', () => {
 
   it('bounds the stack so a long session cannot grow without limit', async () => {
     const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'highlight').click()
     for (let i = 0; i < 80; i++) drag(layer, [i, i], [i + 40, i + 40])
     expect(marks(editor)).toHaveLength(80)
 
@@ -300,6 +320,7 @@ describe('undo and redo', () => {
 
   it('starts empty for a new editor, so history never leaks across captures', async () => {
     const first = await mountEditor()
+    tool(first.shadow, 'highlight').click()
     drag(first.layer, [0, 0], [50, 50])
     first.editor.hide()
 
@@ -310,7 +331,8 @@ describe('undo and redo', () => {
   })
 
   it('stops listening for keys once closed', async () => {
-    const { editor, layer } = await mountEditor()
+    const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'highlight').click()
     drag(layer, [0, 0], [50, 50])
     const before = marks(editor).length
     editor.hide()
@@ -322,6 +344,7 @@ describe('undo and redo', () => {
 describe('selection', () => {
   it('selects the mark under the pointer and moves it by drag', async () => {
     const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'highlight').click()
     drag(layer, [100, 100], [200, 200])
     tool(shadow, 'select').click()
     drag(layer, [150, 150], [170, 190])
@@ -331,6 +354,7 @@ describe('selection', () => {
 
   it('deletes the selected mark by button and by key', async () => {
     const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'highlight').click()
     drag(layer, [100, 100], [200, 200])
     drag(layer, [300, 300], [400, 400])
 
@@ -348,6 +372,7 @@ describe('selection', () => {
 
   it('keeps delete disabled until something is selected', async () => {
     const { shadow, layer } = await mountEditor()
+    tool(shadow, 'highlight').click()
     drag(layer, [100, 100], [200, 200])
     expect(action(shadow, 'delete').disabled).toBe(true)
     tool(shadow, 'select').click()
@@ -358,6 +383,7 @@ describe('selection', () => {
 
   it('deselects on a click that hits nothing', async () => {
     const { shadow, layer } = await mountEditor()
+    tool(shadow, 'highlight').click()
     drag(layer, [100, 100], [200, 200])
     tool(shadow, 'select').click()
     pointer(layer, 'pointerdown', 150, 150)
@@ -369,6 +395,7 @@ describe('selection', () => {
 
   it('undoes a move back to where it started', async () => {
     const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'highlight').click()
     drag(layer, [100, 100], [200, 200])
     tool(shadow, 'select').click()
     drag(layer, [150, 150], [250, 250])
@@ -379,6 +406,7 @@ describe('selection', () => {
 
   it('clears everything at once and can be undone', async () => {
     const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'highlight').click()
     drag(layer, [0, 0], [50, 50])
     drag(layer, [60, 60], [120, 120])
     action(shadow, 'clear').click()
@@ -406,6 +434,7 @@ describe('export', () => {
 
   it('hands back both the exported marks and the round-trip state', async () => {
     const { shadow, layer, saved } = await mountEditor()
+    tool(shadow, 'highlight').click()
     drag(layer, [100, 100], [200, 200])
     const save = Array.from(
       shadow.querySelectorAll<HTMLButtonElement>('.pulse-annotation__action-btn')
@@ -434,5 +463,151 @@ describe('export', () => {
     const { cancelled } = await mountEditor()
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     expect(cancelled()).toBe(1)
+  })
+})
+
+describe('shape tools', () => {
+  function swatch(shadow: ShadowRoot, color: string): HTMLButtonElement {
+    const btn = shadow.querySelector<HTMLButtonElement>(`[data-color="${color}"]`)
+    if (!btn) throw new Error(`no swatch for ${color}`)
+    return btn
+  }
+
+  function strokeBtn(shadow: ShadowRoot, width: number): HTMLButtonElement {
+    const btn = shadow.querySelector<HTMLButtonElement>(`[data-stroke="${width}"]`)
+    if (!btn) throw new Error(`no stroke button for ${width}`)
+    return btn
+  }
+
+  it('draws an arrow from where the drag began to where it ended', async () => {
+    const { editor, layer } = await mountEditor()
+    drag(layer, [40, 60], [300, 220])
+    expect(marks(editor)[0]).toMatchObject({ kind: 'arrow', x1: 40, y1: 60, x2: 300, y2: 220 })
+  })
+
+  it('keeps arrow direction — a right-to-left drag is not normalised away', async () => {
+    const { editor, layer } = await mountEditor()
+    drag(layer, [300, 220], [40, 60])
+    expect(marks(editor)[0]).toMatchObject({ kind: 'arrow', x1: 300, y1: 220, x2: 40, y2: 60 })
+  })
+
+  it('discards an arrow that was really a click', async () => {
+    const { editor, layer } = await mountEditor()
+    drag(layer, [100, 100], [103, 101])
+    expect(marks(editor)).toEqual([])
+  })
+
+  it('draws an outlined rectangle', async () => {
+    const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'rect').click()
+    drag(layer, [10, 20], [110, 90])
+    expect(marks(editor)[0]).toMatchObject({ kind: 'rect', x: 10, y: 20, w: 100, h: 70 })
+  })
+
+  it('draws an ellipse inscribed in the dragged rect', async () => {
+    const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'ellipse').click()
+    drag(layer, [110, 90], [10, 20])
+    expect(marks(editor)[0]).toMatchObject({ kind: 'ellipse', x: 10, y: 20, w: 100, h: 70 })
+  })
+
+  it('records a freehand path as a flat point list', async () => {
+    const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'pen').click()
+    pointer(layer, 'pointerdown', 10, 10)
+    pointer(layer, 'pointermove', 40, 10)
+    pointer(layer, 'pointermove', 40, 60)
+    pointer(layer, 'pointerup', 90, 60)
+    const pen = marks(editor)[0]
+    expect(pen.kind).toBe('pen')
+    if (pen.kind !== 'pen') throw new Error('expected a pen mark')
+    expect(pen.points).toEqual([10, 10, 40, 10, 40, 60, 90, 60])
+  })
+
+  it('drops pen samples too close together to see', async () => {
+    const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'pen').click()
+    pointer(layer, 'pointerdown', 10, 10)
+    pointer(layer, 'pointermove', 10.5, 10)
+    pointer(layer, 'pointermove', 11, 10)
+    pointer(layer, 'pointerup', 60, 10)
+    const pen = marks(editor)[0]
+    if (pen.kind !== 'pen') throw new Error('expected a pen mark')
+    expect(pen.points).toEqual([10, 10, 60, 10])
+  })
+
+  it('discards a pen tap that never moved', async () => {
+    const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'pen').click()
+    pointer(layer, 'pointerdown', 10, 10)
+    pointer(layer, 'pointerup', 10, 10)
+    expect(marks(editor)).toEqual([])
+  })
+
+  it('applies the chosen colour and stroke to the next mark', async () => {
+    const { editor, shadow, layer } = await mountEditor()
+    swatch(shadow, '#3b82f6').click()
+    strokeBtn(shadow, STROKE_WIDTHS[2]).click()
+    drag(layer, [0, 0], [100, 100])
+    expect(marks(editor)[0]).toMatchObject({
+      color: '#3b82f6',
+      strokeWidth: STROKE_WIDTHS[2],
+    })
+  })
+
+  it('defaults to red, the colour a bug report reaches for', async () => {
+    const { editor, layer } = await mountEditor()
+    drag(layer, [0, 0], [100, 100])
+    expect(marks(editor)[0]).toMatchObject({ color: '#ef4444' })
+  })
+
+  it('restyles the selected mark rather than appearing to do nothing', async () => {
+    const { editor, shadow, layer } = await mountEditor()
+    drag(layer, [0, 0], [100, 100])
+    tool(shadow, 'select').click()
+    pointer(layer, 'pointerdown', 50, 50)
+    pointer(layer, 'pointerup', 50, 50)
+    // The palette stays reachable in select mode; otherwise selecting a mark
+    // would be the one state in which its colour cannot be changed.
+    const group = shadow.querySelector<HTMLElement>('.pulse-annotation__style-group')
+    expect(group?.hidden).toBe(false)
+    swatch(shadow, '#22c55e').click()
+    expect(marks(editor)[0]).toMatchObject({ color: '#22c55e' })
+  })
+
+  it('hides colour and stroke for the tools they cannot affect', async () => {
+    const { shadow } = await mountEditor()
+    const group = shadow.querySelector<HTMLElement>('.pulse-annotation__style-group')
+    expect(group?.hidden).toBe(false)
+    tool(shadow, 'highlight').click()
+    expect(group?.hidden).toBe(true)
+    tool(shadow, 'select').click()
+    expect(group?.hidden).toBe(true)
+    tool(shadow, 'hide').click()
+    expect(group?.hidden).toBe(true)
+    tool(shadow, 'pen').click()
+    expect(group?.hidden).toBe(false)
+  })
+
+  it('selects a thin arrow by its shaft, not just its bounding box', async () => {
+    const { editor, shadow, layer } = await mountEditor()
+    drag(layer, [0, 0], [200, 200])
+    tool(shadow, 'select').click()
+    pointer(layer, 'pointerdown', 190, 10)
+    pointer(layer, 'pointerup', 190, 10)
+    expect(action(shadow, 'delete').disabled).toBe(true)
+
+    pointer(layer, 'pointerdown', 100, 100)
+    pointer(layer, 'pointerup', 100, 100)
+    expect(action(shadow, 'delete').disabled).toBe(false)
+    expect(marks(editor)).toHaveLength(1)
+  })
+
+  it('moves an arrow by both ends together', async () => {
+    const { editor, shadow, layer } = await mountEditor()
+    drag(layer, [100, 100], [200, 200])
+    tool(shadow, 'select').click()
+    drag(layer, [150, 150], [160, 170])
+    expect(marks(editor)[0]).toMatchObject({ x1: 110, y1: 120, x2: 210, y2: 220 })
   })
 })

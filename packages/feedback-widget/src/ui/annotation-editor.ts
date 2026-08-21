@@ -36,6 +36,17 @@ const MIN_RECT = 4
 const MAX_HISTORY = 60
 /** Grab radius for selection, in image pixels before DPR scaling. */
 const HIT_TOLERANCE = 6
+/** A drag shorter than this was a click, not an arrow. */
+const MIN_ARROW = 8
+/**
+ * Pen samples closer together than this add nothing a viewer can see and cost
+ * two numbers each in the stored row, so they are dropped as they arrive.
+ */
+const MIN_PEN_STEP = 2
+/** Logical stroke widths, scaled to image pixels when a mark is made. */
+export const STROKE_WIDTHS = [2, 4, 7] as const
+/** Tools that draw with the current colour and stroke; the rest have a fixed look. */
+const STYLED_TOOLS: ReadonlySet<EditorTool> = new Set(['arrow', 'rect', 'ellipse', 'pen'])
 
 export type EditorTool = 'select' | AnnotationKind
 
@@ -59,7 +70,7 @@ interface Snapshot {
 }
 
 type Drag =
-  | { mode: 'draw'; start: Point; current: Point }
+  | { mode: 'draw'; start: Point; current: Point; points: number[] }
   | { mode: 'move'; start: Point; current: Point; index: number; origin: ScreenshotAnnotation }
 
 export function normaliseRect(a: Point, b: Point): AnnotationRect {
@@ -85,10 +96,12 @@ export class AnnotationEditor {
   private undoStack: Snapshot[] = []
   private redoStack: Snapshot[] = []
 
-  private tool: EditorTool = 'highlight'
+  // Arrow, not highlight: pointing at the broken thing is the single most
+  // common mark in a bug report, so it is what the editor opens on.
+  private tool: EditorTool = 'arrow'
   private color: AnnotationColor = ANNOTATION_COLORS[0]
   /** Logical stroke width; multiplied by the capture's scale when a mark is made. */
-  private stroke = 3
+  private stroke: number = STROKE_WIDTHS[1]
   private selected: number | null = null
   private drag: Drag | null = null
   /** image px per CSS px — a 2x capture draws 2x strokes so marks stay legible. */
@@ -315,6 +328,8 @@ export class AnnotationEditor {
     }
 
     toolbar.appendChild(divider())
+    toolbar.appendChild(this.renderStyleControls())
+    toolbar.appendChild(divider())
     toolbar.appendChild(this.renderHistoryControls())
     toolbar.appendChild(divider())
     toolbar.appendChild(this.renderActions())
@@ -325,9 +340,80 @@ export class AnnotationEditor {
   protected tools(): Array<{ id: EditorTool; label: string; icon: string | readonly string[] }> {
     return [
       { id: 'select', label: 'Select', icon: EDITOR_ICONS.select },
+      { id: 'arrow', label: 'Arrow', icon: EDITOR_ICONS.arrow },
+      { id: 'rect', label: 'Rectangle', icon: EDITOR_ICONS.rect },
+      { id: 'ellipse', label: 'Ellipse', icon: EDITOR_ICONS.ellipse },
+      { id: 'pen', label: 'Pen', icon: EDITOR_ICONS.pen },
       { id: 'highlight', label: 'Highlight', icon: EDITOR_ICONS.highlight },
       { id: 'hide', label: 'Hide', icon: EDITOR_ICONS.hide },
     ]
+  }
+
+  /**
+   * Colour and stroke, shown only for the tools they affect. Highlight and hide
+   * have a fixed appearance, so offering them a colour would be a lie.
+   */
+  private renderStyleControls(): HTMLElement {
+    const group = document.createElement('div')
+    group.className = 'pulse-annotation__group pulse-annotation__style-group'
+
+    for (const color of ANNOTATION_COLORS) {
+      const btn = document.createElement('button')
+      btn.className = 'pulse-annotation__swatch'
+      btn.type = 'button'
+      btn.dataset.color = color
+      btn.style.setProperty('--pulse-swatch', color)
+      btn.title = color
+      btn.setAttribute('aria-label', `Colour ${color}`)
+      btn.addEventListener('click', () => {
+        this.color = color
+        this.applyStyleToSelection()
+        this.syncToolbarState()
+      })
+      group.appendChild(btn)
+    }
+
+    for (const width of STROKE_WIDTHS) {
+      const btn = document.createElement('button')
+      btn.className = 'pulse-annotation__stroke'
+      btn.type = 'button'
+      btn.dataset.stroke = String(width)
+      btn.title = `Stroke ${width}`
+      btn.setAttribute('aria-label', `Stroke width ${width}`)
+      btn.appendChild(dot(width))
+      btn.addEventListener('click', () => {
+        this.stroke = width
+        this.applyStyleToSelection()
+        this.syncToolbarState()
+      })
+      group.appendChild(btn)
+    }
+
+    return group
+  }
+
+  private selectionIsStyled(): boolean {
+    if (this.selected === null) return false
+    const mark = this.annotations[this.selected]
+    return !!mark && 'strokeWidth' in mark
+  }
+
+  /**
+   * Restyling the selected mark is what people expect from a toolbar that also
+   * sets the next mark's style — otherwise picking a colour with something
+   * selected appears to do nothing.
+   */
+  private applyStyleToSelection(): void {
+    if (this.selected === null) return
+    const mark = this.annotations[this.selected]
+    if (!mark || !('strokeWidth' in mark)) return
+    this.pushHistory()
+    this.annotations[this.selected] = {
+      ...mark,
+      color: this.color,
+      strokeWidth: this.strokeInImagePixels(),
+    }
+    this.redraw()
   }
 
   private renderHistoryControls(): HTMLElement {
@@ -393,6 +479,23 @@ export class AnnotationEditor {
       btn.classList.toggle('pulse-annotation__tool-btn--active', active)
       btn.setAttribute('aria-pressed', String(active))
     }
+    for (const btn of toolbar.querySelectorAll<HTMLButtonElement>('[data-color]')) {
+      btn.classList.toggle('pulse-annotation__swatch--active', btn.dataset.color === this.color)
+      btn.setAttribute('aria-pressed', String(btn.dataset.color === this.color))
+    }
+    for (const btn of toolbar.querySelectorAll<HTMLButtonElement>('[data-stroke]')) {
+      const active = btn.dataset.stroke === String(this.stroke)
+      btn.classList.toggle('pulse-annotation__stroke--active', active)
+      btn.setAttribute('aria-pressed', String(active))
+    }
+    const styleGroup = toolbar.querySelector<HTMLElement>('.pulse-annotation__style-group')
+    // Visible when the active tool draws with a style, and also whenever a
+    // styled mark is selected — otherwise selecting something would be the one
+    // state in which its colour cannot be changed.
+    if (styleGroup) {
+      styleGroup.hidden = !STYLED_TOOLS.has(this.tool) && !this.selectionIsStyled()
+    }
+
     setDisabled(toolbar, 'undo', this.undoStack.length === 0)
     setDisabled(toolbar, 'redo', this.redoStack.length === 0)
     setDisabled(toolbar, 'delete', this.selected === null)
@@ -446,7 +549,7 @@ export class AnnotationEditor {
       return
     }
 
-    this.drag = { mode: 'draw', start: point, current: point }
+    this.drag = { mode: 'draw', start: point, current: point, points: [point.x, point.y] }
   }
 
   private extendDrag(e: PointerEvent): void {
@@ -460,6 +563,8 @@ export class AnnotationEditor {
         drag.current.x - drag.start.x,
         drag.current.y - drag.start.y
       )
+    } else if (this.tool === 'pen') {
+      this.appendPenPoint(drag)
     }
     this.redraw()
   }
@@ -480,7 +585,8 @@ export class AnnotationEditor {
       return
     }
 
-    const mark = this.buildMark(drag.start, drag.current)
+    if (drag.mode === 'draw' && this.tool === 'pen') this.appendPenPoint(drag)
+    const mark = this.buildMark(drag)
     if (mark) {
       this.pushHistory()
       this.annotations.push(mark)
@@ -488,19 +594,78 @@ export class AnnotationEditor {
     this.afterMutation()
   }
 
-  /** The mark a completed drag produces, or null when the drag was a stray click. */
-  protected buildMark(start: Point, end: Point): ScreenshotAnnotation | null {
-    if (this.tool === 'select') return null
-    const rect = normaliseRect(start, end)
-    if (rect.w < MIN_RECT || rect.h < MIN_RECT) return null
-    if (this.tool === 'highlight') return { kind: 'highlight', ...rect }
-    if (this.tool === 'hide') return { kind: 'hide', ...rect }
-    return null
+  /** Samples the pointer path, dropping steps too small for anyone to see. */
+  private appendPenPoint(drag: Extract<Drag, { mode: 'draw' }>): void {
+    const lastX = drag.points[drag.points.length - 2]
+    const lastY = drag.points[drag.points.length - 1]
+    const step = MIN_PEN_STEP * this.scale
+    if (Math.hypot(drag.current.x - lastX, drag.current.y - lastY) < step) return
+    drag.points.push(drag.current.x, drag.current.y)
   }
 
-  /** The mark shown mid-drag, before it is committed. */
-  protected previewMark(start: Point, end: Point): ScreenshotAnnotation | null {
-    return this.buildMark(start, end)
+  /** Stroke widths are stored in image pixels, so a 2x capture gets a 2x stroke. */
+  protected strokeInImagePixels(): number {
+    return Math.max(1, Math.round(this.stroke * this.scale))
+  }
+
+  /** The mark a completed drag produces, or null when the drag was a stray click. */
+  protected buildMark(drag: Extract<Drag, { mode: 'draw' }>): ScreenshotAnnotation | null {
+    const { start, current: end } = drag
+    const style = { color: this.color, strokeWidth: this.strokeInImagePixels() }
+
+    switch (this.tool) {
+      case 'select':
+      case 'text':
+        return null
+      case 'arrow': {
+        if (Math.hypot(end.x - start.x, end.y - start.y) < MIN_ARROW * this.scale) return null
+        return {
+          kind: 'arrow',
+          x1: Math.round(start.x),
+          y1: Math.round(start.y),
+          x2: Math.round(end.x),
+          y2: Math.round(end.y),
+          ...style,
+        }
+      }
+      case 'pen': {
+        if (drag.points.length < 4) return null
+        return { kind: 'pen', points: drag.points.map((v) => Math.round(v)), ...style }
+      }
+      default: {
+        const rect = normaliseRect(start, end)
+        if (rect.w < MIN_RECT || rect.h < MIN_RECT) return null
+        if (this.tool === 'highlight') return { kind: 'highlight', ...rect }
+        if (this.tool === 'hide') return { kind: 'hide', ...rect }
+        if (this.tool === 'rect') return { kind: 'rect', ...rect, ...style }
+        return { kind: 'ellipse', ...rect, ...style }
+      }
+    }
+  }
+
+  /**
+   * The mark shown mid-drag. Unlike the committed mark it is never rejected for
+   * being small — a preview that blinks out below a threshold reads as a bug.
+   */
+  protected previewMark(drag: Extract<Drag, { mode: 'draw' }>): ScreenshotAnnotation | null {
+    const built = this.buildMark(drag)
+    if (built) return built
+    const { start, current: end } = drag
+    const style = { color: this.color, strokeWidth: this.strokeInImagePixels() }
+    if (this.tool === 'arrow') {
+      return {
+        kind: 'arrow',
+        x1: Math.round(start.x),
+        y1: Math.round(start.y),
+        x2: Math.round(end.x),
+        y2: Math.round(end.y),
+        ...style,
+      }
+    }
+    if (this.tool === 'pen' && drag.points.length >= 2) {
+      return { kind: 'pen', points: drag.points.map((v) => Math.round(v)), ...style }
+    }
+    return null
   }
 
   // -- Rendering ----------------------------------------------------------
@@ -512,8 +677,7 @@ export class AnnotationEditor {
     ctx.clearRect(0, 0, canvas.width, canvas.height)
 
     const drag = this.drag
-    const pending =
-      drag && drag.mode === 'draw' ? this.previewMark(drag.start, drag.current) : null
+    const pending = drag && drag.mode === 'draw' ? this.previewMark(drag) : null
 
     paintAnnotations(ctx, pending ? [...this.annotations, pending] : this.annotations, canvas)
     this.paintChrome(ctx)
@@ -601,6 +765,10 @@ export function createAnnotationEditor(
 
 export const EDITOR_ICONS = {
   select: 'M3 2.5l9.5 5-4 1.2-1.2 4L3 2.5Z',
+  arrow: 'M3 13L12.5 3.5M12.5 3.5H7M12.5 3.5V9',
+  rect: 'M2.5 4h11v8h-11z',
+  ellipse: 'M8 3.2c3 0 5.3 2.1 5.3 4.8S11 12.8 8 12.8 2.7 10.7 2.7 8 5 3.2 8 3.2Z',
+  pen: 'M11.5 2.5a1.5 1.5 0 0 1 2 2L6 12l-3 1 1-3 7.5-7.5Z',
   highlight: ['M2 2.5h12v11H2z', 'M5.5 6h5v4h-5z'],
   hide: 'M2.5 4a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1V4Z',
   undo: 'M6 4.5L3 7.5l3 3M3 7.5h6.5a3.5 3.5 0 0 1 0 7H7',
@@ -608,6 +776,21 @@ export const EDITOR_ICONS = {
   trash: 'M3 4.5h10M6.5 4.5V3h3v1.5M5 4.5l.5 8h5l.5-8',
   clear: 'M3.5 3.5l9 9M12.5 3.5l-9 9',
 } as const
+
+/** A filled circle sized to the stroke it selects, so the buttons read at a glance. */
+function dot(width: number): SVGSVGElement {
+  const NS = 'http://www.w3.org/2000/svg'
+  const svg = document.createElementNS(NS, 'svg')
+  svg.setAttribute('viewBox', '0 0 16 16')
+  svg.setAttribute('aria-hidden', 'true')
+  const circle = document.createElementNS(NS, 'circle')
+  circle.setAttribute('cx', '8')
+  circle.setAttribute('cy', '8')
+  circle.setAttribute('r', String(1.5 + width * 0.6))
+  circle.setAttribute('fill', 'currentColor')
+  svg.appendChild(circle)
+  return svg
+}
 
 function cloneAnnotation<T extends ScreenshotAnnotation>(a: T): T {
   return a.kind === 'pen' ? { ...a, points: [...a.points] } : { ...a }

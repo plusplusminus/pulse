@@ -130,6 +130,65 @@ export function editorStyles(theme: 'light' | 'dark'): string {
       height: 16px;
     }
 
+    .pulse-annotation__style-group[hidden] {
+      display: none;
+    }
+
+    .pulse-annotation__swatch {
+      width: 20px;
+      height: 20px;
+      padding: 0;
+      border: 1px solid ${c.border};
+      border-radius: 50%;
+      background: var(--pulse-swatch, #ef4444);
+      cursor: pointer;
+      outline: none;
+      transition: transform 0.12s ease, box-shadow 0.12s ease;
+    }
+
+    .pulse-annotation__swatch:hover {
+      transform: scale(1.12);
+    }
+
+    /* A ring rather than a border: the swatch IS the colour, so nothing may cover it. */
+    .pulse-annotation__swatch--active {
+      box-shadow: 0 0 0 2px ${c.bg}, 0 0 0 4px ${c.primary};
+    }
+
+    .pulse-annotation__swatch:focus-visible {
+      box-shadow: 0 0 0 2px ${c.bg}, 0 0 0 4px ${c.primary};
+    }
+
+    .pulse-annotation__stroke {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border: none;
+      border-radius: 6px;
+      background: transparent;
+      color: ${c.muted};
+      cursor: pointer;
+      outline: none;
+      transition: background 0.12s ease, color 0.12s ease;
+    }
+
+    .pulse-annotation__stroke:hover {
+      background: ${c.inputBg};
+      color: ${c.text};
+    }
+
+    .pulse-annotation__stroke--active {
+      background: ${c.primary}1a;
+      color: ${c.primary};
+    }
+
+    .pulse-annotation__stroke svg {
+      width: 16px;
+      height: 16px;
+    }
+
     .pulse-annotation__action-btn {
       display: flex;
       align-items: center;
