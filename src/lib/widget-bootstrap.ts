@@ -15,6 +15,7 @@ export const BOOTSTRAP_DEFAULTS: Omit<WidgetBootstrapPayload, "site" | "api"> = 
     captureTab: false,
     elementPick: true,
     video: false,
+    voiceOver: false,
     console: false,
     sentry: false,
     replay: { enabled: false, bufferSeconds: 30, maskAllInputs: true },
@@ -77,6 +78,7 @@ export function buildBootstrapPayload(
       captureTab: bool(capture.captureTab, d.capture.captureTab),
       elementPick: bool(capture.elementPick, d.capture.elementPick),
       video: bool(capture.video, d.capture.video),
+      voiceOver: bool(capture.voiceOver, d.capture.voiceOver),
       console: bool(capture.console, d.capture.console),
       sentry: bool(capture.sentry, d.capture.sentry),
       replay: {

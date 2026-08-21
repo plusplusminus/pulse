@@ -4,6 +4,7 @@ vi.mock("../supabase", () => ({ supabaseAdmin: { storage: {} } }));
 
 import {
   STORAGE_PATH_PATTERN,
+  baseContentType,
   WIDGET_MEDIA_MAX_BYTES,
   deleteWidgetObjects,
   signWidgetRead,
@@ -349,5 +350,37 @@ describe("WIDGET_MEDIA_MAX_BYTES", () => {
     expect(WIDGET_MEDIA_MAX_BYTES.screenshot).toBe(10 * 1024 * 1024);
     expect(WIDGET_MEDIA_MAX_BYTES.video).toBe(100 * 1024 * 1024);
     expect(WIDGET_MEDIA_MAX_BYTES.replay).toBe(20 * 1024 * 1024);
+  });
+});
+
+// PULSE-400: with a microphone track the widget negotiates an Opus/AAC-paired
+// type, so these exact strings now reach the upload route. Kept explicit rather
+// than imported from the widget package — the point is that the SERVER accepts
+// what the widget emits, and a shared constant would let both sides drift
+// together without a test noticing.
+describe("voice-over content types (PULSE-400)", () => {
+  it("accepts the Opus- and AAC-paired types a voice-over recording produces", async () => {
+    const { storage } = fakeStorage();
+    const cases: Array<[string, string]> = [
+      ["video/webm;codecs=vp9,opus", "webm"],
+      ["video/webm;codecs=vp8,opus", "webm"],
+      ["video/mp4;codecs=avc1,mp4a.40.2", "mp4"],
+    ];
+    for (const [contentType, ext] of cases) {
+      const result = await signWidgetUpload(
+        baseInput(storage, { kind: "video", contentType })
+      );
+      expect(baseContentType(contentType)).toMatch(/^video\/(webm|mp4)$/);
+      expect(result.storagePath.endsWith(`.${ext}`)).toBe(true);
+      // A narrated recording is media like any other: same private bucket,
+      // same per-hub prefix, no codec parameter anywhere in the key.
+      expect(result.storagePath).toContain("/videos/");
+      expect(result.storagePath).not.toContain("opus");
+      expect(result.storagePath).not.toContain(",");
+    }
+  });
+
+  it("strips every parameter, not just the first", () => {
+    expect(baseContentType('video/webm; codecs="vp9,opus"; foo=bar')).toBe("video/webm");
   });
 });

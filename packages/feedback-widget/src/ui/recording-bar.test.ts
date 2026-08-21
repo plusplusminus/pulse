@@ -11,7 +11,11 @@ import { MAX_RECORDING_MS } from '../capture/video'
 import { getWidgetStyles } from './styles'
 
 let shadow: ShadowRoot
-let config: { onStop: Mock<() => void>; onDiscard: Mock<() => void> }
+let config: {
+  onStop: Mock<() => void>
+  onDiscard: Mock<() => void>
+  onToggleMic?: Mock<() => void>
+}
 let clock: { now: () => number; advance: (ms: number) => void }
 
 function makeClock(start = 1_000) {
@@ -21,6 +25,12 @@ function makeClock(start = 1_000) {
 
 function makeBar(): RecordingBar {
   return new RecordingBar(shadow, { ...config, now: clock.now })
+}
+
+/** A bar built for a reporter who opted into voice-over. */
+function makeMicBar(): RecordingBar {
+  config.onToggleMic = vi.fn<() => void>()
+  return makeBar()
 }
 
 function el(selector: string): HTMLElement {
@@ -226,5 +236,203 @@ describe('styles', () => {
 
   it('gives both controls a visible focus ring', () => {
     expect(getWidgetStyles('light')).toContain('.pulse-recbar__btn:focus-visible')
+  })
+})
+
+// -- voice-over (PULSE-400) ---------------------------------------------------
+
+describe('mic control', () => {
+  const micBtn = () => el('.pulse-recbar__mic') as HTMLButtonElement
+  const micText = () => el('.pulse-recbar__mic-text').textContent
+  const slashHidden = () =>
+    shadow.querySelector('.pulse-recbar__mic svg path:last-of-type')!.getAttribute('display') ===
+    'none'
+
+  it('builds no mic control and no meter without an onToggleMic — a site with voiceOver off gets no mic UI', () => {
+    makeBar()
+    expect(shadow.querySelector('.pulse-recbar__mic')).toBeNull()
+    expect(shadow.querySelector('.pulse-recbar__level')).toBeNull()
+  })
+
+  it('starts pending, because getUserMedia is still resolving when the bar is built', () => {
+    makeMicBar()
+    expect(micText()).toBe('Mic…')
+    expect(micBtn().disabled).toBe(true)
+    expect(micBtn().getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('shows live state in the icon AND the text, never colour alone', () => {
+    const bar = makeMicBar()
+    bar.setMicState('live')
+
+    expect(micText()).toBe('Mic on')
+    expect(slashHidden()).toBe(true)
+    expect(micBtn().getAttribute('aria-pressed')).toBe('true')
+
+    bar.setMicState('muted')
+
+    expect(micText()).toBe('Mic muted')
+    // The slash over the microphone is the second, non-colour signal.
+    expect(slashHidden()).toBe(false)
+    expect(micBtn().getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('is a real focusable button reachable by Tab, between the readouts and Stop', () => {
+    makeMicBar()
+    expect(micBtn().tagName).toBe('BUTTON')
+    expect(micBtn().getAttribute('tabindex')).toBeNull()
+
+    const order = Array.from(el('.pulse-recbar').children).map((c) => c.className)
+    const mic = order.findIndex((c) => c.includes('pulse-recbar__mic'))
+    const size = order.findIndex((c) => c.includes('pulse-recbar__size'))
+    const stop = order.findIndex((c) => c.includes('pulse-recbar__btn--stop'))
+    expect(mic).toBeGreaterThan(size)
+    expect(mic).toBeLessThan(stop)
+  })
+
+  it('takes focus and fires the toggle from the keyboard', () => {
+    const bar = makeMicBar()
+    bar.setMicState('live')
+
+    micBtn().focus()
+    expect(shadow.activeElement).toBe(micBtn())
+    micBtn().click()
+
+    expect(config.onToggleMic).toHaveBeenCalledTimes(1)
+    // Stop and Discard are untouched: muting is not ending.
+    expect(config.onStop).not.toHaveBeenCalled()
+    expect(config.onDiscard).not.toHaveBeenCalled()
+  })
+
+  it('toggles from muted as well as from live', () => {
+    const bar = makeMicBar()
+    bar.setMicState('muted')
+    micBtn().click()
+    expect(config.onToggleMic).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not fire while pending or unavailable — there is no track to mute', () => {
+    const bar = makeMicBar()
+    micBtn().click()
+    bar.setMicState('unavailable')
+    micBtn().click()
+    expect(config.onToggleMic).not.toHaveBeenCalled()
+  })
+
+  it('says "No mic" for the rest of the recording rather than quietly vanishing', () => {
+    const bar = makeMicBar()
+    bar.setMicState('unavailable')
+
+    // Silently dropping the control would leave the reporter narrating into
+    // nothing — and removing it would slide Stop sideways mid-recording.
+    expect(shadow.querySelector('.pulse-recbar__mic')).not.toBeNull()
+    expect(micText()).toBe('No mic')
+    expect(micBtn().disabled).toBe(true)
+    expect(slashHidden()).toBe(false)
+  })
+
+  it('never changes the number of children, so Stop never moves under the pointer', () => {
+    const bar = makeMicBar()
+    const before = el('.pulse-recbar').children.length
+    for (const state of ['live', 'muted', 'unavailable', 'pending'] as const) {
+      bar.setMicState(state)
+      expect(el('.pulse-recbar').children.length).toBe(before)
+    }
+  })
+})
+
+describe('level meter', () => {
+  const levelWidth = () => el('.pulse-recbar__level-fill').style.width
+
+  it('sits at the floor before anything arrives', () => {
+    makeMicBar()
+    expect(levelWidth()).toBe('0%')
+  })
+
+  it('moves with the level', () => {
+    const bar = makeMicBar()
+    bar.setMicState('live')
+    bar.setLevel(0.42)
+    expect(levelWidth()).toBe('42%')
+    bar.setLevel(1)
+    expect(levelWidth()).toBe('100%')
+  })
+
+  it('clamps out-of-range values instead of overflowing the track', () => {
+    const bar = makeMicBar()
+    bar.setMicState('live')
+    bar.setLevel(-3)
+    expect(levelWidth()).toBe('0%')
+    bar.setLevel(7)
+    expect(levelWidth()).toBe('100%')
+  })
+
+  it('drops to the floor the moment the mic is muted', () => {
+    const bar = makeMicBar()
+    bar.setMicState('live')
+    bar.setLevel(0.8)
+    expect(levelWidth()).toBe('80%')
+
+    bar.setMicState('muted')
+
+    expect(levelWidth()).toBe('0%')
+  })
+
+  it('stays at the floor when the mic never opened', () => {
+    const bar = makeMicBar()
+    bar.setMicState('live')
+    bar.setLevel(0.8)
+    bar.setMicState('unavailable')
+    expect(levelWidth()).toBe('0%')
+  })
+
+  it('is hidden from assistive tech: the same state is already in the button text', () => {
+    makeMicBar()
+    expect(el('.pulse-recbar__level').getAttribute('aria-hidden')).toBe('true')
+  })
+
+  it('skips redundant writes at frame rate', () => {
+    const bar = makeMicBar()
+    bar.setMicState('live')
+    const fill = el('.pulse-recbar__level-fill')
+    bar.setLevel(0.5)
+    // A value setLevel would never write, so a rewrite is unmistakable.
+    fill.style.width = '13px'
+    // Same rounded percent: the style must not be touched.
+    bar.setLevel(0.502)
+    expect(fill.style.width).toBe('13px')
+    bar.setLevel(0.6)
+    expect(fill.style.width).toBe('60%')
+  })
+})
+
+describe('mic in the slim bar', () => {
+  it('keeps the mic text, unlike the word Recording', () => {
+    const bar = makeMicBar()
+    bar.setMicState('muted')
+    bar.setSlim(true)
+
+    const css = getWidgetStyles('light')
+    expect(css).toContain('.pulse-recbar--slim .pulse-recbar__label')
+    // Whether a voice is being recorded is not something to infer from a 13px
+    // icon burnt into someone's video.
+    expect(css).not.toContain('.pulse-recbar--slim .pulse-recbar__mic-text')
+    expect(el('.pulse-recbar__mic-text').textContent).toBe('Mic muted')
+  })
+
+  it('gives the mic control the same focus ring as Stop and Discard', () => {
+    // It carries .pulse-recbar__btn, so the focus ring is literally the same rule.
+    const btn = shadow.querySelector('.pulse-recbar__mic')
+    expect(btn).toBeNull()
+    makeMicBar()
+    expect(el('.pulse-recbar__mic').classList.contains('pulse-recbar__btn')).toBe(true)
+    expect(getWidgetStyles('light')).toContain('.pulse-recbar__btn:focus-visible')
+  })
+
+  it('keeps Stop and Discard hovering as themselves, not as the mic button', () => {
+    const css = getWidgetStyles('light')
+    // A bare .pulse-recbar__btn:hover declared after them would override both.
+    expect(css).toContain('.pulse-recbar__mic:not(:disabled):hover')
+    expect(css).not.toContain('.pulse-recbar__btn:not(:disabled):hover')
   })
 })

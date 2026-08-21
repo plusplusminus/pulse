@@ -9,6 +9,7 @@ export const SAFE_DEFAULTS: Pick<BootstrapPayload, 'capture' | 'privacy' | 'ui'>
     captureTab: false,
     elementPick: true,
     video: false,
+    voiceOver: false,
     console: false,
     sentry: false,
     replay: { enabled: false, bufferSeconds: 30, maskAllInputs: true },

@@ -8,6 +8,12 @@ import type {
 import { getWidgetStyles } from './ui/styles'
 import { TriggerButton } from './ui/trigger'
 import { BAR_IN_RECORDING_NOTICE, FeedbackPanel, type PanelFormData } from './ui/panel'
+import {
+  MicLevelMeter,
+  isGetUserMediaSupported,
+  micNotice,
+  requestMicStream,
+} from './capture/mic'
 import { AnnotationCanvas } from './ui/annotation'
 import { ElementPicker, type DragRect, type Point } from './capture/pick-mode'
 import { buildPick, buildMultiPick, buildAreaPick } from './capture/pick-builder'
@@ -25,6 +31,7 @@ import { isGetDisplayMediaSupported } from './capture/display-media'
 import {
   createVideoRecorder,
   requestRecordingStream,
+  stopTracks,
   type VideoRecorder,
   type VideoRecording,
 } from './capture/video'
@@ -87,6 +94,11 @@ export class Widget {
   private recorder: VideoRecorder | null = null
   private recording: VideoRecording | null = null
   private recordingBar: RecordingBar | null = null
+  /** Voice-over opt-in (PULSE-400). False means no getUserMedia call is reachable. */
+  private voiceOver = false
+  /** Live only for the duration of a recording; muting never stops it. */
+  private micTrack: MediaStreamTrack | null = null
+  private levelMeter: MicLevelMeter | null = null
   private user: { email?: string; name?: string }
   private themeQuery: MediaQueryList | null = null
   private themeHandler: ((e: MediaQueryListEvent) => void) | null = null
@@ -126,6 +138,13 @@ export class Widget {
       // disagree about what the browser supports (PULSE-339).
       allowCaptureTab: this.config.capture.captureTab && isGetDisplayMediaSupported(),
       allowVideo: this.config.capture.video && isGetDisplayMediaSupported(),
+      // A microphone is a higher consent bar than a screenshot: the site has
+      // to allow it AND the browser has to be able to do it (PULSE-400).
+      allowVoiceOver:
+        this.config.capture.video &&
+        this.config.capture.voiceOver &&
+        isGetDisplayMediaSupported() &&
+        isGetUserMediaSupported(),
       onSubmit: (data) => this.handleSubmit(data),
       onClose: () => this.close(),
       onAnnotate: () => this.startAnnotation(),
@@ -134,6 +153,7 @@ export class Widget {
       onCaptureTab: () => this.captureTab(),
       onRecordVideo: () => this.startRecording(),
       onRemoveVideo: () => this.setRecording(null),
+      onToggleVoiceOver: () => this.toggleVoiceOver(),
       onPickElement: () => this.startPick(),
       onEditPick: (id) => this.startEditPick(id),
       onDeletePick: (id) => this.deletePick(id),
@@ -221,6 +241,7 @@ export class Widget {
     }
     this.recorder?.cancel()
     this.recorder = null
+    this.releaseVoiceOver()
     this.recordingBar?.destroy()
     this.recordingBar = null
     this.freezer.destroy()
@@ -484,6 +505,7 @@ export class Widget {
     if (this.state !== 'open') return
     this.panel.setVideoError(null)
     this.panel.setVideoNotice(null)
+    this.panel.setVoiceOverNote(null)
     this.hideForRecording()
 
     let stream: Promise<MediaStream>
@@ -495,10 +517,14 @@ export class Widget {
       return
     }
 
+    const withVoiceOver = this.voiceOver
     this.state = 'recording'
     this.recordingBar = new RecordingBar(this.shadow, {
       onStop: () => void this.collectRecording(),
       onDiscard: () => this.cancelRecording(),
+      // Only wired when the reporter opted in: no opt-in, no mic control and
+      // no level meter in the bar at all.
+      onToggleMic: withVoiceOver ? () => this.toggleMute() : undefined,
     })
     this.recordingBar.focusStop()
     this.recorder = createVideoRecorder({
@@ -507,7 +533,114 @@ export class Widget {
       onProgress: (progress) => this.recordingBar?.update(progress),
       onEnd: () => this.collectRecording(),
     })
-    void this.beginRecording(stream)
+    void this.beginRecording(withVoiceOver ? this.composeWithVoiceOver(stream) : stream)
+  }
+
+  // -- voice-over (PULSE-400) ---------------------------------------------------
+
+  /**
+   * The opt-in click, and the only place a microphone prompt can originate.
+   * `getUserMedia` runs synchronously off this activation; the stream it
+   * returns is released immediately, because its job was to settle the
+   * permission, not to hold a live microphone open while the reporter fills in
+   * a form. Record re-opens it, silently, against the granted permission.
+   *
+   * A refusal is never an error — the reporter simply records without a
+   * voice-over — so both outcomes land in the same place.
+   */
+  private toggleVoiceOver(): void {
+    this.panel.setVoiceOverNote(null)
+    if (this.voiceOver) return this.setVoiceOver(false)
+    try {
+      void requestMicStream().then(
+        (stream) => {
+          stopTracks(stream)
+          this.setVoiceOver(true)
+        },
+        (e: unknown) => this.setVoiceOver(false, e)
+      )
+    } catch (e) {
+      this.setVoiceOver(false, e)
+    }
+  }
+
+  private setVoiceOver(on: boolean, failure?: unknown): void {
+    this.voiceOver = on
+    this.panel.setVoiceOver(on)
+    if (failure !== undefined) this.panel.setVoiceOverNote(micNotice(failure))
+  }
+
+  /**
+   * Video track + microphone track in one `MediaStream`, the only shape
+   * `MediaRecorder` accepts. A microphone that will not open degrades to silent
+   * video — the display stream is returned untouched and the recording runs —
+   * because losing a two-minute repro over a missing mic is a far worse outcome
+   * than losing the narration.
+   */
+  private async composeWithVoiceOver(display: Promise<MediaStream>): Promise<MediaStream> {
+    let mic: MediaStream | null = null
+    try {
+      mic = await requestMicStream()
+    } catch (e) {
+      this.panel.setVoiceOverNote(micNotice(e))
+    }
+
+    let stream: MediaStream
+    try {
+      stream = await display
+    } catch (e) {
+      // Share prompt declined after the mic opened: release it, or the browser
+      // shows a microphone indicator for a recording that never started.
+      stopTracks(mic)
+      throw e
+    }
+
+    // `state !== 'recording'` means Discard landed while the prompts were still
+    // resolving: hand back the stream the recorder will release, but never
+    // adopt the track — a meter outliving its recording is a leaked context.
+    const track = this.state === 'recording' ? (mic?.getAudioTracks()[0] ?? null) : null
+    if (!track) {
+      stopTracks(mic)
+      if (this.state === 'recording') this.recordingBar?.setMicState('unavailable')
+      return stream
+    }
+
+    this.micTrack = track
+    this.recordingBar?.setMicState('live')
+    this.levelMeter = new MicLevelMeter({
+      onLevel: (level) => this.recordingBar?.setLevel(level),
+    })
+    // Observational only; a meter that cannot start costs the recording nothing.
+    this.levelMeter.start(mic!)
+    return new MediaStream([...stream.getVideoTracks(), track])
+  }
+
+  /**
+   * Mute is `enabled = false`, NEVER `stop()`. A stopped track cannot be
+   * revived, ends the audio for the rest of the recording and can desync what
+   * is already written; a disabled one records silence and flips back
+   * instantly. The track itself is the state — there is no second flag to
+   * fall out of step with it.
+   */
+  private toggleMute(): void {
+    const track = this.micTrack
+    if (!track) return
+    const muting = track.enabled
+    track.enabled = !muting
+    this.levelMeter?.setMuted(muting)
+    this.recordingBar?.setMicState(muting ? 'muted' : 'live')
+  }
+
+  /**
+   * The recorder stops every track on the composed stream, the microphone
+   * included, so this only drops our references and tears down the analyser.
+   * Stopping here as well would be a no-op — and would put a `stop()` call on
+   * the mic track in a code path that must never have one.
+   */
+  private releaseVoiceOver(): void {
+    this.levelMeter?.stop()
+    this.levelMeter = null
+    this.micTrack = null
   }
 
   private async beginRecording(stream: Promise<MediaStream>): Promise<void> {
@@ -573,6 +706,7 @@ export class Widget {
   }
 
   private restoreAfterRecording(): void {
+    this.releaseVoiceOver()
     this.recordingBar?.destroy()
     this.recordingBar = null
     this.host.style.display = ''
@@ -724,6 +858,9 @@ export class Widget {
       this.currentScreenshot = null
       this.annotations = []
       this.captureSurface = undefined
+      // The panel clears its own opt-in on a submitted report; keep the two in
+      // step, so the next reporter has to choose the microphone again.
+      this.voiceOver = false
       this.setRecording(null)
       this.picks = []
       this.markersById.clear()

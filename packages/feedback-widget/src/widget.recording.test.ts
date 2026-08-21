@@ -99,6 +99,7 @@ function config(): RuntimeConfig {
       captureTab: false,
       elementPick: false,
       video: true,
+      voiceOver: false,
       console: false,
       sentry: false,
       replay: { enabled: false, bufferSeconds: 0, maskAllInputs: false },

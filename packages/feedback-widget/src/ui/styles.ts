@@ -391,6 +391,38 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
       color: ${c.error};
     }
 
+    /* Voice-over opt-in (PULSE-400). Inherits .pulse-add-screenshot chrome. */
+    .pulse-voiceover {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .pulse-voiceover__toggle {
+      width: 100%;
+      border-style: solid;
+      font-size: 13px;
+    }
+
+    .pulse-voiceover__label {
+      flex: 1;
+      text-align: left;
+    }
+
+    /* The word, not just the border: "On" / "Off" is the state, colour a hint. */
+    .pulse-voiceover__state {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }
+
+    .pulse-voiceover__toggle[aria-pressed='true'] {
+      border-color: ${c.primary};
+      color: ${c.text};
+    }
+
     .pulse-add-screenshot {
       flex: 1;
       display: flex;
@@ -1141,6 +1173,59 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
       box-shadow: 0 0 0 2px #14141c, 0 0 0 4px ${c.primary};
     }
 
+    /* Voice-over (PULSE-400). Inherits .pulse-recbar__btn; state reads from
+       the slashed icon and the text, with colour only ever a third signal. */
+    .pulse-recbar__mic {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding-left: 7px;
+    }
+
+    .pulse-recbar__mic svg {
+      width: 13px;
+      height: 13px;
+      flex: none;
+    }
+
+    .pulse-recbar__mic--off {
+      color: rgba(244, 244, 245, 0.62);
+    }
+
+    .pulse-recbar__mic:not(:disabled):hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    /* Pending and unavailable are not actions: no pointer, no hover promise. */
+    .pulse-recbar__mic--dead {
+      cursor: default;
+      background: none;
+      padding: 4px 0;
+    }
+
+    .pulse-recbar__level {
+      width: 26px;
+      height: 4px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.16);
+      overflow: hidden;
+      flex: none;
+    }
+
+    .pulse-recbar__level-fill {
+      display: block;
+      height: 100%;
+      width: 0%;
+      border-radius: inherit;
+      background: #4ade80;
+      /* Fast enough to track speech, slow enough not to strobe. */
+      transition: width 0.06s linear;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .pulse-recbar__level-fill { transition: none; }
+    }
+
     /* Slim: this tab is the shared surface, so spend fewer pixels. */
     .pulse-recbar--slim {
       gap: 6px;
@@ -1158,9 +1243,17 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
       display: none;
     }
 
-    .pulse-recbar--slim .pulse-recbar__btn {
+    .pulse-recbar--slim .pulse-recbar__btn,
+    .pulse-recbar--slim .pulse-recbar__mic {
       padding: 4px 8px;
       font-size: 11px;
+    }
+
+    /* Slim drops the word "Recording" — the dot already says it — but never
+       the mic text. Whether a voice is being recorded is not something to
+       infer from a 13px icon burnt into someone's video. */
+    .pulse-recbar--slim .pulse-recbar__level {
+      width: 20px;
     }
 
     .pulse-recbar--ending .pulse-recbar__dot {

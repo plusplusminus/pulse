@@ -15,7 +15,7 @@ const payload: BootstrapPayload = {
     screenshot: false,
     captureTab: true,
     elementPick: true,
-    video: false,
+    video: false, voiceOver: false,
     console: true,
     sentry: true,
     replay: { enabled: true, bufferSeconds: 45, maskAllInputs: false },
