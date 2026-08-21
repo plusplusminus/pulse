@@ -165,6 +165,10 @@ function marks(editor: AnnotationEditor): ScreenshotAnnotation[] {
   return editor.getAnnotations()
 }
 
+function editorCrop(editor: AnnotationEditor) {
+  return editor.getState().crop
+}
+
 beforeEach(() => {
   installHarness()
 })
@@ -792,5 +796,131 @@ describe('text tool', () => {
     await vi.waitFor(() => expect(saved.blob).not.toBeNull())
     expect(saved.annotations).toHaveLength(1)
     expect(saved.annotations[0]).toMatchObject({ kind: 'text', text: 'unfinished' })
+  })
+})
+
+describe('crop', () => {
+  it('drags a region and exports at the cropped size', async () => {
+    const { shadow, layer, saved } = await mountEditor()
+    tool(shadow, 'crop').click()
+    drag(layer, [200, 100], [700, 500])
+
+    const save = Array.from(
+      shadow.querySelectorAll<HTMLButtonElement>('.pulse-annotation__action-btn')
+    ).find((b) => b.textContent === 'Save')
+    save?.click()
+    await vi.waitFor(() => expect(saved.blob).not.toBeNull())
+    expect(exported[exported.length - 1]).toEqual({ width: 500, height: 400 })
+  })
+
+  it('translates annotations into the cropped image so the admin overlay lines up', async () => {
+    const { shadow, layer, saved } = await mountEditor()
+    tool(shadow, 'highlight').click()
+    drag(layer, [300, 200], [400, 300])
+    tool(shadow, 'crop').click()
+    drag(layer, [200, 100], [700, 500])
+
+    const save = Array.from(
+      shadow.querySelectorAll<HTMLButtonElement>('.pulse-annotation__action-btn')
+    ).find((b) => b.textContent === 'Save')
+    save?.click()
+    await vi.waitFor(() => expect(saved.blob).not.toBeNull())
+
+    // Submitted marks are in the cropped image's space...
+    expect(saved.annotations).toEqual([{ kind: 'highlight', x: 100, y: 100, w: 100, h: 100 }])
+    // ...while the round-trip state keeps the originals, so a re-edit is exact.
+    expect(saved.state).toEqual({
+      annotations: [{ kind: 'highlight', x: 300, y: 200, w: 100, h: 100 }],
+      crop: { x: 200, y: 100, w: 500, h: 400 },
+    })
+  })
+
+  it('reopens with the crop it was handed', async () => {
+    const crop = { x: 100, y: 100, w: 300, h: 300 }
+    const { shadow, saved } = await mountEditor({ annotations: [], crop })
+    expect(action(shadow, 'crop-reset').disabled).toBe(false)
+
+    const save = Array.from(
+      shadow.querySelectorAll<HTMLButtonElement>('.pulse-annotation__action-btn')
+    ).find((b) => b.textContent === 'Save')
+    save?.click()
+    await vi.waitFor(() => expect(saved.blob).not.toBeNull())
+    expect(exported[exported.length - 1]).toEqual({ width: 300, height: 300 })
+  })
+
+  it('moves an existing crop by dragging inside it', async () => {
+    const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'crop').click()
+    drag(layer, [100, 100], [400, 400])
+    drag(layer, [250, 250], [300, 260])
+    expect(editorCrop(editor)).toEqual({ x: 150, y: 110, w: 300, h: 300 })
+  })
+
+  it('resizes from a corner handle, leaving the opposite corner anchored', async () => {
+    const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'crop').click()
+    drag(layer, [100, 100], [400, 400])
+    drag(layer, [400, 400], [500, 450])
+    expect(editorCrop(editor)).toEqual({ x: 100, y: 100, w: 400, h: 350 })
+  })
+
+  it('clamps a crop dragged past the edge of the bitmap', async () => {
+    const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'crop').click()
+    drag(layer, [900, 600], [5000, 5000])
+    expect(editorCrop(editor)).toEqual({ x: 900, y: 600, w: 300, h: 200 })
+  })
+
+  it('keeps the previous crop when a drag was really a click', async () => {
+    const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'crop').click()
+    drag(layer, [100, 100], [400, 400])
+    drag(layer, [800, 700], [802, 701])
+    expect(editorCrop(editor)).toEqual({ x: 100, y: 100, w: 300, h: 300 })
+  })
+
+  it('resets to the full frame, and the reset can be undone', async () => {
+    const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'crop').click()
+    drag(layer, [100, 100], [400, 400])
+    action(shadow, 'crop-reset').click()
+    expect(editorCrop(editor)).toBeNull()
+    action(shadow, 'undo').click()
+    expect(editorCrop(editor)).toEqual({ x: 100, y: 100, w: 300, h: 300 })
+  })
+
+  it('keeps crop-reset disabled while there is no crop', async () => {
+    const { shadow } = await mountEditor()
+    expect(action(shadow, 'crop-reset').disabled).toBe(true)
+  })
+
+  it('undoes a crop drag back to the full frame', async () => {
+    const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'crop').click()
+    drag(layer, [100, 100], [400, 400])
+    action(shadow, 'undo').click()
+    expect(editorCrop(editor)).toBeNull()
+  })
+
+  it('is cleared by Clear all, along with every mark', async () => {
+    const { editor, shadow, layer } = await mountEditor()
+    tool(shadow, 'highlight').click()
+    drag(layer, [0, 0], [50, 50])
+    tool(shadow, 'crop').click()
+    drag(layer, [100, 100], [400, 400])
+    action(shadow, 'clear').click()
+    expect(marks(editor)).toEqual([])
+    expect(editorCrop(editor)).toBeNull()
+  })
+
+  it('exports the whole capture when no crop was set', async () => {
+    const { shadow, saved } = await mountEditor()
+    const save = Array.from(
+      shadow.querySelectorAll<HTMLButtonElement>('.pulse-annotation__action-btn')
+    ).find((b) => b.textContent === 'Save')
+    save?.click()
+    await vi.waitFor(() => expect(saved.blob).not.toBeNull())
+    expect(exported[exported.length - 1]).toEqual(CAPTURE)
+    expect(saved.state?.crop).toBeNull()
   })
 })

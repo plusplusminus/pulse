@@ -38,6 +38,10 @@ const MIN_RECT = 4
 const MAX_HISTORY = 60
 /** Grab radius for selection, in image pixels before DPR scaling. */
 const HIT_TOLERANCE = 6
+/** Corner-handle grab radius and drawn size, before DPR scaling. */
+const HANDLE = 9
+/** A crop smaller than this is a mis-drag, not an intent. */
+const MIN_CROP = 16
 /** A drag shorter than this was a click, not an arrow. */
 const MIN_ARROW = 8
 /**
@@ -60,7 +64,7 @@ const COLORED_TOOLS: ReadonlySet<EditorTool> = new Set([
 /** Tools that draw with the current stroke width. */
 const STROKE_TOOLS: ReadonlySet<EditorTool> = new Set(['arrow', 'rect', 'ellipse', 'pen'])
 
-export type EditorTool = 'select' | AnnotationKind
+export type EditorTool = 'select' | 'crop' | AnnotationKind
 
 export interface AnnotationEditorConfig {
   /**
@@ -81,9 +85,18 @@ interface Snapshot {
   crop: CropRect | null
 }
 
+type CropHandle = 'nw' | 'ne' | 'sw' | 'se' | 'move' | 'new'
+
 type Drag =
   | { mode: 'draw'; start: Point; current: Point; points: number[] }
   | { mode: 'move'; start: Point; current: Point; index: number; origin: ScreenshotAnnotation }
+  | {
+      mode: 'crop'
+      start: Point
+      current: Point
+      handle: CropHandle
+      origin: CropRect | null
+    }
 
 export function normaliseRect(a: Point, b: Point): AnnotationRect {
   return {
@@ -291,6 +304,14 @@ export class AnnotationEditor {
     this.afterMutation()
   }
 
+  /** Non-destructive: the bitmap was never cut, so the full frame just comes back. */
+  private resetCrop(): void {
+    if (!this.crop) return
+    this.pushHistory()
+    this.crop = null
+    this.afterMutation()
+  }
+
   private clearAll(): void {
     if (this.annotations.length === 0 && !this.crop) return
     this.pushHistory()
@@ -383,6 +404,7 @@ export class AnnotationEditor {
       { id: 'ellipse', label: 'Ellipse', icon: EDITOR_ICONS.ellipse },
       { id: 'pen', label: 'Pen', icon: EDITOR_ICONS.pen },
       { id: 'text', label: 'Text', icon: EDITOR_ICONS.text },
+      { id: 'crop', label: 'Crop', icon: EDITOR_ICONS.crop },
       { id: 'highlight', label: 'Highlight', icon: EDITOR_ICONS.highlight },
       { id: 'hide', label: 'Hide', icon: EDITOR_ICONS.hide },
     ]
@@ -495,6 +517,11 @@ export class AnnotationEditor {
     deleteBtn.addEventListener('click', () => this.deleteSelected())
     group.appendChild(deleteBtn)
 
+    const cropReset = toolButton(EDITOR_ICONS.cropReset, 'Reset crop')
+    cropReset.dataset.action = 'crop-reset'
+    cropReset.addEventListener('click', () => this.resetCrop())
+    group.appendChild(cropReset)
+
     const clearBtn = toolButton(EDITOR_ICONS.clear, 'Clear all')
     clearBtn.dataset.action = 'clear'
     clearBtn.addEventListener('click', () => this.clearAll())
@@ -569,6 +596,7 @@ export class AnnotationEditor {
     setDisabled(toolbar, 'redo', this.redoStack.length === 0)
     setDisabled(toolbar, 'delete', this.selected === null)
     setDisabled(toolbar, 'clear', this.annotations.length === 0 && !this.crop)
+    setDisabled(toolbar, 'crop-reset', !this.crop)
     const wrap = this.container?.querySelector<HTMLElement>('.pulse-annotation__canvas-wrap')
     wrap?.classList.toggle('pulse-annotation__canvas-wrap--select', this.tool === 'select')
   }
@@ -613,6 +641,20 @@ export class AnnotationEditor {
 
     this.canvas?.setPointerCapture(e.pointerId)
 
+    if (this.tool === 'crop') {
+      this.drag = {
+        mode: 'crop',
+        start: point,
+        current: point,
+        handle: this.cropHandleAt(point),
+        origin: this.crop ? { ...this.crop } : null,
+      }
+      this.pushHistory()
+      this.selected = null
+      this.afterMutation()
+      return
+    }
+
     if (this.tool === 'select') {
       const index = hitTest(this.annotations, point, HIT_TOLERANCE * this.scale, this.ctx ?? undefined)
       this.selected = index
@@ -644,6 +686,8 @@ export class AnnotationEditor {
         drag.current.x - drag.start.x,
         drag.current.y - drag.start.y
       )
+    } else if (drag.mode === 'crop') {
+      this.crop = this.cropFromDrag(drag)
     } else if (this.tool === 'pen') {
       this.appendPenPoint(drag)
     }
@@ -666,6 +710,17 @@ export class AnnotationEditor {
       return
     }
 
+    if (drag.mode === 'crop') {
+      const next = this.cropFromDrag(drag)
+      // A mis-drag restores whatever the crop was, rather than cropping to a sliver.
+      this.crop =
+        next && next.w >= MIN_CROP * this.scale && next.h >= MIN_CROP * this.scale
+          ? next
+          : drag.origin
+      this.afterMutation()
+      return
+    }
+
     if (drag.mode === 'draw' && this.tool === 'pen') this.appendPenPoint(drag)
     const mark = this.buildMark(drag)
     if (mark) {
@@ -673,6 +728,64 @@ export class AnnotationEditor {
       this.annotations.push(mark)
     }
     this.afterMutation()
+  }
+
+  private imageSize(): { w: number; h: number } {
+    return { w: this.canvas?.width ?? 0, h: this.canvas?.height ?? 0 }
+  }
+
+  /** Which part of the existing crop the pointer grabbed, if any. */
+  private cropHandleAt(p: Point): CropHandle {
+    const crop = this.crop
+    if (!crop) return 'new'
+    const grab = HANDLE * this.scale
+    const near = (x: number, y: number) => Math.abs(p.x - x) <= grab && Math.abs(p.y - y) <= grab
+    if (near(crop.x, crop.y)) return 'nw'
+    if (near(crop.x + crop.w, crop.y)) return 'ne'
+    if (near(crop.x, crop.y + crop.h)) return 'sw'
+    if (near(crop.x + crop.w, crop.y + crop.h)) return 'se'
+    if (
+      p.x >= crop.x &&
+      p.x <= crop.x + crop.w &&
+      p.y >= crop.y &&
+      p.y <= crop.y + crop.h
+    ) {
+      return 'move'
+    }
+    return 'new'
+  }
+
+  /** The crop a drag describes, always clamped inside the bitmap. */
+  private cropFromDrag(drag: Extract<Drag, { mode: 'crop' }>): CropRect | null {
+    const size = this.imageSize()
+    const origin = drag.origin
+    const dx = drag.current.x - drag.start.x
+    const dy = drag.current.y - drag.start.y
+
+    if (drag.handle === 'new' || !origin) {
+      const r = normaliseRect(drag.start, drag.current)
+      return clampCrop(r, size)
+    }
+
+    if (drag.handle === 'move') {
+      const w = origin.w
+      const h = origin.h
+      return {
+        x: Math.round(Math.max(0, Math.min(origin.x + dx, size.w - w))),
+        y: Math.round(Math.max(0, Math.min(origin.y + dy, size.h - h))),
+        w,
+        h,
+      }
+    }
+
+    // A corner drag moves that corner and leaves the opposite one anchored.
+    const left = drag.handle === 'nw' || drag.handle === 'sw' ? origin.x + dx : origin.x
+    const top = drag.handle === 'nw' || drag.handle === 'ne' ? origin.y + dy : origin.y
+    const right = drag.handle === 'ne' || drag.handle === 'se' ? origin.x + origin.w + dx : origin.x + origin.w
+    const bottom =
+      drag.handle === 'sw' || drag.handle === 'se' ? origin.y + origin.h + dy : origin.y + origin.h
+
+    return clampCrop(normaliseRect({ x: left, y: top }, { x: right, y: bottom }), size)
   }
 
   protected textSizeInImagePixels(): number {
@@ -884,6 +997,7 @@ export class AnnotationEditor {
 
   /** Editor-only decoration: never part of the export. */
   protected paintChrome(ctx: CanvasRenderingContext2D): void {
+    this.paintCropChrome(ctx)
     if (this.selected === null) return
     const mark = this.annotations[this.selected]
     if (!mark) return
@@ -894,6 +1008,41 @@ export class AnnotationEditor {
     ctx.lineWidth = Math.max(1.5 * this.scale, 1)
     ctx.setLineDash([6 * this.scale, 4 * this.scale])
     ctx.strokeRect(b.x - pad, b.y - pad, b.w + pad * 2, b.h + pad * 2)
+    ctx.restore()
+  }
+
+  /**
+   * The crop, shown as everything outside it dimmed plus corner handles. Drawn
+   * on the overlay canvas only — the export cuts the bitmap instead.
+   */
+  private paintCropChrome(ctx: CanvasRenderingContext2D): void {
+    const crop = this.crop
+    const size = this.imageSize()
+    if (!crop) return
+
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(0, 0, size.w, size.h)
+    ctx.rect(crop.x, crop.y, crop.w, crop.h)
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)'
+    ctx.fill('evenodd')
+    ctx.restore()
+
+    ctx.save()
+    ctx.strokeStyle = '#ffffff'
+    ctx.lineWidth = Math.max(1.5 * this.scale, 1)
+    ctx.strokeRect(crop.x, crop.y, crop.w, crop.h)
+
+    const h = HANDLE * this.scale
+    ctx.fillStyle = '#ffffff'
+    for (const [cx, cy] of [
+      [crop.x, crop.y],
+      [crop.x + crop.w, crop.y],
+      [crop.x, crop.y + crop.h],
+      [crop.x + crop.w, crop.y + crop.h],
+    ]) {
+      ctx.fillRect(cx - h / 2, cy - h / 2, h, h)
+    }
     ctx.restore()
   }
 
@@ -971,6 +1120,8 @@ export const EDITOR_ICONS = {
   ellipse: 'M8 3.2c3 0 5.3 2.1 5.3 4.8S11 12.8 8 12.8 2.7 10.7 2.7 8 5 3.2 8 3.2Z',
   pen: 'M11.5 2.5a1.5 1.5 0 0 1 2 2L6 12l-3 1 1-3 7.5-7.5Z',
   text: 'M3 4V3h10v1M8 3v10M6 13h4',
+  crop: 'M4.5 1.5v10h10M1.5 4.5h10v10',
+  cropReset: ['M4.5 1.5v10h10M1.5 4.5h10v10', 'M2 14L14 2'],
   highlight: ['M2 2.5h12v11H2z', 'M5.5 6h5v4h-5z'],
   hide: 'M2.5 4a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1V4Z',
   undo: 'M6 4.5L3 7.5l3 3M3 7.5h6.5a3.5 3.5 0 0 1 0 7H7',
@@ -1005,6 +1156,18 @@ function dot(width: number): SVGSVGElement {
 
 function cloneAnnotation<T extends ScreenshotAnnotation>(a: T): T {
   return a.kind === 'pen' ? { ...a, points: [...a.points] } : { ...a }
+}
+
+/** Keeps a crop inside the bitmap; a region outside it would export blank pixels. */
+function clampCrop(r: AnnotationRect, size: { w: number; h: number }): CropRect {
+  const x = Math.max(0, Math.min(r.x, size.w))
+  const y = Math.max(0, Math.min(r.y, size.h))
+  return {
+    x: Math.round(x),
+    y: Math.round(y),
+    w: Math.round(Math.min(r.w, size.w - x)),
+    h: Math.round(Math.min(r.h, size.h - y)),
+  }
 }
 
 function setHidden(toolbar: HTMLElement, selector: string, hidden: boolean): void {
