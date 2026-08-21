@@ -26,6 +26,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { AnnotationOverlay } from "./annotation-overlay";
 import { cn } from "@/lib/utils";
 import {
   mediaProxyUrl,
@@ -268,47 +269,6 @@ function ArtefactSlot({
     );
   }
   return <Empty>{absent}</Empty>;
-}
-
-/**
- * Renders the stored vector marks over the screenshot. Marks are in the
- * capture's own pixel space, so everything is expressed as a percentage of the
- * natural size and stays aligned at any display width.
- */
-function AnnotationOverlay({
-  annotations,
-  natural,
-}: {
-  annotations: ScreenshotAnnotation[];
-  natural: { w: number; h: number };
-}) {
-  return (
-    <>
-      {annotations.map((annotation, index) => {
-        if (annotation.kind !== "highlight" && annotation.kind !== "hide") {
-          return null;
-        }
-        return (
-          <span
-            key={index}
-            aria-hidden
-            style={{
-              left: `${(annotation.x / natural.w) * 100}%`,
-              top: `${(annotation.y / natural.h) * 100}%`,
-              width: `${(annotation.w / natural.w) * 100}%`,
-              height: `${(annotation.h / natural.h) * 100}%`,
-            }}
-            className={cn(
-              "absolute rounded-sm pointer-events-none",
-              annotation.kind === "highlight"
-                ? "ring-2 ring-primary ring-offset-0"
-                : "bg-foreground"
-            )}
-          />
-        );
-      })}
-    </>
-  );
 }
 
 function ScreenshotPanel({
