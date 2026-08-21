@@ -90,6 +90,8 @@ export class FeedbackPanel {
       onAnnotate: () => void
       onRetakeScreenshot: () => void
       onCaptureScreenshot: () => void
+      /** Dim the page and let the reporter drag the region to capture (PULSE-404). */
+      onCaptureRegion: () => void
       onCaptureTab: () => void
       onRecordVideo: () => void
       onRemoveVideo: () => void
@@ -483,6 +485,16 @@ export class FeedbackPanel {
       this.popItem('This viewport', 'The page as you see it now', icon(ICONS.screenshot), () => {
         close()
         this.config.onCaptureScreenshot()
+      })
+    )
+
+    // Between the two whole-screen modes because that is what it is: the same
+    // capture, framed first. The ellipsis promises a step before anything is
+    // attached, which is the honest read — the panel is about to disappear.
+    list.appendChild(
+      this.popItem('Select a region…', 'Drag a box around the problem', icon(ICONS.region), () => {
+        close()
+        this.config.onCaptureRegion()
       })
     )
 

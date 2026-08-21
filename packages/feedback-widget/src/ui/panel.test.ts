@@ -31,6 +31,7 @@ let config: {
   onTogglePause: Mock<() => void>
   onCaptureTab: Mock<() => void>
   onCaptureScreenshot: Mock<() => void>
+  onCaptureRegion: Mock<() => void>
   onRecordVideo: Mock<() => void>
   onRemoveVideo: Mock<() => void>
   onToggleVoiceOver: Mock<() => void>
@@ -68,6 +69,7 @@ beforeEach(() => {
     onTogglePause: vi.fn<() => void>(),
     onCaptureTab: vi.fn<() => void>(),
     onCaptureScreenshot: vi.fn<() => void>(),
+    onCaptureRegion: vi.fn<() => void>(),
     onRecordVideo: vi.fn<() => void>(),
     onRemoveVideo: vi.fn<() => void>(),
     onToggleVoiceOver: vi.fn<() => void>(),
@@ -312,7 +314,7 @@ describe('capture controls', () => {
     expect(attachLabels()).toEqual(['Screenshot'])
     expect(optionLabels()).toEqual([])
     openOptions('Screenshot options')
-    expect(optionLabels()).toEqual(['This viewport', 'Capture tab'])
+    expect(optionLabels()).toEqual(['This viewport', 'Select a region…', 'Capture tab'])
   })
 
   it('hides Capture tab where the browser or the site does not allow it', () => {
@@ -320,8 +322,35 @@ describe('capture controls', () => {
     panel.setState('open')
     openOptions('Screenshot options')
     // Absent, never a disabled control advertising a feature the site turned off.
-    expect(optionLabels()).toEqual(['This viewport'])
+    expect(optionLabels()).toEqual(['This viewport', 'Select a region…'])
     expect(shadow.querySelector('.pulse-pop__item[disabled]')).toBeNull()
+  })
+
+  /** Picking an element and framing a region are different jobs (PULSE-404). */
+  it('offers region select even where Capture tab is unavailable', () => {
+    const panel = makePanel(false, { allowScreenshot: true, allowCaptureTab: false })
+    panel.setState('open')
+    openOptions('Screenshot options')
+    expect(optionLabels()).toContain('Select a region…')
+  })
+
+  it('has no region option at all when the site turned screenshots off', () => {
+    const panel = makePanel(true, { allowScreenshot: false, allowVideo: true })
+    panel.setState('open')
+    expect(shadow.querySelector('.pulse-caret[aria-label="Screenshot options"]')).toBeNull()
+    expect(optionLabels()).not.toContain('Select a region…')
+  })
+
+  it('closes the popover before starting region select — the panel is about to hide', () => {
+    const panel = makePanel(false, { allowScreenshot: true, allowCaptureTab: true })
+    panel.setState('open')
+    openOptions('Screenshot options')
+    const item = Array.from(shadow.querySelectorAll('.pulse-pop__item')).find(
+      (b) => b.querySelector('.pulse-pop__name')?.textContent === 'Select a region…'
+    ) as HTMLButtonElement
+    item.click()
+    expect(config.onCaptureRegion).toHaveBeenCalledTimes(1)
+    expect(shadow.querySelector('.pulse-pop')).toBeNull()
   })
 
   it('routes the Capture tab click straight through, with nothing awaited first', () => {

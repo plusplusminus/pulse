@@ -1,12 +1,18 @@
 import type { DragRect } from '../capture/pick-mode'
 
-/** The drag rectangle drawn while the user sweeps out an area (PULSE-350). */
+/**
+ * The drag rectangle drawn while the user sweeps out an area (PULSE-350).
+ *
+ * `className` exists so region capture (PULSE-404) can wear the same rectangle
+ * with a cut-out shadow instead of a fill, rather than shipping a second
+ * marquee that would then drift from this one.
+ */
 export class Marquee {
   private element: HTMLElement
 
-  constructor(shadow: ShadowRoot) {
+  constructor(shadow: ShadowRoot, className = 'pulse-marquee') {
     this.element = document.createElement('div')
-    this.element.className = 'pulse-marquee'
+    this.element.className = className
     this.element.style.display = 'none'
     shadow.appendChild(this.element)
   }

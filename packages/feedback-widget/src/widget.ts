@@ -24,6 +24,9 @@ import { ElementPicker, type DragRect, type Point } from './capture/pick-mode'
 import { buildPick, buildMultiPick, buildAreaPick } from './capture/pick-builder'
 import { MultiSelection } from './capture/multi-select'
 import { collectAreaCandidates, findMarqueeElements, resolveMarquee } from './capture/area-select'
+import { RegionSelector } from './capture/region-select'
+import { viewportSize } from './capture/region'
+import { cropToRegion } from './capture/crop'
 import { PageFreezer } from './capture/freeze'
 import { captureSelectedText, clearSelection } from './capture/text-selection'
 import {
@@ -81,6 +84,8 @@ export class Widget {
   private outlines: PickOutlines | null = null
   private status: PickStatus | null = null
   private marquee: Marquee | null = null
+  /** Live only while the reporter is framing a region (PULSE-404). */
+  private regionSelector: RegionSelector | null = null
   /** Candidate elements snapshotted once per drag; the page cannot change mid-marquee. */
   private dragCandidates: Element[] = []
   private picks: WidgetPick[] = []
@@ -158,6 +163,7 @@ export class Widget {
       onAnnotate: () => this.startAnnotation(),
       onRetakeScreenshot: () => this.retakeScreenshot(),
       onCaptureScreenshot: () => this.captureFullScreen(),
+      onCaptureRegion: () => this.startRegionCapture(),
       onCaptureTab: () => this.captureTab(),
       onRecordVideo: () => this.startRecording(),
       onRemoveVideo: () => this.setRecording(null),
@@ -167,6 +173,13 @@ export class Widget {
       onDeletePick: (id) => this.deletePick(id),
       onTogglePause: () => this.togglePause(),
     })
+
+    if (this.config.capture.screenshot) {
+      this.regionSelector = new RegionSelector(this.shadow, this.host, {
+        onSelect: (rect) => void this.finishRegionCapture(rect),
+        onCancel: () => this.cancelRegionCapture(),
+      })
+    }
 
     if (this.config.capture.elementPick) {
       this.markers = new PickMarkers(this.shadow)
@@ -231,6 +244,7 @@ export class Widget {
     if (this.state === 'closed') return
     this.resumePage()
     this.teardownPickMode()
+    this.regionSelector?.stop()
     this.state = 'closed'
     this.panel.setState('closed')
     this.markers?.hide()
@@ -255,6 +269,8 @@ export class Widget {
     this.freezer.destroy()
     this.teardownPickMode()
     this.picker = null
+    this.regionSelector?.destroy()
+    this.regionSelector = null
     this.popup?.destroy()
     this.markers?.destroy()
     this.outlines?.destroy()
@@ -489,6 +505,10 @@ export class Widget {
     // Dropping a recording is now a deliberate click on Discard in the bar.
     if (this.state === 'recording') {
       void this.collectRecording()
+      // Framing a region is modal and the panel is already hidden behind it, so
+      // Escape backs out of the selection before anything else can claim it.
+    } else if (this.regionSelector?.isActive) {
+      this.cancelRegionCapture()
       // An attach-row popover is the innermost thing open, so Escape backs out
       // of the options and stops there — it must never close the panel too.
     } else if (this.panel.closePopovers(true)) {
@@ -804,6 +824,56 @@ export class Widget {
     let error: string | null = null
     try {
       blob = await this.pulse.captureScreenshot()
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Screenshot capture failed'
+    }
+    this.setScreenshot(blob)
+    this.panel.setCaptureError(error)
+    this.state = 'open'
+    this.panel.setState('open')
+  }
+
+  // -- region capture (PULSE-404) ----------------------------------------------
+
+  /**
+   * The fast path: dim the page, drag the bit that is wrong. Element-pick and
+   * this are different jobs — one names a component, this one frames a picture.
+   */
+  private startRegionCapture(): void {
+    if (!this.regionSelector || this.state !== 'open') return
+    this.state = 'capturing'
+    this.panel.setCaptureError(null)
+    this.panel.hide()
+    this.regionSelector.start()
+  }
+
+  /** Escape, or a click with no drag: back to the panel with nothing attached. */
+  private cancelRegionCapture(): void {
+    if (!this.regionSelector?.isActive) return
+    this.regionSelector.stop()
+    this.state = 'open'
+    this.panel.setState('open')
+  }
+
+  /**
+   * FULL viewport through the same `captureViewport` the other screenshot mode
+   * uses — so `privacy.maskSelectors` and the default excludes are honoured
+   * inside the region for free — then cropped to the selection in the bitmap's
+   * own pixel space. Capturing only the region at reduced scale and enlarging
+   * it would throw away the detail that is the point of choosing a region.
+   */
+  private async finishRegionCapture(region: DragRect): Promise<void> {
+    // The overlay comes down first: it lives in the widget's shadow root, which
+    // the engine excludes either way, but a dim left up across an async capture
+    // reads as a hang.
+    const viewport = viewportSize()
+    this.regionSelector?.stop()
+
+    let blob: Blob | null = null
+    let error: string | null = null
+    try {
+      const full = await this.pulse.captureScreenshot()
+      blob = full ? await cropToRegion(full, region, viewport) : null
     } catch (e) {
       error = e instanceof Error ? e.message : 'Screenshot capture failed'
     }
