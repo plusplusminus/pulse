@@ -25,17 +25,12 @@ export function AnnotationOverlay({
       aria-hidden
       className="absolute inset-0 w-full h-full pointer-events-none"
     >
-      {/* One even-odd path dims everything outside every highlight at once. */}
-      {highlights.length > 0 && (
-        <path
-          fillRule="evenodd"
-          fill="rgba(0,0,0,0.45)"
-          d={
-            `M0 0H${natural.w}V${natural.h}H0Z` +
-            highlights.map((r) => `M${r.x} ${r.y}H${r.x + r.w}V${r.y + r.h}H${r.x}Z`).join("")
-          }
-        />
-      )}
+      {/*
+        Outline only — deliberately NOT the dim the widget's painter applies.
+        The screenshot stored for a submission is the FLATTENED export: every
+        mark, the dim included, is already in those pixels. Drawing the dim
+        again here would darken the frame a second time.
+      */}
       {highlights.map((r, i) => (
         <rect
           key={`hl-${i}`}

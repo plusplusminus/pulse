@@ -36,20 +36,23 @@ describe("AnnotationOverlay", () => {
     }
   });
 
-  it("dims outside every highlight with one even-odd path, then outlines each", () => {
+  it("outlines every highlight", () => {
     const markup = render([
       SAMPLES.highlight,
       { kind: "highlight", x: 300, y: 400, w: 60, h: 60 },
     ]);
-    expect(markup).toContain('fill-rule="evenodd"');
-    expect(markup).toContain("M0 0H1200V800H0Z");
-    expect(markup).toContain("M10 20H110V70H10Z");
-    expect(markup).toContain("M300 400H360V460H300Z");
     expect((markup.match(/stroke="#5e6ad2"/g) ?? []).length).toBe(2);
   });
 
-  it("never dims when there is no highlight", () => {
-    expect(render([SAMPLES.hide])).not.toContain("evenodd");
+  it("never re-applies the dim, which is already baked into the exported PNG", () => {
+    const markup = render([
+      SAMPLES.highlight,
+      { kind: "highlight", x: 300, y: 400, w: 60, h: 60 },
+    ]);
+    expect(markup).not.toContain("evenodd");
+    expect(markup).not.toContain("rgba(0,0,0,0.45)");
+    // The full-frame counter-rect only exists to punch holes in a dim.
+    expect(markup).not.toContain("M0 0H1200V800H0Z");
   });
 
   it("paints redactions last so a hide over a highlight still redacts", () => {
