@@ -8,4 +8,6 @@ interface Window {
   __PulseCaptureEngine?: import('./screenshot').CaptureEngine
   /** Set by webm-duration.global.js once the lazily injected fixer has run. */
   __PulseWebmDuration?: import('./capture/webm-duration').WebmDurationFixer
+  /** Set by annotation-editor.global.js once the lazily injected editor has run. */
+  __PulseAnnotationEditor?: import('./ui/annotation').AnnotationEditorModule
 }

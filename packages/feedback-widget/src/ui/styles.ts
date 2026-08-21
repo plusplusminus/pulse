@@ -46,14 +46,6 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
       color: ${c.text};
     }
 
-    :host(.pulse-annotating) {
-      position: fixed !important;
-      inset: 0 !important;
-      z-index: 2147483647 !important;
-      width: 100vw !important;
-      height: 100vh !important;
-    }
-
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     /* Trigger button */
@@ -915,123 +907,6 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
     .pulse-capturing__text {
       font-size: 13px;
       color: ${c.muted};
-    }
-
-    /* Annotation canvas */
-    .pulse-annotation {
-      position: fixed;
-      inset: 0;
-      z-index: 2147483647;
-      background: rgba(0,0,0,0.6);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .pulse-annotation__toolbar {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      padding: 6px 8px;
-      background: ${c.bg};
-      border-radius: 10px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-      margin-bottom: 12px;
-    }
-
-    .pulse-annotation__divider {
-      width: 1px;
-      height: 24px;
-      background: ${c.border};
-      margin: 0 4px;
-    }
-
-    .pulse-annotation__tool-btn {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 32px;
-      height: 32px;
-      border: none;
-      border-radius: 6px;
-      background: transparent;
-      color: ${c.muted};
-      cursor: pointer;
-      transition: background 0.12s ease, color 0.12s ease;
-      outline: none;
-    }
-
-    .pulse-annotation__tool-btn:hover {
-      background: ${c.inputBg};
-      color: ${c.text};
-    }
-
-    .pulse-annotation__tool-btn--active {
-      background: ${c.primary}1a;
-      color: ${c.primary};
-    }
-
-    .pulse-annotation__tool-btn svg {
-      width: 16px;
-      height: 16px;
-    }
-
-    .pulse-annotation__action-btn {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 4px;
-      padding: 6px 12px;
-      border: none;
-      border-radius: 6px;
-      background: transparent;
-      color: ${c.muted};
-      font-family: inherit;
-      font-size: 12px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: background 0.12s ease, color 0.12s ease;
-      outline: none;
-    }
-
-    .pulse-annotation__action-btn:hover {
-      background: ${c.inputBg};
-      color: ${c.text};
-    }
-
-    .pulse-annotation__action-btn--primary {
-      background: ${c.primary};
-      color: #ffffff;
-    }
-
-    .pulse-annotation__action-btn--primary:hover {
-      background: ${c.primaryHover};
-      color: #ffffff;
-    }
-
-    /* The bitmap keeps its native pixels; only CSS scales it to fit the viewport. */
-    .pulse-annotation__canvas-wrap {
-      position: relative;
-      max-width: min(92vw, 1100px);
-      max-height: 76vh;
-      border-radius: 8px;
-      overflow: hidden;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-      cursor: crosshair;
-      background: #ffffff;
-      touch-action: none;
-    }
-
-    .pulse-annotation__canvas-wrap canvas {
-      display: block;
-      width: 100%;
-      height: 100%;
-    }
-
-    .pulse-annotation__layer {
-      position: absolute;
-      inset: 0;
     }
 
     /* Element pick: hover overlay + label (pointer-events none so the page stays hittable) */

@@ -70,17 +70,136 @@ export interface FeedbackPayload {
 }
 
 // -- Screenshot annotations: mirror of ScreenshotAnnotation in src/lib/widget-types.ts --
+//
+// A discriminated union on `kind` (PULSE-401). Every variant lives in the
+// captured bitmap's own pixel space — never viewport or panel space — so marks
+// survive a panel resize and bake onto the full-resolution export unchanged.
+//
+// `highlight` and `hide` keep exactly the rect-only shape they had before the
+// union, so rows written by earlier widget versions still parse.
 
-export const ANNOTATION_KINDS = ['highlight', 'hide'] as const
+export const ANNOTATION_KINDS = [
+  'highlight',
+  'hide',
+  'rect',
+  'ellipse',
+  'arrow',
+  'pen',
+  'text',
+] as const
 export type AnnotationKind = (typeof ANNOTATION_KINDS)[number]
 
-/** One rect in the captured bitmap's own pixel space (never viewport or panel space). */
-export interface ScreenshotAnnotation {
-  kind: AnnotationKind
+/**
+ * Fixed palette. Small on purpose — a colour picker is a paint-program feature.
+ * Every entry has to stay visible on both a white app and a dark dashboard,
+ * which is why the set skips mid-greys.
+ */
+export const ANNOTATION_COLORS = [
+  '#ef4444', // red — default; the "look here" colour people reach for
+  '#f59e0b', // amber
+  '#22c55e', // green
+  '#3b82f6', // blue
+  '#111827', // near-black, for light screenshots
+  '#ffffff', // white, for dark screenshots
+] as const
+export type AnnotationColor = (typeof ANNOTATION_COLORS)[number]
+
+/**
+ * Stroke and font sizes are stored in IMAGE pixels, already multiplied by the
+ * capture's DPR at the moment the mark is made. A 2x capture therefore gets a
+ * 2x stroke and stays legible, and any renderer — the export, the editor
+ * preview, the admin overlay — can scale by image size alone with no DPR
+ * knowledge of its own.
+ */
+export interface AnnotationStroke {
+  color: AnnotationColor
+  /** Stroke width in image pixels. */
+  strokeWidth: number
+}
+
+/** Shared rect geometry, in image pixels. */
+export interface AnnotationRect {
   x: number
   y: number
   w: number
   h: number
+}
+
+/** Dims everything outside it and outlines it. Fixed appearance, as before. */
+export interface HighlightAnnotation extends AnnotationRect {
+  kind: 'highlight'
+}
+
+/** Solid black redaction. Fixed appearance, as before. */
+export interface HideAnnotation extends AnnotationRect {
+  kind: 'hide'
+}
+
+/** Outlined box — not filled; a filled box would hide what it points at. */
+export interface BoxAnnotation extends AnnotationRect, AnnotationStroke {
+  kind: 'rect'
+}
+
+/** Outlined ellipse inscribed in its rect. */
+export interface EllipseAnnotation extends AnnotationRect, AnnotationStroke {
+  kind: 'ellipse'
+}
+
+/** Tail (x1,y1) to head (x2,y2). The head is drawn at the second point. */
+export interface ArrowAnnotation extends AnnotationStroke {
+  kind: 'arrow'
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+}
+
+/** Freehand path as a flat [x0,y0,x1,y1,...] list — half the JSON of point objects. */
+export interface PenAnnotation extends AnnotationStroke {
+  kind: 'pen'
+  points: number[]
+}
+
+/** (x,y) is the top-left of the first line's box. */
+export interface TextAnnotation {
+  kind: 'text'
+  x: number
+  y: number
+  text: string
+  color: AnnotationColor
+  /** Font size in image pixels (DPR already applied). */
+  fontSize: number
+}
+
+export type ScreenshotAnnotation =
+  | HighlightAnnotation
+  | HideAnnotation
+  | BoxAnnotation
+  | EllipseAnnotation
+  | ArrowAnnotation
+  | PenAnnotation
+  | TextAnnotation
+
+/**
+ * Non-destructive crop, in image pixels. Applied only at export, so it can be
+ * adjusted or cleared while editing without invalidating any annotation.
+ */
+export interface CropRect {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/**
+ * Everything needed to reopen the editor exactly where the reporter left it.
+ * Annotations here are in the ORIGINAL capture's space; the crop has not been
+ * applied. The widget stores this opaquely and hands it back on re-annotate —
+ * the geometry all lives in the lazily loaded editor.
+ */
+export interface AnnotationEditorState {
+  annotations: ScreenshotAnnotation[]
+  crop: CropRect | null
 }
 
 // -- Element picks: mirror of WidgetPick in src/lib/widget-types.ts (Pulse app) ----------

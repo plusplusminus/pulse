@@ -56,6 +56,20 @@ export default defineConfig([
     define: { __PULSE_API_URL__: JSON.stringify(PULSE_API_URL) },
   },
   {
+    // Lazily injected screenshot editor (PULSE-401). Same reasoning as the
+    // capture engine: iife cannot code-split, so keeping the editor out of the
+    // embed means keeping it out of the embed's import graph entirely.
+    entry: { 'annotation-editor': 'src/entries/annotation-editor.ts' },
+    format: ['iife'],
+    globalName: '__PulseAnnotationEditor',
+    sourcemap: true,
+    clean: false,
+    target: 'es2020',
+    minify: true,
+    treeshake: true,
+    define: { __PULSE_API_URL__: JSON.stringify(PULSE_API_URL) },
+  },
+  {
     // Cookie-gated loader; unchanged semantics
     entry: { 'pulse-loader': 'src/loader.ts' },
     format: ['iife'],

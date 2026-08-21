@@ -26,6 +26,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { AnnotationOverlay } from "./annotation-overlay";
 import { cn } from "@/lib/utils";
 import {
   mediaProxyUrl,
@@ -306,28 +307,9 @@ function ScreenshotPanel({
           onError={() => setFailed(true)}
           className="max-w-full h-auto rounded-md border border-border block"
         />
-        {showAnnotations &&
-          natural &&
-          natural.w > 0 &&
-          natural.h > 0 &&
-          annotations.map((annotation, index) => (
-            <span
-              key={index}
-              aria-hidden
-              style={{
-                left: `${(annotation.x / natural.w) * 100}%`,
-                top: `${(annotation.y / natural.h) * 100}%`,
-                width: `${(annotation.w / natural.w) * 100}%`,
-                height: `${(annotation.h / natural.h) * 100}%`,
-              }}
-              className={cn(
-                "absolute rounded-sm pointer-events-none",
-                annotation.kind === "highlight"
-                  ? "ring-2 ring-primary ring-offset-0"
-                  : "bg-foreground"
-              )}
-            />
-          ))}
+        {showAnnotations && natural && natural.w > 0 && natural.h > 0 && (
+          <AnnotationOverlay annotations={annotations} natural={natural} />
+        )}
       </div>
 
       <div className="flex items-center gap-3 text-xs text-muted-foreground">

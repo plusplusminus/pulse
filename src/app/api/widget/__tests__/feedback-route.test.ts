@@ -499,6 +499,73 @@ describe("POST /api/widget/feedback (metadata bounds)", () => {
   });
 });
 
+
+
+describe("POST /api/widget/feedback (screenshot annotations)", () => {
+  /** One of every kind the editor can produce (PULSE-401). */
+  const annotations = [
+    { kind: "highlight", x: 10, y: 20, w: 100, h: 50 },
+    { kind: "hide", x: 5, y: 6, w: 7, h: 8 },
+    { kind: "rect", x: 1, y: 2, w: 30, h: 40, color: "#ef4444", strokeWidth: 3 },
+    { kind: "ellipse", x: 3, y: 4, w: 50, h: 60, color: "#3b82f6", strokeWidth: 5 },
+    { kind: "arrow", x1: 0, y1: 0, x2: 90, y2: 80, color: "#22c55e", strokeWidth: 4 },
+    { kind: "pen", points: [0, 0, 5, 5, 10, 2], color: "#f59e0b", strokeWidth: 2 },
+    { kind: "text", x: 12, y: 34, text: "this is broken", color: "#111827", fontSize: 24 },
+  ];
+
+  beforeEach(() => {
+    authOk();
+  });
+
+  it("stores every kind on the row exactly as it was sent", async () => {
+    const res = await post(
+      payload({
+        screenshotStoragePath: `${HUB_A}/screenshots/shot.png`,
+        screenshotAnnotations: annotations,
+      })
+    );
+    expect(res.status).toBe(201);
+    expect(inserts[0].screenshot_annotations).toEqual(annotations);
+  });
+
+  it("defaults to an empty array when a report carries no marks", async () => {
+    const res = await post(payload());
+    expect(res.status).toBe(201);
+    expect(inserts[0].screenshot_annotations).toEqual([]);
+  });
+
+  it("rejects an unknown kind rather than storing it", async () => {
+    const res = await post(payload({ screenshotAnnotations: [{ kind: "laser", x: 0, y: 0, w: 1, h: 1 }] }));
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects a colour outside the fixed palette", async () => {
+    const res = await post(
+      payload({
+        screenshotAnnotations: [{ ...annotations[4], color: "#123456" }],
+      })
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("still accepts a rect-only row written before the union existed", async () => {
+    const legacy = [{ kind: "highlight", x: 1, y: 2, w: 3, h: 4 }];
+    const res = await post(
+      payload({
+        screenshotStoragePath: `${HUB_A}/screenshots/shot.png`,
+        screenshotAnnotations: legacy,
+      })
+    );
+    expect(res.status).toBe(201);
+    expect(inserts[0].screenshot_annotations).toEqual(legacy);
+  });
+
+  it("caps the set so one report cannot bloat the JSONB row", async () => {
+    const many = Array.from({ length: 51 }, () => annotations[0]);
+    expect((await post(payload({ screenshotAnnotations: many }))).status).toBe(400);
+  });
+});
+
 describe("POST /api/widget/feedback (multiple attachments, PULSE-403)", () => {
   function shots(n: number, hub = HUB_A) {
     return Array.from({ length: n }, (_, i) => ({

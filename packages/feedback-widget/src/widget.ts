@@ -1,4 +1,5 @@
 import type {
+  AnnotationEditorState,
   RuntimeConfig,
   ScreenshotAnnotation,
   SubmitResult,
@@ -14,7 +15,11 @@ import {
   micNotice,
   requestMicStream,
 } from './capture/mic'
-import { AnnotationCanvas } from './ui/annotation'
+import {
+  EDITOR_LOAD_ERROR,
+  loadAnnotationEditor,
+  type AnnotationEditor,
+} from './ui/annotation'
 import { ElementPicker, type DragRect, type Point } from './capture/pick-mode'
 import { buildPick, buildMultiPick, buildAreaPick } from './capture/pick-builder'
 import { MultiSelection } from './capture/multi-select'
@@ -69,7 +74,7 @@ export class Widget {
   private styleEl!: HTMLStyleElement
   private trigger!: TriggerButton
   private panel!: FeedbackPanel
-  private annotation: AnnotationCanvas | null = null
+  private annotation: AnnotationEditor | null = null
   private picker: ElementPicker | null = null
   private popup: PickPopup | null = null
   private markers: PickMarkers | null = null
@@ -89,7 +94,10 @@ export class Widget {
   private currentScreenshot: Blob | null = null
   /** Bitmap as captured, so re-annotating never stacks rects onto a flattened export. */
   private originalScreenshot: Blob | null = null
+  /** What is submitted: in the EXPORTED image's space, so a crop is already applied. */
   private annotations: ScreenshotAnnotation[] = []
+  /** The editor's own round-trip state (original image space). Opaque here. */
+  private editorState: AnnotationEditorState | null = null
   private captureSurface: CaptureSurface | undefined
   private recorder: VideoRecorder | null = null
   private recording: VideoRecording | null = null
@@ -745,6 +753,8 @@ export class Widget {
     this.originalScreenshot = blob
     this.currentScreenshot = blob
     this.annotations = []
+    // A retake invalidates every mark AND the crop; nothing survives a new bitmap.
+    this.editorState = null
     this.captureSurface = blob ? surface : undefined
     this.panel.setScreenshot(blob)
   }
@@ -804,31 +814,52 @@ export class Widget {
   }
 
   private startAnnotation(): void {
-    // Always annotate the ORIGINAL capture: rects are re-applied from scratch,
+    // Always annotate the ORIGINAL capture: marks are re-applied from scratch,
     // so re-opening the editor never bakes the previous pass into the bitmap.
     const source = this.originalScreenshot
     if (!source) return
-    this.state = 'annotating'
+    void this.openEditor(source)
+  }
 
+  /**
+   * The editor is fetched on first use (PULSE-401), so this is the one place in
+   * the widget that can fail on a network hop. A failed load is not fatal: the
+   * screenshot stays attached exactly as captured and the panel says so.
+   */
+  private async openEditor(source: Blob): Promise<void> {
+    let editor
+    try {
+      editor = await loadAnnotationEditor(this.config.apiUrl)
+    } catch {
+      this.panel.setCaptureError(EDITOR_LOAD_ERROR)
+      return
+    }
+    // Nothing may go full-screen until the editor is actually here to fill it.
+    this.state = 'annotating'
     this.host.classList.add('pulse-annotating')
 
-    this.annotation = new AnnotationCanvas(this.shadow, {
-      onSave: (blob, annotations) => {
-        this.host.classList.remove('pulse-annotating')
-        this.currentScreenshot = blob
-        this.annotations = annotations
-        this.panel.setScreenshot(blob)
-        this.state = 'open'
-        this.annotation = null
+    this.annotation = editor.createAnnotationEditor(
+      this.shadow,
+      {
+        onSave: (blob, annotations, state) => {
+          this.host.classList.remove('pulse-annotating')
+          this.currentScreenshot = blob
+          this.annotations = annotations
+          this.editorState = state
+          this.panel.setScreenshot(blob)
+          this.state = 'open'
+          this.annotation = null
+        },
+        onCancel: () => {
+          this.host.classList.remove('pulse-annotating')
+          this.state = 'open'
+          this.annotation = null
+        },
       },
-      onCancel: () => {
-        this.host.classList.remove('pulse-annotating')
-        this.state = 'open'
-        this.annotation = null
-      },
-    })
+      this.resolveTheme()
+    )
 
-    void this.annotation.show(source, this.annotations)
+    await this.annotation.show(source, this.editorState)
   }
 
   private async retakeScreenshot(): Promise<void> {
@@ -861,6 +892,7 @@ export class Widget {
       this.originalScreenshot = null
       this.currentScreenshot = null
       this.annotations = []
+      this.editorState = null
       this.captureSurface = undefined
       // The panel clears its own opt-in on a submitted report; keep the two in
       // step, so the next reporter has to choose the microphone again.
