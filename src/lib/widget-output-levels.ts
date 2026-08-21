@@ -60,5 +60,5 @@ export const OUTPUT_LEVEL_COPY: readonly OutputLevelCopy[] = [
 ];
 
 export function outputLevelCopy(level: OutputDetailLevel): OutputLevelCopy {
-  return OUTPUT_LEVEL_COPY.find((c) => c.level === level) ?? OUTPUT_LEVEL_COPY[1];
+  return OUTPUT_LEVEL_COPY.find((c) => c.level === level)!;
 }

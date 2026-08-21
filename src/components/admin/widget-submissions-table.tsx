@@ -21,6 +21,7 @@ import {
   type SubmissionArtefacts,
 } from "@/lib/widget-artefacts";
 import type { WidgetSubmission } from "@/lib/widget-types";
+import { retrySubmissionSync } from "@/lib/widget-retry-sync";
 
 interface WidgetSubmissionsTableProps {
   hubId: string;
@@ -54,14 +55,7 @@ export function WidgetSubmissionsTable({ hubId }: WidgetSubmissionsTableProps) {
   const retrySync = async (submissionId: string) => {
     setRetryingId(submissionId);
     try {
-      const res = await fetch(
-        `/api/widget/submissions/${submissionId}/retry`,
-        { method: "POST" }
-      );
-      if (!res.ok) {
-        const err = (await res.json()) as { error?: string };
-        throw new Error(err.error ?? "Retry failed");
-      }
+      await retrySubmissionSync(submissionId);
       toast.success("Sync retried");
       refetch();
     } catch (e) {
@@ -270,7 +264,7 @@ function TypeBadge({ type }: { type: string }) {
   const styles: Record<string, string> = {
     bug: "bg-[var(--badge-orange-bg)] text-[var(--badge-orange-text)]",
     feedback: "bg-[var(--badge-blue-bg)] text-[var(--badge-blue-text)]",
-    idea: "bg-[var(--badge-purple-bg,var(--badge-blue-bg))] text-[var(--badge-purple-text,var(--badge-blue-text))]",
+    idea: "bg-[var(--badge-purple-bg)] text-[var(--badge-purple-text)]",
   };
 
   return (

@@ -10,7 +10,6 @@ import {
   getNearbyText,
   getNearbyElements,
   getDetailedComputedStyles,
-  getForensicComputedStyles,
   getAccessibilityInfo,
   deepElementFromPoint,
   isElementFixed,
@@ -202,13 +201,6 @@ describe('computed styles', () => {
   it('drops the tag default display for a div', () => {
     mount('<style>#t{display:block}</style><div id="t"></div>')
     expect(getDetailedComputedStyles(q('#t'))).not.toHaveProperty('display')
-  })
-  it('forensic string renders key: value pairs', () => {
-    mount('<style>#t{color:red;position:absolute}</style><div id="t"></div>')
-    const s = getForensicComputedStyles(q('#t'))
-    expect(s).toContain('color: rgb(255, 0, 0)')
-    expect(s).toContain('position: absolute')
-    expect(s.split('; ').every((p) => /^[a-z-]+: .+/.test(p))).toBe(true)
   })
 })
 

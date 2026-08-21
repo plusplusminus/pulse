@@ -65,8 +65,8 @@ describe("OUTPUT_LEVEL_COPY", () => {
 });
 
 describe("outputLevelCopy", () => {
-  it("looks a level up and falls back to standard", () => {
+  it("looks a level up", () => {
     expect(outputLevelCopy("forensic").label).toBe("Forensic");
-    expect(outputLevelCopy("nope" as never).level).toBe("standard");
+    expect(outputLevelCopy("compact").label).toBe("Compact");
   });
 });

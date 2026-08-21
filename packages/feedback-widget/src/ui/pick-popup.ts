@@ -1,6 +1,5 @@
 import { PICK_INTENTS, type PickIntent } from '../types'
 
-export const POPUP_WIDTH = 280
 const EDGE_CLAMP = 160
 const FLIP_THRESHOLD = 290
 const GAP = 20
