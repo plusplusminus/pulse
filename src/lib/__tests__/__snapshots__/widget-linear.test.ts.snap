@@ -9,7 +9,7 @@ Sam (sam@acme.test)
 
 ## Context
 - **Page:** https://acme.test/pricing
-- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Browser:** Mozilla/5.0 \\(Macintosh\\) Chrome/140.0
 - **Viewport:** 1440x900
 - **Submitted:** 2026-05-12T10:00:00.000Z
 
@@ -45,7 +45,7 @@ Sam (sam@acme.test)
 
 ## Context
 - **Page:** https://acme.test/pricing
-- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Browser:** Mozilla/5.0 \\(Macintosh\\) Chrome/140.0
 - **Viewport:** 1440x900
 - **Submitted:** 2026-05-12T10:00:00.000Z
 
@@ -73,7 +73,7 @@ Sam (sam@acme.test)
 **Region:** (40, 500) 620×240
 **Classes:** btn btn-primary
 **Position:** 40px, 500px (620×240px)
-**Context:** [before: "Get started"] CTA
+**Context:** \\[before: "Get started"\\] CTA
 **Comment:** This whole block feels cramped
 
 ---
@@ -89,7 +89,7 @@ Sam (sam@acme.test)
 
 ## Context
 - **Page:** https://acme.test/pricing
-- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Browser:** Mozilla/5.0 \\(Macintosh\\) Chrome/140.0
 - **Viewport:** 1440x900
 - **Submitted:** 2026-05-12T10:00:00.000Z
 
@@ -110,7 +110,7 @@ Sam (sam@acme.test)
 
 ## Page Feedback: /pricing
 
-**Environment:** viewport: 1440x900, URL: https://acme.test/pricing, UA: Mozilla/5.0 (Macintosh) Chrome/140.0, dpr: 2, captured: 2026-05-12T10:00:00.000Z
+**Environment:** viewport: 1440x900, URL: https://acme.test/pricing, UA: Mozilla/5.0 \\(Macintosh\\) Chrome/140.0, dpr: 2, captured: 2026-05-12T10:00:00.000Z
 
 ---
 
@@ -120,10 +120,10 @@ Sam (sam@acme.test)
 **Classes:** btn btn-primary
 **Position:** 40px, 500px (620×240px)
 **Full DOM Path:** \`html > body > main.app > section.hero > div.cta > button.btn\`
-**Computed Styles:** color: rgb(255,255,255); background-color: rgb(0,0,0); font-size: 16px
+**Computed Styles:** color: rgb\\(255,255,255\\); background-color: rgb\\(0,0,0\\); font-size: 16px
 **Accessibility:** role="button", aria-label="Sign up", focusable
-**Nearby Elements:** a.link, div.spacer (5 total in .cta)
-**Context:** [before: "Get started"] CTA
+**Nearby Elements:** a.link, div.spacer \\(5 total in .cta\\)
+**Context:** \\[before: "Get started"\\] CTA
 **Comment:** This whole block feels cramped
 
 ---
@@ -139,7 +139,7 @@ Sam (sam@acme.test)
 
 ## Context
 - **Page:** https://acme.test/pricing
-- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Browser:** Mozilla/5.0 \\(Macintosh\\) Chrome/140.0
 - **Viewport:** 1440x900
 - **Submitted:** 2026-05-12T10:00:00.000Z
 
@@ -180,7 +180,7 @@ Sam (sam@acme.test)
 
 ## Context
 - **Page:** https://acme.test/pricing
-- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Browser:** Mozilla/5.0 \\(Macintosh\\) Chrome/140.0
 - **Viewport:** 1440x900
 - **Submitted:** 2026-05-12T10:00:00.000Z
 
@@ -214,7 +214,7 @@ Sam (sam@acme.test)
 
 ## Context
 - **Page:** https://acme.test/pricing
-- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Browser:** Mozilla/5.0 \\(Macintosh\\) Chrome/140.0
 - **Viewport:** 1440x900
 - **Submitted:** 2026-05-12T10:00:00.000Z
 
@@ -250,7 +250,7 @@ Sam (sam@acme.test)
 
 ## Context
 - **Page:** https://acme.test/pricing
-- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Browser:** Mozilla/5.0 \\(Macintosh\\) Chrome/140.0
 - **Viewport:** 1440x900
 - **Submitted:** 2026-05-12T10:00:00.000Z
 
@@ -271,7 +271,7 @@ Sam (sam@acme.test)
 
 ## Page Feedback: /pricing
 
-**Environment:** viewport: 1440x900, URL: https://acme.test/pricing, UA: Mozilla/5.0 (Macintosh) Chrome/140.0, dpr: 1, captured: 2026-05-12T10:00:00.000Z
+**Environment:** viewport: 1440x900, URL: https://acme.test/pricing, UA: Mozilla/5.0 \\(Macintosh\\) Chrome/140.0, dpr: 1, captured: 2026-05-12T10:00:00.000Z
 
 ---
 
@@ -288,7 +288,7 @@ Sam (sam@acme.test)
 
 ## Context
 - **Page:** https://acme.test/pricing
-- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Browser:** Mozilla/5.0 \\(Macintosh\\) Chrome/140.0
 - **Viewport:** 1440x900
 - **Submitted:** 2026-05-12T10:00:00.000Z
 
@@ -324,7 +324,7 @@ Sam (sam@acme.test)
 
 ## Context
 - **Page:** https://acme.test/pricing
-- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Browser:** Mozilla/5.0 \\(Macintosh\\) Chrome/140.0
 - **Viewport:** 1440x900
 - **Submitted:** 2026-05-12T10:00:00.000Z
 
@@ -345,7 +345,7 @@ Sam (sam@acme.test)
 
 ## Page Feedback: /pricing
 
-1. **3 elements: button "Save", input [email]+1 more**: These three should line up (intent: change)
+1. **3 elements: button "Save", input \\[email\\]+1 more**: These three should line up (intent: change)
 
 ---
 *Submitted via Pulse feedback widget*"
@@ -360,7 +360,7 @@ Sam (sam@acme.test)
 
 ## Context
 - **Page:** https://acme.test/pricing
-- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Browser:** Mozilla/5.0 \\(Macintosh\\) Chrome/140.0
 - **Viewport:** 1440x900
 - **Submitted:** 2026-05-12T10:00:00.000Z
 
@@ -383,12 +383,12 @@ Sam (sam@acme.test)
 
 **Viewport:** 1440x900
 
-### 1. 3 elements: button "Save", input [email]+1 more
+### 1. 3 elements: button "Save", input \\[email\\]+1 more
 **Intent:** change
 **Location:** \`main > section.hero > .cta > button\`
 **Classes:** btn btn-primary
 **Position:** 5px, 20px (345×90px)
-**Context:** [before: "Get started"] CTA
+**Context:** \\[before: "Get started"\\] CTA
 **Comment:** These three should line up
 
 ---
@@ -404,7 +404,7 @@ Sam (sam@acme.test)
 
 ## Context
 - **Page:** https://acme.test/pricing
-- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Browser:** Mozilla/5.0 \\(Macintosh\\) Chrome/140.0
 - **Viewport:** 1440x900
 - **Submitted:** 2026-05-12T10:00:00.000Z
 
@@ -425,20 +425,20 @@ Sam (sam@acme.test)
 
 ## Page Feedback: /pricing
 
-**Environment:** viewport: 1440x900, URL: https://acme.test/pricing, UA: Mozilla/5.0 (Macintosh) Chrome/140.0, dpr: 2, captured: 2026-05-12T10:00:00.000Z
+**Environment:** viewport: 1440x900, URL: https://acme.test/pricing, UA: Mozilla/5.0 \\(Macintosh\\) Chrome/140.0, dpr: 2, captured: 2026-05-12T10:00:00.000Z
 
 ---
 
-### 1. 3 elements: button "Save", input [email]+1 more
+### 1. 3 elements: button "Save", input \\[email\\]+1 more
 **Intent:** change
 **Location:** \`main > section.hero > .cta > button\`
 **Classes:** btn btn-primary
 **Position:** 5px, 20px (345×90px)
 **Full DOM Path:** \`html > body > main.app > section.hero > div.cta > button.btn\`
-**Computed Styles:** color: rgb(255,255,255); background-color: rgb(0,0,0); font-size: 16px
+**Computed Styles:** color: rgb\\(255,255,255\\); background-color: rgb\\(0,0,0\\); font-size: 16px
 **Accessibility:** role="button", aria-label="Sign up", focusable
-**Nearby Elements:** a.link, div.spacer (5 total in .cta)
-**Context:** [before: "Get started"] CTA
+**Nearby Elements:** a.link, div.spacer \\(5 total in .cta\\)
+**Context:** \\[before: "Get started"\\] CTA
 **Comment:** These three should line up
 *Forensic data shown for first element of selection*
 
@@ -455,7 +455,7 @@ Sam (sam@acme.test)
 
 ## Context
 - **Page:** https://acme.test/pricing
-- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Browser:** Mozilla/5.0 \\(Macintosh\\) Chrome/140.0
 - **Viewport:** 1440x900
 - **Submitted:** 2026-05-12T10:00:00.000Z
 
@@ -478,7 +478,7 @@ Sam (sam@acme.test)
 
 **Viewport:** 1440x900
 
-### 1. 3 elements: button "Save", input [email]+1 more
+### 1. 3 elements: button "Save", input \\[email\\]+1 more
 **Intent:** change
 **Location:** \`main > section.hero > .cta > button\`
 **Comment:** These three should line up
@@ -496,7 +496,7 @@ Sam (sam@acme.test)
 
 ## Context
 - **Page:** https://acme.test/pricing
-- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Browser:** Mozilla/5.0 \\(Macintosh\\) Chrome/140.0
 - **Viewport:** 1440x900
 - **Submitted:** 2026-05-12T10:00:00.000Z
 
@@ -532,7 +532,7 @@ Sam (sam@acme.test)
 
 ## Context
 - **Page:** https://acme.test/pricing
-- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Browser:** Mozilla/5.0 \\(Macintosh\\) Chrome/140.0
 - **Viewport:** 1440x900
 - **Submitted:** 2026-05-12T10:00:00.000Z
 
@@ -560,7 +560,7 @@ Sam (sam@acme.test)
 **Location:** \`main > section.hero > .cta > button\`
 **Classes:** btn btn-primary
 **Position:** 120px, 340px (180×44px)
-**Context:** [before: "Get started"] CTA
+**Context:** \\[before: "Get started"\\] CTA
 **Comment:** Make this bigger
 
 ---
@@ -576,7 +576,7 @@ Sam (sam@acme.test)
 
 ## Context
 - **Page:** https://acme.test/pricing
-- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Browser:** Mozilla/5.0 \\(Macintosh\\) Chrome/140.0
 - **Viewport:** 1440x900
 - **Submitted:** 2026-05-12T10:00:00.000Z
 
@@ -597,7 +597,7 @@ Sam (sam@acme.test)
 
 ## Page Feedback: /pricing
 
-**Environment:** viewport: 1440x900, URL: https://acme.test/pricing, UA: Mozilla/5.0 (Macintosh) Chrome/140.0, dpr: 2, captured: 2026-05-12T10:00:00.000Z
+**Environment:** viewport: 1440x900, URL: https://acme.test/pricing, UA: Mozilla/5.0 \\(Macintosh\\) Chrome/140.0, dpr: 2, captured: 2026-05-12T10:00:00.000Z
 
 ---
 
@@ -607,10 +607,10 @@ Sam (sam@acme.test)
 **Classes:** btn btn-primary
 **Position:** 120px, 340px (180×44px)
 **Full DOM Path:** \`html > body > main.app > section.hero > div.cta > button.btn\`
-**Computed Styles:** color: rgb(255,255,255); background-color: rgb(0,0,0); font-size: 16px
+**Computed Styles:** color: rgb\\(255,255,255\\); background-color: rgb\\(0,0,0\\); font-size: 16px
 **Accessibility:** role="button", aria-label="Sign up", focusable
-**Nearby Elements:** a.link, div.spacer (5 total in .cta)
-**Context:** [before: "Get started"] CTA
+**Nearby Elements:** a.link, div.spacer \\(5 total in .cta\\)
+**Context:** \\[before: "Get started"\\] CTA
 **Comment:** Make this bigger
 
 ---
@@ -626,7 +626,7 @@ Sam (sam@acme.test)
 
 ## Context
 - **Page:** https://acme.test/pricing
-- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Browser:** Mozilla/5.0 \\(Macintosh\\) Chrome/140.0
 - **Viewport:** 1440x900
 - **Submitted:** 2026-05-12T10:00:00.000Z
 
@@ -667,7 +667,7 @@ Sam (sam@acme.test)
 
 ## Context
 - **Page:** https://acme.test/pricing
-- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Browser:** Mozilla/5.0 \\(Macintosh\\) Chrome/140.0
 - **Viewport:** 1440x900
 - **Submitted:** 2026-05-12T10:00:00.000Z
 
@@ -703,7 +703,7 @@ Sam (sam@acme.test)
 
 ## Context
 - **Page:** https://acme.test/pricing
-- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Browser:** Mozilla/5.0 \\(Macintosh\\) Chrome/140.0
 - **Viewport:** 1440x900
 - **Submitted:** 2026-05-12T10:00:00.000Z
 
@@ -747,7 +747,7 @@ Sam (sam@acme.test)
 
 ## Context
 - **Page:** https://acme.test/pricing
-- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Browser:** Mozilla/5.0 \\(Macintosh\\) Chrome/140.0
 - **Viewport:** 1440x900
 - **Submitted:** 2026-05-12T10:00:00.000Z
 
@@ -768,7 +768,7 @@ Sam (sam@acme.test)
 
 ## Page Feedback: /pricing
 
-**Environment:** viewport: 1440x900, URL: https://acme.test/pricing, UA: Mozilla/5.0 (Macintosh) Chrome/140.0, dpr: 2, captured: 2026-05-12T10:00:00.000Z
+**Environment:** viewport: 1440x900, URL: https://acme.test/pricing, UA: Mozilla/5.0 \\(Macintosh\\) Chrome/140.0, dpr: 2, captured: 2026-05-12T10:00:00.000Z
 
 ---
 
@@ -778,9 +778,9 @@ Sam (sam@acme.test)
 **Classes:** btn btn-primary
 **Position:** 120px, 340px (180×44px)
 **Full DOM Path:** \`html > body > main.app > section.hero > div.cta > button.btn\`
-**Computed Styles:** color: rgb(255,255,255); background-color: rgb(0,0,0); font-size: 16px
+**Computed Styles:** color: rgb\\(255,255,255\\); background-color: rgb\\(0,0,0\\); font-size: 16px
 **Accessibility:** role="button", aria-label="Sign up", focusable
-**Nearby Elements:** a.link, div.spacer (5 total in .cta)
+**Nearby Elements:** a.link, div.spacer \\(5 total in .cta\\)
 **Selected text:** "Sign up now"
 **Comment:** Reword this
 
@@ -797,7 +797,7 @@ Sam (sam@acme.test)
 
 ## Context
 - **Page:** https://acme.test/pricing
-- **Browser:** Mozilla/5.0 (Macintosh) Chrome/140.0
+- **Browser:** Mozilla/5.0 \\(Macintosh\\) Chrome/140.0
 - **Viewport:** 1440x900
 - **Submitted:** 2026-05-12T10:00:00.000Z
 
