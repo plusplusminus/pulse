@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   artefactState,
+  mediaAssetProxyUrl,
   mediaProxyUrl,
   screenshotSrc,
   submissionArtefacts,
@@ -71,6 +72,15 @@ describe("mediaProxyUrl", () => {
   it("points at the proxy route, never a signed URL", () => {
     expect(mediaProxyUrl(SUBMISSION_ID, "replay")).toBe(
       `/api/widget/media/${SUBMISSION_ID}/replay`
+    );
+  });
+});
+
+describe("mediaAssetProxyUrl", () => {
+  it("addresses one asset, under the static `asset` segment", () => {
+    const assetId = "11111111-1111-4111-8111-111111111111";
+    expect(mediaAssetProxyUrl(assetId)).toBe(
+      `/api/widget/media/asset/${assetId}`
     );
   });
 });

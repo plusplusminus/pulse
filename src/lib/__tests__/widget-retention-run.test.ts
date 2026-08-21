@@ -15,6 +15,7 @@ import {
   type RetentionDeps,
 } from "../widget-retention-run";
 import type {
+  RetentionAsset,
   RetentionPatch,
   RetentionSubmission,
 } from "../widget-retention";
@@ -56,12 +57,39 @@ function withAllMedia(n: number, days: number): RetentionSubmission {
   });
 }
 
+type PurgeCall = { ids: string[]; purgedAt: string };
+
 type Harness = {
   deps: RetentionDeps;
   deleted: string[][];
   patches: PatchCall[];
   fetchArgs: Array<{ cutoffIso: string; afterId: string | null; limit: number }>;
+  assetFetchArgs: Array<{
+    cutoffIso: string;
+    afterId: string | null;
+    limit: number;
+  }>;
+  assetPurges: PurgeCall[];
+  submissionStamps: PurgeCall[];
 };
+
+/** id must sort ascending for the cursor assertions to mean anything. */
+function assetRow(
+  n: number,
+  days: number,
+  overrides: Partial<RetentionAsset> = {}
+): RetentionAsset {
+  const tag = String(n).padStart(8, "0");
+  return {
+    id: `${tag}-0000-4000-8000-00000000000a`,
+    submission_id: `${tag}-0000-4000-8000-000000000000`,
+    kind: "screenshot",
+    storage_path: `${HUB}/screenshots/${tag}.png`,
+    created_at: agedDays(days),
+    purged_at: null,
+    ...overrides,
+  };
+}
 
 /**
  * `pages` is served one call at a time; anything after the list is an empty
@@ -72,12 +100,19 @@ function harness(
   overrides: {
     failDelete?: (paths: string[]) => boolean;
     failPatch?: (call: PatchCall) => boolean;
+    assetPages?: RetentionAsset[][];
+    failAssetPurge?: (call: PurgeCall) => boolean;
+    failSubmissionStamp?: (call: PurgeCall) => boolean;
   } = {}
 ): Harness {
   const deleted: string[][] = [];
   const patches: PatchCall[] = [];
   const fetchArgs: Harness["fetchArgs"] = [];
+  const assetFetchArgs: Harness["assetFetchArgs"] = [];
+  const assetPurges: PurgeCall[] = [];
+  const submissionStamps: PurgeCall[] = [];
   let page = 0;
+  let assetPage = 0;
 
   const deps: RetentionDeps = {
     now: NOW,
@@ -96,9 +131,33 @@ function harness(
       if (overrides.failPatch?.(call)) throw new Error("patch failed");
       patches.push(call);
     },
+    async fetchAssetPage(cutoffIso, afterId, limit) {
+      assetFetchArgs.push({ cutoffIso, afterId, limit });
+      return overrides.assetPages?.[assetPage++] ?? [];
+    },
+    async purgeAssets(ids, purgedAt) {
+      const call = { ids, purgedAt };
+      if (overrides.failAssetPurge?.(call)) throw new Error("asset purge failed");
+      assetPurges.push(call);
+    },
+    async stampSubmissionsPurged(ids, purgedAt) {
+      const call = { ids, purgedAt };
+      if (overrides.failSubmissionStamp?.(call)) {
+        throw new Error("submission stamp failed");
+      }
+      submissionStamps.push(call);
+    },
   };
 
-  return { deps, deleted, patches, fetchArgs };
+  return {
+    deps,
+    deleted,
+    patches,
+    fetchArgs,
+    assetFetchArgs,
+    assetPurges,
+    submissionStamps,
+  };
 }
 
 /** Every path handed to the bucket across all calls. */
@@ -347,5 +406,231 @@ describe("schedule", () => {
     );
     expect(entry).toBeDefined();
     expect(entry?.schedule).toBe(WIDGET_RETENTION_SCHEDULE);
+  });
+});
+
+describe("runWidgetRetention — per-asset pass (PULSE-403)", () => {
+  it("deletes the object, stamps the asset and stamps its submission", async () => {
+    const asset = assetRow(1, 200);
+    const h = harness([[]], { assetPages: [[asset]] });
+
+    const result = await runWidgetRetention(h.deps);
+
+    expect(flatDeleted(h)).toEqual([asset.storage_path]);
+    expect(h.assetPurges).toEqual([
+      { ids: [asset.id], purgedAt: NOW.toISOString() },
+    ]);
+    // Keeps the proxy answering 410 for a submission whose media only ever
+    // existed as asset rows.
+    expect(h.submissionStamps).toEqual([
+      { ids: [asset.submission_id], purgedAt: NOW.toISOString() },
+    ]);
+    expect(result).toMatchObject({
+      assetsScanned: 1,
+      assetPages: 1,
+      assetObjectsDeleted: 1,
+      assetsPurged: 1,
+      assetObjectsFailed: 0,
+      assetPurgesFailed: 0,
+      assetsTruncated: false,
+    });
+  });
+
+  it("uses the shortest window as the candidate cutoff, like the column pass", async () => {
+    const h = harness([[]], { assetPages: [[assetRow(1, 45)]] });
+    await runWidgetRetention(h.deps);
+
+    expect(h.assetFetchArgs[0]).toEqual({
+      cutoffIso: agedDays(30),
+      afterId: null,
+      limit: PAGE_SIZE,
+    });
+  });
+
+  it("keeps the per-kind windows: 45-day video goes, 45-day screenshot stays", async () => {
+    const h = harness([[]], {
+      assetPages: [
+        [
+          assetRow(1, 45, { kind: "screenshot" }),
+          assetRow(2, 45, {
+            kind: "video",
+            storage_path: `${HUB}/videos/00000002.webm`,
+          }),
+        ],
+      ],
+    });
+
+    const result = await runWidgetRetention(h.deps);
+
+    expect(flatDeleted(h)).toEqual([`${HUB}/videos/00000002.webm`]);
+    expect(result.assetsPurged).toBe(1);
+  });
+
+  it("purges every attachment of a multi-screenshot submission", async () => {
+    const submissionId = "00000001-0000-4000-8000-000000000000";
+    const assets = [1, 2, 3].map((n) =>
+      assetRow(n, 200, { submission_id: submissionId })
+    );
+    const h = harness([[]], { assetPages: [assets] });
+
+    const result = await runWidgetRetention(h.deps);
+
+    expect(result.assetsPurged).toBe(3);
+    expect(h.assetPurges[0].ids).toHaveLength(3);
+    // One stamp for the submission, not one per asset.
+    expect(h.submissionStamps).toEqual([
+      { ids: [submissionId], purgedAt: NOW.toISOString() },
+    ]);
+  });
+
+  it("skips an asset already stamped, so a same-day re-run is a no-op", async () => {
+    const h = harness([[]], {
+      assetPages: [[assetRow(1, 200, { purged_at: NOW.toISOString() })]],
+    });
+
+    const result = await runWidgetRetention(h.deps);
+
+    expect(h.deleted).toEqual([]);
+    expect(h.assetPurges).toEqual([]);
+    expect(result.assetsScanned).toBe(1);
+    expect(result.assetsPurged).toBe(0);
+  });
+
+  it("does not stamp an asset whose object failed to delete", async () => {
+    const h = harness([[]], {
+      assetPages: [[assetRow(1, 200)]],
+      failDelete: () => true,
+    });
+
+    const result = await runWidgetRetention(h.deps);
+
+    expect(h.assetPurges).toEqual([]);
+    expect(h.submissionStamps).toEqual([]);
+    expect(result.assetObjectsFailed).toBe(1);
+    expect(result.assetsPurged).toBe(0);
+  });
+
+  it("stamps the assets whose objects went and leaves the one that did not", async () => {
+    const good = assetRow(1, 200);
+    const bad = assetRow(2, 200, {
+      storage_path: `${HUB}/screenshots/stuck.png`,
+    });
+    const h = harness([[]], {
+      assetPages: [[good, bad]],
+      failDelete: (paths) => paths.includes(bad.storage_path!),
+    });
+
+    const result = await runWidgetRetention(h.deps);
+
+    expect(h.assetPurges[0].ids).toEqual([good.id]);
+    expect(result.assetsPurged).toBe(1);
+    expect(result.assetObjectsFailed).toBe(1);
+  });
+
+  it("refuses a malformed asset path rather than handing it to the bucket", async () => {
+    const h = harness([[]], {
+      assetPages: [[assetRow(1, 200, { storage_path: "../../etc/passwd" })]],
+    });
+
+    const result = await runWidgetRetention(h.deps);
+
+    expect(h.deleted).toEqual([]);
+    expect(h.assetPurges).toEqual([]);
+    expect(result.assetObjectsFailed).toBe(1);
+    expect(Sentry.captureException).toHaveBeenCalled();
+  });
+
+  it("leaves an unrecognised kind alone — no window it can prove", async () => {
+    const h = harness([[]], {
+      assetPages: [[assetRow(1, 3650, { kind: "document" })]],
+    });
+
+    const result = await runWidgetRetention(h.deps);
+
+    expect(h.deleted).toEqual([]);
+    expect(result.assetsPurged).toBe(0);
+  });
+
+  it("keeps media whose created_at will not parse", async () => {
+    const h = harness([[]], {
+      assetPages: [[assetRow(1, 200, { created_at: "not-a-date" })]],
+    });
+
+    const result = await runWidgetRetention(h.deps);
+
+    expect(h.deleted).toEqual([]);
+    expect(result.assetsPurged).toBe(0);
+  });
+
+  it("counts a failed purge and does not claim the assets were stamped", async () => {
+    const h = harness([[]], {
+      assetPages: [[assetRow(1, 200)]],
+      failAssetPurge: () => true,
+    });
+
+    const result = await runWidgetRetention(h.deps);
+
+    expect(result.assetPurgesFailed).toBe(1);
+    expect(result.assetsPurged).toBe(0);
+    expect(h.submissionStamps).toEqual([]);
+    expect(Sentry.captureException).toHaveBeenCalled();
+  });
+
+  it("does not undo the asset purge when the submission stamp fails", async () => {
+    const h = harness([[]], {
+      assetPages: [[assetRow(1, 200)]],
+      failSubmissionStamp: () => true,
+    });
+
+    const result = await runWidgetRetention(h.deps);
+
+    expect(result.assetsPurged).toBe(1);
+    expect(h.submissionStamps).toEqual([]);
+    expect(Sentry.captureException).toHaveBeenCalled();
+  });
+
+  it("pages assets in id order, advancing the cursor past each full page", async () => {
+    const full = Array.from({ length: PAGE_SIZE }, (_, i) =>
+      assetRow(i + 1, 200)
+    );
+    const h = harness([[]], { assetPages: [full, [assetRow(999, 200)]] });
+
+    const result = await runWidgetRetention(h.deps);
+
+    // The second page is short, so the loop stops rather than fetching again.
+    expect(h.assetFetchArgs.map((a) => a.afterId)).toEqual([
+      null,
+      full[full.length - 1].id,
+    ]);
+    expect(result.assetPages).toBe(2);
+    expect(result.assetsScanned).toBe(PAGE_SIZE + 1);
+  });
+
+  it("runs both passes: legacy columns and asset rows in one job", async () => {
+    const h = harness([[withAllMedia(1, 200)]], {
+      assetPages: [[assetRow(2, 200)]],
+    });
+
+    const result = await runWidgetRetention(h.deps);
+
+    expect(result.rowsUpdated).toBe(1);
+    expect(result.assetsPurged).toBe(1);
+    expect(result.objectsDeleted).toBe(3);
+    expect(result.assetObjectsDeleted).toBe(1);
+  });
+
+  it("reports zeroes for the asset pass when nothing is due", async () => {
+    const h = harness([[]]);
+    const result = await runWidgetRetention(h.deps);
+
+    expect(result).toMatchObject({
+      assetsScanned: 0,
+      assetPages: 0,
+      assetObjectsDeleted: 0,
+      assetObjectsFailed: 0,
+      assetsPurged: 0,
+      assetPurgesFailed: 0,
+      assetsTruncated: false,
+    });
   });
 });

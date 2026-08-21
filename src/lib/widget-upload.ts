@@ -47,11 +47,18 @@ export const WIDGET_MEDIA_CONTENT_TYPES: Record<
   replay: { "application/json": "json" },
 };
 
-const KIND_FOLDERS: Record<WidgetMediaKind, string> = {
+/**
+ * Bucket folder per kind. Exported because the feedback endpoint has to prove a
+ * submitted path was minted for the kind it is claimed as — a video key passed
+ * off as a screenshot is rejected there (PULSE-324/403).
+ */
+export const WIDGET_MEDIA_FOLDERS = {
   screenshot: "screenshots",
   video: "videos",
   replay: "replays",
-};
+} as const satisfies Record<WidgetMediaKind, string>;
+
+const KIND_FOLDERS: Record<WidgetMediaKind, string> = WIDGET_MEDIA_FOLDERS;
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
