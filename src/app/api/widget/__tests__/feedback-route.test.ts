@@ -226,18 +226,73 @@ describe("POST /api/widget/feedback (storage path cut-over)", () => {
     const row = inserts[0];
     expect(typeof row.id).toBe("string");
     expect(row.screenshot_storage_path).toBe(storagePath);
+    // The legacy column keeps the legacy URL shape, so the media URLs already
+    // written into Linear issues today keep resolving.
     expect(row.screenshot_url).toBe(
       `https://pulse.test/api/widget/media/${row.id}/screenshot`
     );
     expect(row).not.toHaveProperty("screenshot");
 
+    // A NEW body names the attachment directly (PULSE-403): the asset URL is
+    // unambiguous when a submission carries several screenshots.
     const [call] = mockedCreateIssue.mock.calls;
     expect(call[0].description).toContain(
-      `![Screenshot](https://pulse.test/api/widget/media/${row.id}/screenshot)`
+      `![Screenshot](https://pulse.test/api/widget/media/asset/${assetInserts[0].id})`
     );
     const body = (await res.json()) as { id: string; status: string };
     expect(body.id).toBe(row.id);
     expect(body.status).toBe("created");
+  });
+
+  it("lists several screenshots as numbered links rather than a wall of images", async () => {
+    authOk(HUB_A);
+    const res = await post(
+      payload({
+        assets: [0, 1, 2].map((i) => ({
+          kind: "screenshot",
+          storagePath: `${HUB_A}/screenshots/shot-${i}.png`,
+          position: i,
+        })),
+      })
+    );
+
+    expect(res.status).toBe(201);
+    expect(assetInserts).toHaveLength(3);
+    const [call] = mockedCreateIssue.mock.calls;
+    const body = call[0].description;
+
+    expect(body).toContain("## Screenshots");
+    expect(body).not.toContain("![Screenshot](");
+    assetInserts.forEach((asset, index) => {
+      expect(body).toContain(
+        `${index + 1}. [Screenshot ${index + 1}](https://pulse.test/api/widget/media/asset/${asset.id})`
+      );
+    });
+  });
+
+  it("falls back to the legacy embed when the asset rows could not be written", async () => {
+    authOk(HUB_A);
+    db.assetInsertError = { message: "assets table missing" };
+
+    const res = await post(
+      payload({
+        assets: [0, 1].map((i) => ({
+          kind: "screenshot",
+          storagePath: `${HUB_A}/screenshots/shot-${i}.png`,
+          position: i,
+        })),
+      })
+    );
+
+    expect(res.status).toBe(201);
+    const row = inserts[0];
+    const [call] = mockedCreateIssue.mock.calls;
+    // Nothing may name an asset URL that was never stored; the legacy column
+    // still addresses the first screenshot, so that is what the body links.
+    expect(call[0].description).not.toContain("/media/asset/");
+    expect(call[0].description).toContain(
+      `![Screenshot](https://pulse.test/api/widget/media/${row.id}/screenshot)`
+    );
   });
 
   it("rejects a storage path scoped to another hub", async () => {

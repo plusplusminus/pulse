@@ -18,6 +18,7 @@ import {
   renderSubmissionBody,
   createWidgetLinearIssue,
   widgetMediaUrl,
+  widgetScreenshotUrls,
 } from "@/lib/widget-linear";
 import { CAPTURE_SURFACES, type WidgetFeedbackResponse } from "@/lib/widget-types";
 import { STORAGE_PATH_PATTERN } from "@/lib/widget-upload";
@@ -281,11 +282,18 @@ export async function POST(request: Request) {
     // report: the submission is already saved and its legacy columns still hold
     // the first screenshot and video, so what is lost is the second and later
     // attachments — worth an alert, not worth discarding the whole report.
+    // Ids are minted here rather than by the database so the Linear body can
+    // name each attachment by its own /media/asset/:assetId URL in this same
+    // pass, exactly as submissionId is minted above.
+    const assetIds = assets.map(() => crypto.randomUUID());
+    let assetsStored = false;
+
     if (assets.length > 0) {
       const { error: assetError } = await supabaseAdmin
         .from("widget_submission_assets")
         .insert(
-          assets.map((asset) => ({
+          assets.map((asset, index) => ({
+            id: assetIds[index],
             submission_id: submissionId,
             kind: asset.kind,
             storage_path: asset.storagePath,
@@ -295,6 +303,7 @@ export async function POST(request: Request) {
             position: asset.position,
           }))
         );
+      assetsStored = !assetError;
 
       if (assetError) {
         console.error(
@@ -310,6 +319,20 @@ export async function POST(request: Request) {
         );
       }
     }
+
+    // A body may only name asset URLs that were actually written. If the asset
+    // insert failed, the legacy columns are all that survived, so the body
+    // falls back to the single embedded screenshot they still address.
+    const screenshotUrls = assetsStored
+      ? widgetScreenshotUrls(
+          submissionId,
+          assets.flatMap((asset, index) =>
+            asset.kind === "screenshot" ? [{ id: assetIds[index] }] : []
+          )
+        )
+      : screenshotUrl
+        ? [screenshotUrl]
+        : [];
 
     // Resolve team from hub_team_mappings
     const { data: mapping } = await supabaseAdmin
@@ -332,7 +355,7 @@ export async function POST(request: Request) {
             description: data.description,
             reporter: data.reporter,
             metadata: data.metadata,
-            screenshotUrl,
+            screenshotUrls,
             videoUrl,
           },
           picks: data.picks,

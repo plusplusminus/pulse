@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   artefactState,
+  galleryState,
   mediaAssetProxyUrl,
   mediaProxyUrl,
   screenshotSrc,
   submissionArtefacts,
+  submissionScreenshots,
 } from "../widget-artefacts";
-import type { WidgetSubmission } from "../widget-types";
+import type { ResolvedAsset } from "../widget-assets";
+import type { ScreenshotAnnotation, WidgetSubmission } from "../widget-types";
 
 const SUBMISSION_ID = "11111111-2222-3333-4444-555555555555";
 
@@ -161,5 +164,123 @@ describe("submissionArtefacts", () => {
     const result = submissionArtefacts(row);
     expect(result.pickCount).toBe(0);
     expect(result.annotationCount).toBe(0);
+  });
+});
+
+// PULSE-403: the detail view renders a gallery. The rules that only exist once
+// there is more than one image are which URL each points at, and which marks
+// belong to which — annotations are per asset now, not per submission.
+describe("submissionScreenshots", () => {
+  function asset(overrides: Partial<ResolvedAsset> = {}): ResolvedAsset {
+    return {
+      id: "asset-1",
+      kind: "screenshot",
+      storagePath: "hub/screenshots/a.png",
+      contentType: "image/png",
+      sizeBytes: null,
+      width: null,
+      height: null,
+      durationMs: null,
+      annotations: [],
+      position: 0,
+      purgedAt: null,
+      ...overrides,
+    };
+  }
+
+  const mark = (x: number): ScreenshotAnnotation => ({
+    kind: "highlight",
+    x,
+    y: 0,
+    w: 1,
+    h: 1,
+  });
+
+  it("points every screenshot at its own asset URL, in position order", () => {
+    const result = submissionScreenshots(
+      [
+        asset({ id: "b", position: 1 }),
+        asset({ id: "a", position: 0 }),
+        asset({ id: "v", kind: "video", position: 0 }),
+      ],
+      submission()
+    );
+
+    expect(result.map((s) => s.src)).toEqual([
+      mediaAssetProxyUrl("a"),
+      mediaAssetProxyUrl("b"),
+    ]);
+  });
+
+  it("keeps each screenshot's marks with that screenshot", () => {
+    const result = submissionScreenshots(
+      [
+        asset({ id: "a", position: 0, annotations: [mark(1)] }),
+        asset({ id: "b", position: 1, annotations: [mark(2), mark(3)] }),
+      ],
+      submission()
+    );
+
+    expect(result.map((s) => s.annotations.length)).toEqual([1, 2]);
+    expect(result[1].annotations[0]).toMatchObject({ x: 2 });
+  });
+
+  it("falls back to the kind URL for an attachment still in a legacy column", () => {
+    const result = submissionScreenshots(
+      [asset({ id: null })],
+      submission({ screenshot_storage_path: "hub/screenshots/a.png" })
+    );
+    expect(result[0].src).toBe(mediaProxyUrl(SUBMISSION_ID, "screenshot"));
+  });
+
+  it("still renders a pre-PULSE-324 row that carries a URL and no path at all", () => {
+    const result = submissionScreenshots(
+      [],
+      submission({
+        screenshot_url: "https://legacy.example.com/a.png",
+        screenshot_annotations: [mark(9)],
+      })
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].src).toBe("https://legacy.example.com/a.png");
+    expect(result[0].annotations).toHaveLength(1);
+  });
+
+  it("reports a purged asset as purged with nothing to fetch, siblings unaffected", () => {
+    const result = submissionScreenshots(
+      [
+        asset({ id: "a", position: 0, purgedAt: "2026-08-20T00:00:00.000Z" }),
+        asset({ id: "b", position: 1 }),
+      ],
+      submission()
+    );
+    expect(result[0]).toMatchObject({ purged: true, src: null });
+    expect(result[1]).toMatchObject({ purged: false, src: mediaAssetProxyUrl("b") });
+  });
+
+  it("gives every image a distinct key, so the gallery does not collapse", () => {
+    const result = submissionScreenshots(
+      [asset({ id: "a", position: 0 }), asset({ id: "b", position: 1 })],
+      submission()
+    );
+    expect(new Set(result.map((s) => s.key)).size).toBe(2);
+  });
+
+  describe("galleryState", () => {
+    const present = { key: "a", src: "/x", annotations: [], purged: false };
+    const gone = { key: "b", src: null, annotations: [], purged: true };
+
+    it("stays present while any one image is still fetchable", () => {
+      expect(galleryState([gone, present], null)).toBe("present");
+    });
+
+    it("is purged only once every image has gone", () => {
+      expect(galleryState([gone], null)).toBe("purged");
+    });
+
+    it("distinguishes never-attached from deleted", () => {
+      expect(galleryState([], null)).toBe("absent");
+      expect(galleryState([], "2026-08-20T00:00:00.000Z")).toBe("purged");
+    });
   });
 });
