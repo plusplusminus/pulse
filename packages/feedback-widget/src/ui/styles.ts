@@ -487,6 +487,110 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
       border-color: ${c.muted}59;
     }
 
+    /* Attachments (PULSE-402) — chips that open one preview, not stacked blocks. */
+    .pulse-attached {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .pulse-attached__row {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .pulse-chip {
+      display: flex;
+      align-items: stretch;
+      max-width: 100%;
+      border: 1px solid ${c.border};
+      border-radius: 6px;
+      background: ${c.inputBg};
+      overflow: hidden;
+    }
+
+    .pulse-chip--open {
+      border-color: ${c.primary};
+    }
+
+    .pulse-chip__open {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      min-width: 0;
+      height: 24px;
+      padding: 0 7px;
+      border: none;
+      background: transparent;
+      color: ${c.text};
+      font-family: inherit;
+      font-size: 11.5px;
+      font-weight: 500;
+      white-space: nowrap;
+      cursor: pointer;
+      outline: none;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .pulse-chip__open span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .pulse-chip__open svg {
+      width: 12px;
+      height: 12px;
+      flex-shrink: 0;
+      color: ${c.muted};
+    }
+
+    .pulse-chip--open .pulse-chip__open svg {
+      color: ${c.primary};
+    }
+
+    .pulse-chip__open:hover,
+    .pulse-chip__remove:hover {
+      background: ${c.border};
+    }
+
+    .pulse-chip__open:focus-visible,
+    .pulse-chip__remove:focus-visible {
+      box-shadow: inset 0 0 0 2px ${c.primary};
+    }
+
+    .pulse-chip__remove {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      flex-shrink: 0;
+      padding: 0;
+      border: none;
+      border-left: 1px solid ${c.border};
+      background: transparent;
+      color: ${c.muted};
+      cursor: pointer;
+      outline: none;
+    }
+
+    .pulse-chip__remove svg {
+      width: 10px;
+      height: 10px;
+    }
+
+    .pulse-chip__remove:hover {
+      color: ${c.error};
+    }
+
+    /* Previews sit inside the attachments block now, so they carry no margin. */
+    .pulse-attached .pulse-screenshot,
+    .pulse-attached .pulse-picks {
+      margin-bottom: 0;
+    }
+
     /* Popover surface — floats in the shadow root so the panel never reflows. */
     .pulse-pop {
       position: fixed;
@@ -624,15 +728,6 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
       display: block;
       max-height: 160px;
       background: #000000;
-    }
-
-    .pulse-video__meta {
-      padding: 6px 8px;
-      border-top: 1px solid ${c.border};
-      font-size: 11px;
-      font-weight: 500;
-      color: ${c.muted};
-      font-variant-numeric: tabular-nums;
     }
 
     /* Sits inside the preview card, so it needs the card's padding and a rule

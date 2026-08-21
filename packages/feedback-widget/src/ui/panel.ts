@@ -51,6 +51,8 @@ export class FeedbackPanel {
   private voiceOverNote: string | null = null
   private uploadPercent: number | null = null
   private picks: WidgetPick[] = []
+  /** Which attachment chip is showing its preview; one at a time, or none. */
+  private expanded: 'shot' | 'video' | 'picks' | null = null
   private paused = false
   private captureError: string | null = null
   private pauseBtn: HTMLButtonElement | null = null
@@ -255,17 +257,8 @@ export class FeedbackPanel {
 
     this.bodyEl.appendChild(this.renderAttachRow())
 
-    if (this.config.allowElementPick && this.picks.length > 0) {
-      this.bodyEl.appendChild(this.renderPicksSection())
-    }
-
-    if (this.screenshotBlob) {
-      this.bodyEl.appendChild(this.renderScreenshotPreview())
-    }
-
-    if (this.videoBlob) {
-      this.bodyEl.appendChild(this.renderVideoPreview())
-    }
+    const attachments = this.renderAttachments()
+    if (attachments) this.bodyEl.appendChild(attachments)
 
     this.bodyEl.appendChild(this.createField('Email', 'email', 'input', true, 'your@email.com'))
 
@@ -355,6 +348,115 @@ export class FeedbackPanel {
     }
 
     return section
+  }
+
+  // -- attachments as chips (PULSE-402) ----------------------------------------
+
+  /**
+   * Evidence collapses to one row of chips. Each opens its own preview and
+   * nothing else's, so attaching a video no longer pushes Submit off screen
+   * at exactly the moment the reporter wants it.
+   */
+  private renderAttachments(): HTMLElement | null {
+    const hasPicks = this.config.allowElementPick && this.picks.length > 0
+    if (!this.screenshotBlob && !this.videoBlob && !hasPicks) return null
+
+    const section = document.createElement('div')
+    section.className = 'pulse-attached'
+
+    const row = document.createElement('div')
+    row.className = 'pulse-attached__row'
+    row.setAttribute('role', 'group')
+    row.setAttribute('aria-label', 'Attached')
+
+    const caption = document.createElement('span')
+    caption.className = 'pulse-attach__caption'
+    caption.textContent = 'Attached'
+    row.appendChild(caption)
+
+    if (this.screenshotBlob) {
+      row.appendChild(
+        this.chip('shot', 'Screenshot', icon(ICONS.screenshot), 'Remove screenshot', () => this.setScreenshot(null))
+      )
+    }
+
+    if (this.videoBlob) {
+      const meta = `${FeedbackPanel.formatDuration(this.videoDurationMs)} · ${FeedbackPanel.formatBytes(
+        this.videoBlob.size
+      )}`
+      row.appendChild(
+        this.chip(
+          'video',
+          meta,
+          icon(ICONS.play, { filled: [0] }),
+          'Remove recording',
+          () => this.config.onRemoveVideo(),
+          'pulse-video__meta'
+        )
+      )
+    }
+
+    if (hasPicks) {
+      // No cross on this one: a single control that dropped every pick at once
+      // would be a destructive aggregate with no undo. Removal stays per pick,
+      // inside the list the chip opens.
+      row.appendChild(
+        this.chip('picks', `${this.picks.length} pick${this.picks.length === 1 ? '' : 's'}`, icon(ICONS.element))
+      )
+    }
+
+    section.appendChild(row)
+
+    if (this.expanded === 'shot' && this.screenshotBlob) section.appendChild(this.renderScreenshotPreview())
+    if (this.expanded === 'video' && this.videoBlob) section.appendChild(this.renderVideoPreview())
+    if (this.expanded === 'picks' && hasPicks) section.appendChild(this.renderPicksSection())
+
+    return section
+  }
+
+  private chip(
+    key: 'shot' | 'video' | 'picks',
+    label: string,
+    glyph: SVGSVGElement,
+    removeLabel?: string,
+    onRemove?: () => void,
+    labelClass?: string
+  ): HTMLElement {
+    const wrap = document.createElement('div')
+    wrap.className = `pulse-chip${this.expanded === key ? ' pulse-chip--open' : ''}`
+
+    const open = document.createElement('button')
+    open.type = 'button'
+    open.className = `pulse-chip__open pulse-chip__open--${key}`
+    open.setAttribute('aria-expanded', String(this.expanded === key))
+    open.appendChild(glyph)
+    const text = document.createElement('span')
+    if (labelClass) text.className = labelClass
+    text.textContent = label
+    open.appendChild(text)
+    open.addEventListener('click', () => {
+      this.expanded = this.expanded === key ? null : key
+      this.renderForm()
+    })
+    wrap.appendChild(open)
+
+    if (onRemove && removeLabel) {
+      const remove = document.createElement('button')
+      remove.type = 'button'
+      remove.className = 'pulse-chip__remove'
+      remove.setAttribute('aria-label', removeLabel)
+      remove.title = removeLabel
+      remove.appendChild(icon(ICONS.close))
+      remove.addEventListener('click', () => {
+        // Collapsing first keeps a stale preview from flashing between the
+        // removal and the re-render that drops the chip.
+        if (this.expanded === key) this.expanded = null
+        onRemove()
+      })
+      wrap.appendChild(remove)
+    }
+
+    return wrap
   }
 
   private attachButton(
@@ -759,15 +861,6 @@ export class FeedbackPanel {
       container.appendChild(video)
     }
 
-    // The live readout is impossible while the widget is hidden, so the numbers
-    // land here the moment the panel comes back (PULSE-338).
-    const meta = document.createElement('div')
-    meta.className = 'pulse-video__meta'
-    meta.textContent = `${FeedbackPanel.formatDuration(this.videoDurationMs)} · ${FeedbackPanel.formatBytes(
-      this.videoBlob?.size ?? 0
-    )}`
-    container.appendChild(meta)
-
     const actions = document.createElement('div')
     actions.className = 'pulse-screenshot__actions'
 
@@ -800,6 +893,7 @@ export class FeedbackPanel {
 
   /** Blob and its measured duration move together; null clears both. */
   setVideo(blob: Blob | null, durationMs = 0): void {
+    if (!blob && this.expanded === 'video') this.expanded = null
     if (this.videoUrl) {
       URL.revokeObjectURL(this.videoUrl)
       this.videoUrl = null
@@ -1002,6 +1096,7 @@ export class FeedbackPanel {
   private resetForm(): void {
     this.formData = { title: '', type: 'bug', email: this.user.email ?? '' }
     this.picks = []
+    this.expanded = null
     this.screenshotBlob = null
     if (this.screenshotUrl) {
       URL.revokeObjectURL(this.screenshotUrl)
@@ -1116,11 +1211,13 @@ export class FeedbackPanel {
   }
 
   setPicks(picks: WidgetPick[]): void {
+    if (picks.length === 0 && this.expanded === 'picks') this.expanded = null
     this.picks = [...picks]
     if (this.state === 'open') this.renderForm()
   }
 
   setScreenshot(blob: Blob | null): void {
+    if (!blob && this.expanded === 'shot') this.expanded = null
     if (this.screenshotUrl) {
       URL.revokeObjectURL(this.screenshotUrl)
       this.screenshotUrl = null

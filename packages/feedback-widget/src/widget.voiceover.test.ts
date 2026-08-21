@@ -184,6 +184,11 @@ function notes(): string[] {
 }
 
 /** Voice-over is a setting on Record, so it is reached through Record's caret. */
+/** PULSE-402: a finished recording is a chip; its preview is one click in. */
+function openVideo(): void {
+  click('.pulse-chip__open--video')
+}
+
 function openRecordOptions(): void {
   click('.pulse-caret[aria-label="Recording options"]')
 }
@@ -344,6 +349,7 @@ describe('a microphone that will not open', () => {
     expect(q('.pulse-recbar')).not.toBeNull()
     click('.pulse-recbar__btn--stop')
     await flush()
+    openVideo()
     expect(q('.pulse-video__player')).not.toBeNull()
   })
 
@@ -470,6 +476,7 @@ describe('recording with a voice-over', () => {
 
     expect(micTrack.stop).toHaveBeenCalledTimes(1)
     expect(videoTrack.stop).toHaveBeenCalledTimes(1)
+    openVideo()
     expect(q('.pulse-video__player')).not.toBeNull()
   })
 
@@ -486,6 +493,7 @@ describe('recording with a voice-over', () => {
     await flush()
 
     expect(micTrack.stop).toHaveBeenCalledTimes(1)
+    openVideo()
     expect(q('.pulse-video__player')).not.toBeNull()
   })
 

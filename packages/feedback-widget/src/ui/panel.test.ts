@@ -4,6 +4,11 @@ import { BAR_IN_RECORDING_NOTICE, FeedbackPanel, VOICE_OVER_NOTICE } from './pan
 import { CROSS_ORIGIN_NOTICE, ENGINE_LOAD_ERROR } from '../screenshot'
 import type { WidgetPick } from '../types'
 
+/** PULSE-402: a finished recording is a chip; its preview is one click in. */
+function openVideo(): void {
+  ;(shadow.querySelector('.pulse-chip__open--video') as HTMLButtonElement).click()
+}
+
 function pick(id: string, name: string, comment: string, intent: WidgetPick['intent'] = 'fix'): WidgetPick {
   return {
     id,
@@ -70,11 +75,40 @@ beforeEach(() => {
 })
 
 describe('picks list', () => {
+  // PULSE-402: picks collapse to one chip; the list is what the chip opens.
+  const openPicks = () => (shadow.querySelector('.pulse-chip__open--picks') as HTMLButtonElement).click()
+
+  it('collapses to a single chip that counts them and opens the list', () => {
+    const panel = makePanel()
+    panel.setState('open')
+    expect(shadow.querySelector('.pulse-chip__open--picks')).toBeNull()
+
+    panel.setPicks([pick('a', 'button "Save"', '')])
+    expect(shadow.querySelector('.pulse-chip__open--picks span')?.textContent).toBe('1 pick')
+    expect(shadow.querySelector('.pulse-picks__list')).toBeNull()
+
+    panel.setPicks([pick('a', 'button "Save"', ''), pick('b', 'nav', '')])
+    expect(shadow.querySelector('.pulse-chip__open--picks span')?.textContent).toBe('2 picks')
+
+    openPicks()
+    expect(shadow.querySelectorAll('.pulse-picks__row')).toHaveLength(2)
+  })
+
+  // A single control dropping every pick at once would be destructive with no
+  // undo, so the chip only opens — removal stays per pick, inside the list.
+  it('offers no bulk remove on the picks chip', () => {
+    const panel = makePanel()
+    panel.setState('open')
+    panel.setPicks([pick('a', 'button "Save"', ''), pick('b', 'nav', '')])
+    expect(shadow.querySelector('.pulse-chip__open--picks')!.closest('.pulse-chip')!.querySelector('.pulse-chip__remove')).toBeNull()
+  })
+
   it('renders a row per pick with name, intent badge, truncated comment and edit/delete', () => {
     const panel = makePanel()
     panel.setState('open')
     const long = 'x'.repeat(120)
     panel.setPicks([pick('a', 'button "Save"', long), pick('b', '3 elements: a, b+1 more', 'short', 'question')])
+    openPicks()
 
     const rows = shadow.querySelectorAll('.pulse-picks__row')
     expect(rows).toHaveLength(2)
@@ -90,6 +124,7 @@ describe('picks list', () => {
     const panel = makePanel()
     panel.setState('open')
     panel.setPicks([pick('a', 'button "Save"', 'c')])
+    openPicks()
 
     const row = shadow.querySelector('.pulse-picks__row')!
     ;(row.querySelector('.pulse-picks__action--edit') as HTMLButtonElement).click()
@@ -122,6 +157,82 @@ describe('picks list', () => {
 // PULSE-402/399: the row's composition follows the site's capture gates and
 // nothing else, so evidence arriving can never make Record slide under a
 // pointer that was aiming at Screenshot.
+describe('attachment chips (PULSE-402)', () => {
+  const chipLabels = () =>
+    Array.from(shadow.querySelectorAll('.pulse-attached__row .pulse-chip__open span')).map((e) => e.textContent)
+
+  beforeEach(() => {
+    URL.createObjectURL = vi.fn(() => 'blob:pulse/0')
+    URL.revokeObjectURL = vi.fn()
+  })
+
+  it('shows nothing at all until something is attached', () => {
+    const panel = makePanel(true, { allowScreenshot: true, allowVideo: true })
+    panel.setState('open')
+    expect(shadow.querySelector('.pulse-attached')).toBeNull()
+  })
+
+  it('names each attachment in one row, the recording by its length and weight', () => {
+    const panel = makePanel(true, { allowScreenshot: true, allowVideo: true })
+    panel.setState('open')
+    panel.setScreenshot(new Blob(['png'], { type: 'image/png' }))
+    panel.setVideo(new Blob(['x'.repeat(2048)], { type: 'video/webm' }), 12_000)
+    panel.setPicks([pick('a', 'button "Save"', ''), pick('b', 'nav', '')])
+
+    expect(chipLabels()).toEqual(['Screenshot', '0:12 · 2 KB', '2 picks'])
+  })
+
+  it('stays collapsed by default, so evidence never pushes Submit off screen', () => {
+    const panel = makePanel(true, { allowScreenshot: true, allowVideo: true })
+    panel.setState('open')
+    panel.setScreenshot(new Blob(['png'], { type: 'image/png' }))
+    panel.setVideo(new Blob(['x'], { type: 'video/webm' }), 12_000)
+
+    expect(shadow.querySelector('.pulse-screenshot__img')).toBeNull()
+    expect(shadow.querySelector('.pulse-video__player')).toBeNull()
+  })
+
+  it('opens one preview at a time — a second chip closes the first', () => {
+    const panel = makePanel(true, { allowScreenshot: true, allowVideo: true })
+    panel.setState('open')
+    panel.setScreenshot(new Blob(['png'], { type: 'image/png' }))
+    panel.setVideo(new Blob(['x'], { type: 'video/webm' }), 12_000)
+
+    ;(shadow.querySelector('.pulse-chip__open--shot') as HTMLButtonElement).click()
+    expect(shadow.querySelector('.pulse-screenshot__img')).not.toBeNull()
+    expect(shadow.querySelector('.pulse-chip__open--shot')!.getAttribute('aria-expanded')).toBe('true')
+
+    openVideo()
+    expect(shadow.querySelector('.pulse-screenshot__img')).toBeNull()
+    expect(shadow.querySelector('.pulse-video__player')).not.toBeNull()
+    expect(shadow.querySelector('.pulse-chip__open--shot')!.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('closes again on a second click of the same chip', () => {
+    const panel = makePanel(true, { allowScreenshot: true })
+    panel.setState('open')
+    panel.setScreenshot(new Blob(['png'], { type: 'image/png' }))
+
+    ;(shadow.querySelector('.pulse-chip__open--shot') as HTMLButtonElement).click()
+    ;(shadow.querySelector('.pulse-chip__open--shot') as HTMLButtonElement).click()
+    expect(shadow.querySelector('.pulse-screenshot__img')).toBeNull()
+  })
+
+  it('the screenshot chip removes it and frees the blob URL behind it', () => {
+    const panel = makePanel(true, { allowScreenshot: true })
+    panel.setState('open')
+    panel.setScreenshot(new Blob(['png'], { type: 'image/png' }))
+    ;(shadow.querySelector('.pulse-chip__open--shot') as HTMLButtonElement).click()
+
+    ;(shadow.querySelector('.pulse-chip__remove[aria-label="Remove screenshot"]') as HTMLButtonElement).click()
+
+    expect(panel.getScreenshot()).toBeNull()
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:pulse/0')
+    expect(shadow.querySelector('.pulse-attached')).toBeNull()
+    expect(shadow.querySelector('.pulse-screenshot__img')).toBeNull()
+  })
+})
+
 describe('attach row layout', () => {
   const rowShape = () =>
     Array.from(shadow.querySelectorAll('.pulse-attach__row > *'))
@@ -139,8 +250,7 @@ describe('attach row layout', () => {
     panel.setVideo(new Blob(['x'.repeat(2048)], { type: 'video/webm' }), 12_000)
     panel.setPicks([pick('a', 'button "Save"', ''), pick('b', 'nav', '')])
 
-    expect(shadow.querySelector('.pulse-video__player')).not.toBeNull()
-    expect(shadow.querySelector('.pulse-screenshot__img')).not.toBeNull()
+    expect(shadow.querySelectorAll('.pulse-attached__row .pulse-chip')).toHaveLength(3)
     expect(rowShape()).toBe(before)
   })
 
@@ -340,6 +450,7 @@ describe('video recording controls (PULSE-338)', () => {
     expect(shadow.textContent).not.toContain(BAR_IN_RECORDING_NOTICE)
 
     panel.setVideo(clip(2048), 5_000)
+    openVideo()
     expect(shadow.textContent).toContain(BAR_IN_RECORDING_NOTICE)
 
     panel.setVideo(null)
@@ -352,12 +463,14 @@ describe('video recording controls (PULSE-338)', () => {
     panel.setState('open')
 
     panel.setVideo(clip(2048), 83_000)
+    // The readout rides on the chip; the player is one click in.
+    expect(shadow.querySelector('.pulse-video__meta')?.textContent).toBe('1:23 · 2 KB')
+    openVideo()
 
     const video = shadow.querySelector('.pulse-video__player') as HTMLVideoElement
     expect(video).not.toBeNull()
     expect(video.controls).toBe(true)
     expect(video.src).toBe('blob:pulse/0')
-    expect(shadow.querySelector('.pulse-video__meta')?.textContent).toBe('1:23 · 2 KB')
     // PULSE-402/399: attaching evidence must not move the attach row.
     expect(recordBtn()).not.toBeNull()
     expect(panel.getVideo()?.size).toBe(2048)
@@ -368,6 +481,7 @@ describe('video recording controls (PULSE-338)', () => {
     const panel = makePanel(false, { allowVideo: true })
     panel.setState('open')
     panel.setVideo(clip(1024), 5_000)
+    openVideo()
 
     const rerecord = Array.from(shadow.querySelectorAll('.pulse-screenshot__btn')).find(
       (b) => b.textContent === 'Re-record'
@@ -381,18 +495,19 @@ describe('video recording controls (PULSE-338)', () => {
     expect(shadow.querySelector('.pulse-video__meta')?.textContent).toBe('0:09 · 4 KB')
   })
 
-  it('remove clears the recording and brings the record button back', () => {
+  it('the chip removes the recording and frees the blob behind it', () => {
     const urls = stubObjectUrls()
     const panel = makePanel(false, { allowVideo: true })
     panel.setState('open')
     panel.setVideo(clip(), 3_000)
 
-    const remove = shadow.querySelector('.pulse-screenshot__btn--danger') as HTMLButtonElement
+    const remove = shadow.querySelector('.pulse-chip__remove[aria-label="Remove recording"]') as HTMLButtonElement
     remove.click()
     expect(config.onRemoveVideo).toHaveBeenCalledTimes(1)
 
     // The widget owns the blob, so the panel only clears on setVideo(null).
     panel.setVideo(null)
+    expect(shadow.querySelector('.pulse-chip__open--video')).toBeNull()
     expect(shadow.querySelector('.pulse-video__player')).toBeNull()
     expect(recordBtn()).not.toBeNull()
     expect(panel.getVideo()).toBeNull()
@@ -404,6 +519,7 @@ describe('video recording controls (PULSE-338)', () => {
     const panel = makePanel(false, { allowVideo: false })
     panel.setState('open')
     panel.setVideo(clip(), 1_000)
+    openVideo()
     expect(shadow.querySelector('.pulse-video__player')).not.toBeNull()
   })
 
@@ -536,6 +652,7 @@ describe('voice-over opt-in (PULSE-400)', () => {
     panel.setVoiceOver(true)
     panel.setVideo(new Blob(['x'], { type: 'video/webm;codecs=vp9,opus' }), 1_000)
 
+    openVideo()
     openRecordOptions()
     expect(toggle()!.getAttribute('aria-pressed')).toBe('true')
     expect(shadow.querySelector('.pulse-video__player')).not.toBeNull()
