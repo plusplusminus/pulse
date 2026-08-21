@@ -4,8 +4,54 @@ import { withHubAuthWrite, type HubAuthError } from "@/lib/hub-auth";
 import {
   renderSubmissionBody,
   createWidgetLinearIssue,
+  widgetScreenshotUrls,
 } from "@/lib/widget-linear";
+import {
+  assetsOfKind,
+  resolveSubmissionAssets,
+  type WidgetSubmissionAsset,
+} from "@/lib/widget-assets";
 import type { WidgetSubmission } from "@/lib/widget-types";
+
+const ASSET_COLUMNS =
+  "id, submission_id, kind, storage_path, content_type, size_bytes, width, height, duration_ms, annotations, position, purged_at, created_at";
+
+/**
+ * A retry must render what a fresh submission would, so it reads the same
+ * attachments (PULSE-403) rather than only `screenshot_url`. Dual-read: asset
+ * rows where they exist, the legacy columns where they do not.
+ */
+async function screenshotUrlsFor(sub: WidgetSubmission): Promise<string[]> {
+  const { data, error } = await supabaseAdmin
+    .from("widget_submission_assets")
+    .select(ASSET_COLUMNS)
+    .eq("submission_id", sub.id)
+    .eq("kind", "screenshot")
+    .order("position", { ascending: true })
+    .order("id", { ascending: true });
+
+  if (error) {
+    console.warn(
+      `Retry ${sub.id}: asset lookup failed, falling back to legacy columns:`,
+      error.message
+    );
+  }
+
+  const screenshots = assetsOfKind(
+    resolveSubmissionAssets({
+      assets: (data ?? null) as WidgetSubmissionAsset[] | null,
+      submission: sub,
+    }),
+    "screenshot"
+  );
+
+  // Rows created before PULSE-324 carry a URL and no storage path at all, so
+  // resolveSubmissionAssets sees nothing to resolve.
+  if (screenshots.length === 0) {
+    return sub.screenshot_url ? [sub.screenshot_url] : [];
+  }
+  return widgetScreenshotUrls(sub.id, screenshots);
+}
 
 export async function POST(
   _request: Request,
@@ -67,6 +113,8 @@ export async function POST(
       .eq("id", sub.widget_config_id)
       .single();
 
+    const screenshotUrls = await screenshotUrlsFor(sub);
+
     try {
       const description = renderSubmissionBody({
         submission: {
@@ -76,7 +124,7 @@ export async function POST(
             name: sub.reporter_name ?? undefined,
           },
           metadata: sub.metadata,
-          screenshotUrl: sub.screenshot_url ?? undefined,
+          screenshotUrls,
         },
         picks: sub.picks,
         config: widgetConfig ?? undefined,

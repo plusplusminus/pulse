@@ -35,10 +35,32 @@ export function widgetMediaAssetUrl(assetId: string): string {
   return `${getAppUrl()}/api/widget/media/asset/${assetId}`;
 }
 
+/**
+ * Proxy URL per screenshot, in the reporter's order (PULSE-403). An asset with
+ * an id is addressed directly; one still living in a legacy column falls back
+ * to the `:submissionId/:kind` URL, which resolves to the first of its kind.
+ */
+export function widgetScreenshotUrls(
+  submissionId: string,
+  screenshots: readonly { id: string | null }[]
+): string[] {
+  return screenshots.map((asset) =>
+    asset.id
+      ? widgetMediaAssetUrl(asset.id)
+      : widgetMediaUrl(submissionId, "screenshot")
+  );
+}
+
 export type WidgetSubmissionBody = {
   description?: string;
   reporter: { email: string; name?: string };
   metadata: WidgetMetadata;
+  /** Every screenshot, in the reporter's order (PULSE-403). */
+  screenshotUrls?: string[];
+  /**
+   * The single-screenshot form. Still accepted so a caller that has one URL
+   * and no asset rows — a legacy row on retry — needs no extra query.
+   */
   screenshotUrl?: string;
   videoUrl?: string;
   replayUrl?: string;
@@ -50,8 +72,15 @@ export type WidgetSubmissionBody = {
  * and the footer.
  */
 function submissionSections(submission: WidgetSubmissionBody): string[] {
-  const { description, reporter, metadata, screenshotUrl, videoUrl, replayUrl } =
-    submission;
+  const {
+    description,
+    reporter,
+    metadata,
+    screenshotUrls,
+    screenshotUrl,
+    videoUrl,
+    replayUrl,
+  } = submission;
   const lines: string[] = [];
 
   lines.push("## Feedback");
@@ -92,11 +121,24 @@ function submissionSections(submission: WidgetSubmissionBody): string[] {
   }
   lines.push("");
 
-  lines.push("## Screenshot");
-  if (screenshotUrl) {
-    lines.push(`![Screenshot](${screenshotUrl})`);
-  } else {
+  // One image is still embedded — that is what makes a bug report readable at
+  // a glance. Several are listed as links instead (PULSE-403): six embedded
+  // screenshots turn the issue into a wall of images nobody can scroll past.
+  const screenshots = screenshotUrls?.length
+    ? screenshotUrls
+    : screenshotUrl
+      ? [screenshotUrl]
+      : [];
+
+  lines.push(screenshots.length > 1 ? "## Screenshots" : "## Screenshot");
+  if (screenshots.length === 0) {
     lines.push("_No screenshot attached_");
+  } else if (screenshots.length === 1) {
+    lines.push(`![Screenshot](${screenshots[0]})`);
+  } else {
+    screenshots.forEach((url, index) => {
+      lines.push(`${index + 1}. [Screenshot ${index + 1}](${url})`);
+    });
   }
   lines.push("");
 

@@ -29,11 +29,14 @@ import { toast } from "sonner";
 import { AnnotationOverlay } from "./annotation-overlay";
 import { cn } from "@/lib/utils";
 import {
+  galleryState,
   mediaProxyUrl,
-  screenshotSrc,
   submissionArtefacts,
+  submissionScreenshots,
   type ArtefactState,
+  type SubmissionScreenshot,
 } from "@/lib/widget-artefacts";
+import type { ResolvedAsset } from "@/lib/widget-assets";
 import type {
   PickIntent,
   ScreenshotAnnotation,
@@ -65,17 +68,23 @@ const INTENT_BADGE: Record<PickIntent, string> = {
 export function SubmissionDetail({
   hubId,
   submission,
+  assets = [],
 }: {
   hubId: string;
   submission: WidgetSubmission;
+  /** Dual-read attachments (PULSE-403); empty falls back to legacy columns. */
+  assets?: ResolvedAsset[];
 }) {
   const router = useRouter();
   const [retrying, setRetrying] = useState(false);
 
   const artefacts = submissionArtefacts(submission);
   const picks = submission.picks ?? [];
-  const annotations = submission.screenshot_annotations ?? [];
-  const imageSrc = screenshotSrc(submission);
+  const screenshots = submissionScreenshots(assets, submission);
+  const annotationCount = screenshots.reduce(
+    (total, shot) => total + shot.annotations.length,
+    0
+  );
 
   const retrySync = async () => {
     setRetrying(true);
@@ -198,19 +207,17 @@ export function SubmissionDetail({
           </Section>
 
           <Section
-            title="Screenshot"
+            title={screenshots.length > 1 ? "Screenshots" : "Screenshot"}
             icon={<Camera className="w-3.5 h-3.5" />}
-            count={annotations.length || undefined}
-            countLabel="annotations"
+            count={screenshots.length > 1 ? screenshots.length : undefined}
+            countLabel={annotationCount > 0 ? "with annotations" : undefined}
           >
             <ArtefactSlot
-              state={artefacts.screenshot}
+              state={galleryState(screenshots, submission.media_purged_at)}
               absent="No screenshot attached"
-              purged="Screenshot removed after the retention period"
+              purged="Screenshots removed after the retention period"
             >
-              {imageSrc && (
-                <ScreenshotPanel src={imageSrc} annotations={annotations} />
-              )}
+              <ScreenshotGallery screenshots={screenshots} />
             </ArtefactSlot>
           </Section>
 
@@ -271,12 +278,57 @@ function ArtefactSlot({
   return <Empty>{absent}</Empty>;
 }
 
+/**
+ * Every screenshot on the submission (PULSE-403), in the reporter's order.
+ *
+ * A gallery, not one image: a report walking a flow across three screens is the
+ * whole point of the spec, and each image carries its OWN marks — the overlay
+ * is per panel, never shared.
+ */
+function ScreenshotGallery({
+  screenshots,
+}: {
+  screenshots: SubmissionScreenshot[];
+}) {
+  const numbered = screenshots.length > 1;
+
+  return (
+    <div className="space-y-4">
+      {screenshots.map((shot, index) => (
+        <div key={shot.key} className="space-y-1.5">
+          {numbered && (
+            <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              Screenshot {index + 1}
+            </p>
+          )}
+          {/* Retention is per asset now, so one image can be gone while its
+              siblings are still here. */}
+          {shot.purged || !shot.src ? (
+            <div className="flex items-center gap-2 rounded-md border border-border bg-muted/20 px-3 py-6 text-sm text-muted-foreground justify-center">
+              <Trash2 className="w-4 h-4" />
+              Removed after the retention period
+            </div>
+          ) : (
+            <ScreenshotPanel
+              src={shot.src}
+              annotations={shot.annotations}
+              label={numbered ? `Screenshot ${index + 1}` : "Submission screenshot"}
+            />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ScreenshotPanel({
   src,
   annotations,
+  label,
 }: {
   src: string;
   annotations: ScreenshotAnnotation[];
+  label: string;
 }) {
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const [showAnnotations, setShowAnnotations] = useState(true);
@@ -297,7 +349,7 @@ function ScreenshotPanel({
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={src}
-          alt="Submission screenshot"
+          alt={label}
           onLoad={(e) =>
             setNatural({
               w: e.currentTarget.naturalWidth,

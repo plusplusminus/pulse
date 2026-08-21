@@ -1,4 +1,12 @@
-import type { PulseConfig, RuntimeConfig, ScreenshotAnnotation, SubmitResult, WidgetContext, WidgetPick } from './types'
+import type {
+  FeedbackAsset,
+  PulseConfig,
+  RuntimeConfig,
+  ScreenshotAnnotation,
+  SubmitResult,
+  WidgetContext,
+  WidgetPick,
+} from './types'
 import { ConsoleInterceptor } from './console'
 import { detectSentry } from './sentry'
 import { collectContext } from './context'
@@ -21,6 +29,7 @@ export type {
   WidgetContext,
   WidgetPick,
   PickIntent,
+  FeedbackAsset,
 } from './types'
 
 export interface PulseInstance {
@@ -111,10 +120,10 @@ export class Pulse implements PulseInstance {
     type: 'bug' | 'feedback' | 'idea'
     email: string
     name?: string
-    screenshot?: Blob | null
+    /** Every attached image, in the reporter's order, each with its own marks. */
+    screenshots?: { blob: Blob; annotations?: ScreenshotAnnotation[] }[]
     video?: { blob: Blob; mimeType: string } | null
     picks?: WidgetPick[]
-    screenshotAnnotations?: ScreenshotAnnotation[]
     captureSurface?: WidgetContext['captureSurface']
     onUploadProgress?: (sent: number, total: number) => void
   }): Promise<SubmitResult> {
@@ -128,22 +137,36 @@ export class Pulse implements PulseInstance {
     )
 
     // Bytes go browser -> Supabase Storage; only the object key is submitted.
-    let screenshotStoragePath: string | undefined
-    if (formData.screenshot && this.runtime.capture.screenshot) {
-      screenshotStoragePath = await uploadBlob(
-        this.runtime.apiUrl,
-        this.runtime.siteKey,
-        'screenshot',
-        formData.screenshot
-      )
+    // One asset per attachment (PULSE-403), positioned within its kind.
+    const assets: FeedbackAsset[] = []
+
+    // Sequential, not parallel: `position` is the reporter's ordering, and the
+    // upload endpoint is rate limited per IP — six images at once would spend
+    // the budget in one burst.
+    if (this.runtime.capture.screenshot) {
+      for (const [position, shot] of (formData.screenshots ?? []).entries()) {
+        const storagePath = await uploadBlob(
+          this.runtime.apiUrl,
+          this.runtime.siteKey,
+          'screenshot',
+          shot.blob
+        )
+        assets.push({
+          kind: 'screenshot',
+          storagePath,
+          contentType: shot.blob.type || undefined,
+          sizeBytes: shot.blob.size,
+          annotations: shot.annotations?.length ? shot.annotations : undefined,
+          position,
+        })
+      }
     }
 
     // A recording is the one artefact big enough to need the resumable path
     // (> 6 MB) and slow enough to need a progress readout. The recorder's real
     // mimeType picks the extension server-side; never relabel it here.
-    let videoStoragePath: string | undefined
     if (formData.video && this.runtime.capture.video) {
-      videoStoragePath = await uploadBlob(
+      const storagePath = await uploadBlob(
         this.runtime.apiUrl,
         this.runtime.siteKey,
         'video',
@@ -153,6 +176,13 @@ export class Pulse implements PulseInstance {
           onProgress: formData.onUploadProgress,
         }
       )
+      assets.push({
+        kind: 'video',
+        storagePath,
+        contentType: formData.video.mimeType,
+        sizeBytes: formData.video.blob.size,
+        position: 0,
+      })
     }
 
     const result = await submitFeedback(this.runtime.apiUrl, this.runtime.siteKey, {
@@ -164,12 +194,8 @@ export class Pulse implements PulseInstance {
         email: formData.email,
         name: formData.name,
       },
-      screenshotStoragePath,
-      videoStoragePath,
+      assets: assets.length ? assets : undefined,
       picks: this.runtime.capture.elementPick && formData.picks?.length ? formData.picks : undefined,
-      screenshotAnnotations: formData.screenshotAnnotations?.length
-        ? formData.screenshotAnnotations
-        : undefined,
     })
 
     this.runtime.onSubmit?.(result)

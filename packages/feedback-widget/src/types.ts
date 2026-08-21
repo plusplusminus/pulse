@@ -50,6 +50,22 @@ export interface WidgetContext {
   captureSurface?: 'browser' | 'window' | 'monitor'
 }
 
+/**
+ * One attachment on the wire (PULSE-403). `storagePath` is an object key
+ * minted by POST /api/widget/upload — bytes never travel through the feedback
+ * endpoint. Mirrors `assetInputSchema` in the API route.
+ */
+export interface FeedbackAsset {
+  kind: 'screenshot' | 'video' | 'replay'
+  storagePath: string
+  contentType?: string
+  sizeBytes?: number
+  /** Screenshots only; these marks belong to THIS image (PULSE-403). */
+  annotations?: ScreenshotAnnotation[]
+  /** The reporter's ordering, dense within the kind. */
+  position: number
+}
+
 export interface FeedbackPayload {
   title: string
   description?: string
@@ -59,13 +75,19 @@ export interface FeedbackPayload {
     email: string
     name?: string
   }
-  /** Object key in the private widget-media bucket (from uploadBlob) */
+  /** Every attachment on the submission (PULSE-403), in the reporter's order. */
+  assets?: FeedbackAsset[]
+  /**
+   * Pre-PULSE-403 single-attachment fields. The API still accepts them for one
+   * release so an embed already in the wild keeps working; this widget sends
+   * `assets` instead.
+   */
   screenshotStoragePath?: string
   /** Screen recording object key under {hubId}/videos/ (PULSE-337) */
   videoStoragePath?: string
   /** Element picks (PULSE-329); max 50 */
   picks?: WidgetPick[]
-  /** Screenshot annotation rects (PULSE-333); max 50 */
+  /** Submission-level annotations; superseded by per-asset `annotations`. */
   screenshotAnnotations?: ScreenshotAnnotation[]
 }
 

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildWidgetIssueDescription,
+  widgetScreenshotUrls,
   pageFeedbackPath,
   renderSubmissionBody,
   widgetMediaAssetUrl,
@@ -220,6 +221,69 @@ describe("pageFeedbackPath", () => {
   it("returns the pathname, or the raw value when it will not parse", () => {
     expect(pageFeedbackPath("https://acme.test/a/b?c=1#d")).toBe("/a/b");
     expect(pageFeedbackPath("not a url")).toBe("not a url");
+  });
+});
+
+// PULSE-403: a submission can carry up to six screenshots. One is still worth
+// embedding; six embedded images make the issue unreadable, so several become
+// a numbered list of proxy links.
+describe("multiple screenshots (PULSE-403)", () => {
+  const urls = [
+    "https://pulse.test/api/widget/media/asset/aaa",
+    "https://pulse.test/api/widget/media/asset/bbb",
+    "https://pulse.test/api/widget/media/asset/ccc",
+  ];
+
+  it("embeds a lone screenshot, exactly as before", () => {
+    const body = renderSubmissionBody({
+      submission: { ...submission, screenshotUrl: undefined, screenshotUrls: [urls[0]] },
+    });
+    expect(body).toContain("## Screenshot");
+    expect(body).not.toContain("## Screenshots");
+    expect(body).toContain(`![Screenshot](${urls[0]})`);
+  });
+
+  it("lists several as numbered links and embeds none of them", () => {
+    const body = renderSubmissionBody({
+      submission: { ...submission, screenshotUrl: undefined, screenshotUrls: urls },
+    });
+    expect(body).toContain("## Screenshots");
+    expect(body).not.toContain("![Screenshot](");
+    expect(body).toContain(`1. [Screenshot 1](${urls[0]})`);
+    expect(body).toContain(`2. [Screenshot 2](${urls[1]})`);
+    expect(body).toContain(`3. [Screenshot 3](${urls[2]})`);
+  });
+
+  it("keeps the numbered list above the picks, where the media links have always been", () => {
+    const body = renderSubmissionBody({
+      submission: { ...submission, screenshotUrl: undefined, screenshotUrls: urls },
+      picks: scenarios.single,
+    });
+    expect(body.indexOf(urls[2])).toBeLessThan(body.indexOf("## Page Feedback:"));
+  });
+
+  it("falls back to the single-URL form when no list is given", () => {
+    const body = renderSubmissionBody({ submission });
+    expect(body).toContain(`![Screenshot](${submission.screenshotUrl})`);
+  });
+
+  it("says nothing is attached when neither form carries a URL", () => {
+    const body = renderSubmissionBody({
+      submission: { ...submission, screenshotUrl: undefined, screenshotUrls: [] },
+    });
+    expect(body).toContain("_No screenshot attached_");
+  });
+});
+
+describe("widgetScreenshotUrls", () => {
+  it("addresses each asset by id, and a legacy column by its kind URL", () => {
+    expect(
+      widgetScreenshotUrls("sub-1", [{ id: "asset-1" }, { id: null }, { id: "asset-3" }])
+    ).toEqual([
+      "http://localhost:3000/api/widget/media/asset/asset-1",
+      "http://localhost:3000/api/widget/media/sub-1/screenshot",
+      "http://localhost:3000/api/widget/media/asset/asset-3",
+    ]);
   });
 });
 

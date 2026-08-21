@@ -3,6 +3,7 @@ import { CROSS_ORIGIN_NOTICE } from '../screenshot'
 import { micIcon } from './mic-icon'
 import { icon, ICONS } from './icon'
 import { Popover, type PopoverConfig } from './popover'
+import { MAX_SCREENSHOTS } from '../attachments'
 
 /**
  * The panel and trigger hide for the recording, but a compact control bar
@@ -28,6 +29,16 @@ export const BAR_IN_RECORDING_NOTICE =
 export const VOICE_OVER_NOTICE =
   'Your microphone is recorded into the video. Your browser will ask for permission, and you can mute at any time from the recording bar.'
 
+/** One attached screenshot as the panel needs it: identity plus current bytes. */
+export interface PanelScreenshot {
+  /** Stable across an annotate round-trip, so the preview stays open. */
+  id: string
+  blob: Blob
+}
+
+/** The panel's own copy, with the object URL it owns and must revoke. */
+type HeldScreenshot = PanelScreenshot & { url: string }
+
 export interface PanelFormData {
   title: string
   description?: string
@@ -40,8 +51,8 @@ export class FeedbackPanel {
   private element: HTMLElement
   private state: WidgetState = 'closed'
   private formData: PanelFormData = { title: '', type: 'bug', email: '' }
-  private screenshotBlob: Blob | null = null
-  private screenshotUrl: string | null = null
+  /** Ordered, one entry per attached image (PULSE-403). */
+  private screenshots: HeldScreenshot[] = []
   private videoBlob: Blob | null = null
   private videoUrl: string | null = null
   private videoDurationMs = 0
@@ -51,10 +62,15 @@ export class FeedbackPanel {
   private voiceOverNote: string | null = null
   private uploadPercent: number | null = null
   private picks: WidgetPick[] = []
-  /** Which attachment chip is showing its preview; one at a time, or none. */
-  private expanded: 'shot' | 'video' | 'picks' | null = null
+  /**
+   * Which attachment chip is showing its preview; one at a time, or none.
+   * Screenshots are keyed `shot:<id>` because there can now be several.
+   */
+  private expanded: string | null = null
   private paused = false
   private captureError: string | null = null
+  /** Why the last attach attempt did nothing — currently only the cap. */
+  private attachNote: string | null = null
   private pauseBtn: HTMLButtonElement | null = null
   private user: { email?: string; name?: string }
   /** Rebuilt with the form; only ever one of them is open. */
@@ -87,8 +103,10 @@ export class FeedbackPanel {
       allowVoiceOver?: boolean
       onSubmit: (data: PanelFormData) => Promise<SubmitResult>
       onClose: () => void
-      onAnnotate: () => void
-      onRetakeScreenshot: () => void
+      /** Annotate one screenshot; its marks are its own (PULSE-403). */
+      onAnnotate: (id: string) => void
+      /** Drop one screenshot, leaving every other attachment untouched. */
+      onRemoveScreenshot: (id: string) => void
       onCaptureScreenshot: () => void
       /** Dim the page and let the reporter drag the region to capture (PULSE-404). */
       onCaptureRegion: () => void
@@ -306,6 +324,7 @@ export class FeedbackPanel {
     // has to be readable without first reopening the popover that started it.
     for (const [message, role] of [
       [this.captureError, 'alert'],
+      [this.attachNote, 'alert'],
       [this.videoError, 'alert'],
       [this.voiceOverNote, 'status'],
     ] as const) {
@@ -329,7 +348,7 @@ export class FeedbackPanel {
    */
   private renderAttachments(): HTMLElement | null {
     const hasPicks = this.config.allowElementPick && this.picks.length > 0
-    if (!this.screenshotBlob && !this.videoBlob && !hasPicks) return null
+    if (this.screenshots.length === 0 && !this.videoBlob && !hasPicks) return null
 
     const section = document.createElement('div')
     section.className = 'pulse-attached'
@@ -339,11 +358,21 @@ export class FeedbackPanel {
     row.setAttribute('role', 'group')
     row.setAttribute('aria-label', 'Attached')
 
-    if (this.screenshotBlob) {
+    // One chip per screenshot, in capture order. Numbered only once there is
+    // more than one — a lone "Screenshot 1" would be noise, and the numbers
+    // have to match the order the Linear issue lists them in.
+    this.screenshots.forEach((shot, index) => {
+      const suffix = this.screenshots.length > 1 ? ` ${index + 1}` : ''
       row.appendChild(
-        this.chip('shot', 'Screenshot', icon(ICONS.screenshot), 'Remove screenshot', () => this.setScreenshot(null))
+        this.chip(
+          `shot:${shot.id}`,
+          `Screenshot${suffix}`,
+          icon(ICONS.screenshot),
+          `Remove screenshot${suffix}`,
+          () => this.config.onRemoveScreenshot(shot.id)
+        )
       )
-    }
+    })
 
     if (this.videoBlob) {
       const meta = `${FeedbackPanel.formatDuration(this.videoDurationMs)} · ${FeedbackPanel.formatBytes(
@@ -372,27 +401,34 @@ export class FeedbackPanel {
 
     section.appendChild(row)
 
-    if (this.expanded === 'shot' && this.screenshotBlob) section.appendChild(this.renderScreenshotPreview())
+    const openShot = this.screenshots.findIndex((s) => `shot:${s.id}` === this.expanded)
+    if (openShot !== -1) section.appendChild(this.renderScreenshotPreview(openShot))
     if (this.expanded === 'video' && this.videoBlob) section.appendChild(this.renderVideoPreview())
     if (this.expanded === 'picks' && hasPicks) section.appendChild(this.renderPicksSection())
 
     return section
   }
 
+  /**
+   * `key` identifies the one expanded preview. Screenshots namespace theirs as
+   * `shot:<id>`; the class keeps only the part before the colon so the styling
+   * and the behaviour hooks stay per kind rather than per attachment.
+   */
   private chip(
-    key: 'shot' | 'video' | 'picks',
+    key: string,
     label: string,
     glyph: SVGSVGElement,
     removeLabel?: string,
     onRemove?: () => void,
     labelClass?: string
   ): HTMLElement {
+    const kind = key.split(':')[0]
     const wrap = document.createElement('div')
     wrap.className = `pulse-chip${this.expanded === key ? ' pulse-chip--open' : ''}`
 
     const open = document.createElement('button')
     open.type = 'button'
-    open.className = `pulse-chip__open pulse-chip__open--${key}`
+    open.className = `pulse-chip__open pulse-chip__open--${kind}`
     open.setAttribute('aria-expanded', String(this.expanded === key))
     open.appendChild(glyph)
     const text = document.createElement('span')
@@ -685,17 +721,24 @@ export class FeedbackPanel {
     return field
   }
 
-  private renderScreenshotPreview(): HTMLElement {
+  /**
+   * The expanded screenshot. Annotate and Remove act on THIS image only; "Add
+   * another" replaces PULSE-402's "Retake", which destroyed the capture it was
+   * offered from. It is dropped at the cap rather than shown inert — the
+   * refusal message belongs to the Attach row, where the action still exists.
+   */
+  private renderScreenshotPreview(index: number): HTMLElement {
+    const shot = this.screenshots[index]
+    const suffix = this.screenshots.length > 1 ? ` ${index + 1}` : ''
+
     const container = document.createElement('div')
     container.className = 'pulse-screenshot'
 
-    if (this.screenshotUrl) {
-      const img = document.createElement('img')
-      img.className = 'pulse-screenshot__img'
-      img.src = this.screenshotUrl
-      img.alt = 'Screenshot preview'
-      container.appendChild(img)
-    }
+    const img = document.createElement('img')
+    img.className = 'pulse-screenshot__img'
+    img.src = shot.url
+    img.alt = `Screenshot${suffix} preview`
+    container.appendChild(img)
 
     const actions = document.createElement('div')
     actions.className = 'pulse-screenshot__actions'
@@ -704,23 +747,24 @@ export class FeedbackPanel {
     annotateBtn.className = 'pulse-screenshot__btn'
     annotateBtn.type = 'button'
     annotateBtn.textContent = 'Annotate'
-    annotateBtn.addEventListener('click', () => this.config.onAnnotate())
+    annotateBtn.addEventListener('click', () => this.config.onAnnotate(shot.id))
     actions.appendChild(annotateBtn)
 
-    const retakeBtn = document.createElement('button')
-    retakeBtn.className = 'pulse-screenshot__btn'
-    retakeBtn.type = 'button'
-    retakeBtn.textContent = 'Retake'
-    retakeBtn.addEventListener('click', () => this.config.onRetakeScreenshot())
-    actions.appendChild(retakeBtn)
+    if (this.screenshots.length < MAX_SCREENSHOTS) {
+      const addBtn = document.createElement('button')
+      addBtn.className = 'pulse-screenshot__btn'
+      addBtn.type = 'button'
+      addBtn.textContent = 'Add another'
+      // Reaches getDisplayMedia with this click's user activation intact.
+      addBtn.addEventListener('click', () => this.config.onCaptureScreenshot())
+      actions.appendChild(addBtn)
+    }
 
     const removeBtn = document.createElement('button')
     removeBtn.className = 'pulse-screenshot__btn pulse-screenshot__btn--danger'
     removeBtn.type = 'button'
     removeBtn.textContent = 'Remove'
-    removeBtn.addEventListener('click', () => {
-      this.setScreenshot(null)
-    })
+    removeBtn.addEventListener('click', () => this.config.onRemoveScreenshot(shot.id))
     actions.appendChild(removeBtn)
 
     container.appendChild(actions)
@@ -1029,12 +1073,9 @@ export class FeedbackPanel {
     this.formData = { title: '', type: 'bug', email: this.user.email ?? '' }
     this.picks = []
     this.expanded = null
-    this.screenshotBlob = null
-    if (this.screenshotUrl) {
-      URL.revokeObjectURL(this.screenshotUrl)
-      this.screenshotUrl = null
-    }
+    this.releaseScreenshots()
     this.videoError = null
+    this.attachNote = null
     // The opt-in does not survive a submitted report: the next reporter on the
     // same page must choose the microphone again, deliberately.
     this.voiceOver = false
@@ -1101,9 +1142,7 @@ export class FeedbackPanel {
 
   destroy(): void {
     this.disposePopovers()
-    if (this.screenshotUrl) {
-      URL.revokeObjectURL(this.screenshotUrl)
-    }
+    this.releaseScreenshots()
     if (this.videoUrl) {
       URL.revokeObjectURL(this.videoUrl)
     }
@@ -1148,19 +1187,48 @@ export class FeedbackPanel {
     if (this.state === 'open') this.renderForm()
   }
 
-  setScreenshot(blob: Blob | null): void {
-    if (!blob && this.expanded === 'shot') this.expanded = null
-    if (this.screenshotUrl) {
-      URL.revokeObjectURL(this.screenshotUrl)
-      this.screenshotUrl = null
+  /**
+   * Replaces the whole list. Diffed rather than rebuilt so an object URL is
+   * only minted for bytes the panel has not seen: annotating hands back a new
+   * blob under the SAME id, which must swap that one URL and leave the rest —
+   * and the reporter's open preview — alone.
+   */
+  setScreenshots(shots: readonly PanelScreenshot[]): void {
+    const kept: HeldScreenshot[] = shots.map((shot) => {
+      const held = this.screenshots.find((s) => s.id === shot.id && s.blob === shot.blob)
+      return held ?? { id: shot.id, blob: shot.blob, url: URL.createObjectURL(shot.blob) }
+    })
+
+    for (const held of this.screenshots) {
+      if (!kept.includes(held)) URL.revokeObjectURL(held.url)
     }
-    this.screenshotBlob = blob
-    if (blob) {
-      this.screenshotUrl = URL.createObjectURL(blob)
+    this.screenshots = kept
+
+    // A removed screenshot must not leave its preview keyed open: the next
+    // capture would otherwise land on a chip that opens by itself.
+    if (this.expanded?.startsWith('shot:') && !kept.some((s) => `shot:${s.id}` === this.expanded)) {
+      this.expanded = null
     }
+
     if (this.state === 'open' || this.state === 'capturing') {
       this.setState('open')
     }
+  }
+
+  /**
+   * Why the last attach attempt did nothing. Rendered in the Attach row beside
+   * capture errors, because a refusal has to be readable next to the control
+   * that was refused.
+   */
+  setAttachNote(message: string | null): void {
+    if (this.attachNote === message) return
+    this.attachNote = message
+    if (this.state === 'open') this.renderForm()
+  }
+
+  private releaseScreenshots(): void {
+    for (const held of this.screenshots) URL.revokeObjectURL(held.url)
+    this.screenshots = []
   }
 
   setError(message: string): void {
@@ -1173,7 +1241,7 @@ export class FeedbackPanel {
     this.renderSuccess(result)
   }
 
-  getScreenshot(): Blob | null {
-    return this.screenshotBlob
+  getScreenshots(): Blob[] {
+    return this.screenshots.map((s) => s.blob)
   }
 }

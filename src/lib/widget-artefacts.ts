@@ -12,8 +12,9 @@
  * three states rather than a boolean.
  */
 
+import { assetsOfKind, type ResolvedAsset } from "@/lib/widget-assets";
 import type { WidgetMediaKind } from "@/lib/widget-upload";
-import type { WidgetSubmission } from "@/lib/widget-types";
+import type { ScreenshotAnnotation, WidgetSubmission } from "@/lib/widget-types";
 
 export type ArtefactState = "present" | "purged" | "absent";
 
@@ -104,4 +105,75 @@ export function submissionArtefacts(
       video !== "absent" ||
       replay !== "absent",
   };
+}
+
+// -- Screenshot gallery (PULSE-403) ----------------------------------------
+
+/** One image in the detail view's gallery, already resolved to a proxy URL. */
+export type SubmissionScreenshot = {
+  /** Stable React key: the asset id, or "legacy" for a synthesised one. */
+  key: string;
+  /** Null exactly when the object has been purged; nothing to fetch. */
+  src: string | null;
+  annotations: ScreenshotAnnotation[];
+  purged: boolean;
+};
+
+type ScreenshotGallerySource = Pick<
+  WidgetSubmission,
+  "id" | "screenshot_url" | "screenshot_storage_path"
+> &
+  Partial<Pick<WidgetSubmission, "screenshot_annotations">>;
+
+/**
+ * Every screenshot on a submission, in position order, each pointing at its own
+ * asset URL and carrying its own marks.
+ *
+ * The `screenshot_url` fallback is the third read path, below asset rows and
+ * legacy storage paths: rows created before PULSE-324 carry a directly usable
+ * URL and no path at all, and `resolveSubmissionAssets` cannot see those.
+ */
+export function submissionScreenshots(
+  assets: readonly ResolvedAsset[],
+  submission: ScreenshotGallerySource
+): SubmissionScreenshot[] {
+  const screenshots = assetsOfKind(assets, "screenshot");
+
+  if (screenshots.length === 0) {
+    const legacy = screenshotSrc(submission);
+    if (!legacy) return [];
+    return [
+      {
+        key: "legacy",
+        src: legacy,
+        annotations: submission.screenshot_annotations ?? [],
+        purged: false,
+      },
+    ];
+  }
+
+  return screenshots.map((asset, index) => ({
+    key: asset.id ?? `legacy-${index}`,
+    src: asset.purgedAt
+      ? null
+      : asset.id
+        ? mediaAssetProxyUrl(asset.id)
+        : screenshotSrc(submission),
+    annotations: asset.annotations,
+    purged: asset.purgedAt !== null,
+  }));
+}
+
+/**
+ * The Screenshot section's state for a whole gallery: present while any image
+ * is still fetchable, purged once every one has been deleted, absent when none
+ * was ever attached.
+ */
+export function galleryState(
+  screenshots: readonly SubmissionScreenshot[],
+  mediaPurgedAt: string | null | undefined
+): ArtefactState {
+  if (screenshots.some((shot) => !shot.purged && shot.src)) return "present";
+  if (screenshots.length > 0 || mediaPurgedAt) return "purged";
+  return "absent";
 }

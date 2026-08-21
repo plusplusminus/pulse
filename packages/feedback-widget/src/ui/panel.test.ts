@@ -35,6 +35,8 @@ let config: {
   onRecordVideo: Mock<() => void>
   onRemoveVideo: Mock<() => void>
   onToggleVoiceOver: Mock<() => void>
+  onAnnotate: Mock<(id: string) => void>
+  onRemoveScreenshot: Mock<(id: string) => void>
 }
 
 function makePanel(
@@ -53,8 +55,6 @@ function makePanel(
     ...extra,
     onSubmit: vi.fn(async () => ({ id: '1', linearIssueId: null, linearIssueUrl: null, status: 'created' as const })),
     onClose: vi.fn(),
-    onAnnotate: vi.fn(),
-    onRetakeScreenshot: vi.fn(),
     ...config,
   })
 }
@@ -73,6 +73,8 @@ beforeEach(() => {
     onRecordVideo: vi.fn<() => void>(),
     onRemoveVideo: vi.fn<() => void>(),
     onToggleVoiceOver: vi.fn<() => void>(),
+    onAnnotate: vi.fn<(id: string) => void>(),
+    onRemoveScreenshot: vi.fn<(id: string) => void>(),
   }
 })
 
@@ -160,6 +162,10 @@ describe('picks list', () => {
 // nothing else, so evidence arriving can never make Record slide under a
 // pointer that was aiming at Screenshot.
 describe('attachment chips (PULSE-402)', () => {
+  /** One image per id; ids are what the panel keys previews and removal on. */
+  const shots = (...ids: string[]) =>
+    ids.map((id) => ({ id, blob: new Blob([id], { type: 'image/png' }) }))
+
   const chipLabels = () =>
     Array.from(shadow.querySelectorAll('.pulse-attached__row .pulse-chip__open span')).map((e) => e.textContent)
 
@@ -177,7 +183,7 @@ describe('attachment chips (PULSE-402)', () => {
   it('names each attachment in one row, the recording by its length and weight', () => {
     const panel = makePanel(true, { allowScreenshot: true, allowVideo: true })
     panel.setState('open')
-    panel.setScreenshot(new Blob(['png'], { type: 'image/png' }))
+    panel.setScreenshots(shots('a'))
     panel.setVideo(new Blob(['x'.repeat(2048)], { type: 'video/webm' }), 12_000)
     panel.setPicks([pick('a', 'button "Save"', ''), pick('b', 'nav', '')])
 
@@ -187,7 +193,7 @@ describe('attachment chips (PULSE-402)', () => {
   it('stays collapsed by default, so evidence never pushes Submit off screen', () => {
     const panel = makePanel(true, { allowScreenshot: true, allowVideo: true })
     panel.setState('open')
-    panel.setScreenshot(new Blob(['png'], { type: 'image/png' }))
+    panel.setScreenshots(shots('a'))
     panel.setVideo(new Blob(['x'], { type: 'video/webm' }), 12_000)
 
     expect(shadow.querySelector('.pulse-screenshot__img')).toBeNull()
@@ -197,7 +203,7 @@ describe('attachment chips (PULSE-402)', () => {
   it('opens one preview at a time — a second chip closes the first', () => {
     const panel = makePanel(true, { allowScreenshot: true, allowVideo: true })
     panel.setState('open')
-    panel.setScreenshot(new Blob(['png'], { type: 'image/png' }))
+    panel.setScreenshots(shots('a'))
     panel.setVideo(new Blob(['x'], { type: 'video/webm' }), 12_000)
 
     ;(shadow.querySelector('.pulse-chip__open--shot') as HTMLButtonElement).click()
@@ -213,25 +219,170 @@ describe('attachment chips (PULSE-402)', () => {
   it('closes again on a second click of the same chip', () => {
     const panel = makePanel(true, { allowScreenshot: true })
     panel.setState('open')
-    panel.setScreenshot(new Blob(['png'], { type: 'image/png' }))
+    panel.setScreenshots(shots('a'))
 
     ;(shadow.querySelector('.pulse-chip__open--shot') as HTMLButtonElement).click()
     ;(shadow.querySelector('.pulse-chip__open--shot') as HTMLButtonElement).click()
     expect(shadow.querySelector('.pulse-screenshot__img')).toBeNull()
   })
 
-  it('the screenshot chip removes it and frees the blob URL behind it', () => {
+  it('the screenshot chip asks its owner to remove that one screenshot', () => {
     const panel = makePanel(true, { allowScreenshot: true })
     panel.setState('open')
-    panel.setScreenshot(new Blob(['png'], { type: 'image/png' }))
+    panel.setScreenshots(shots('a'))
     ;(shadow.querySelector('.pulse-chip__open--shot') as HTMLButtonElement).click()
 
     ;(shadow.querySelector('.pulse-chip__remove[aria-label="Remove screenshot"]') as HTMLButtonElement).click()
 
-    expect(panel.getScreenshot()).toBeNull()
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:pulse/0')
-    expect(shadow.querySelector('.pulse-attached')).toBeNull()
+    expect(config.onRemoveScreenshot).toHaveBeenCalledWith('a')
+  })
+
+  it('drops the chip and frees that blob URL once the owner hands back the shorter list', () => {
+    URL.createObjectURL = vi.fn().mockReturnValueOnce('blob:pulse/a').mockReturnValueOnce('blob:pulse/b')
+    const panel = makePanel(true, { allowScreenshot: true })
+    panel.setState('open')
+    panel.setScreenshots(shots('a', 'b'))
+
+    panel.setScreenshots(shots('b').map((s) => ({ ...s, blob: panel.getScreenshots()[1] })))
+
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:pulse/a')
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:pulse/b')
+    expect(shadow.querySelectorAll('.pulse-chip__open--shot')).toHaveLength(1)
+  })
+})
+
+// PULSE-403: the panel holds an ordered LIST of screenshots. What is worth
+// guarding here is identity — which chip a click means, and which object URL
+// survives — because both only became ambiguous once there could be several.
+describe('multiple screenshots (PULSE-403)', () => {
+  const shots = (...ids: string[]) =>
+    ids.map((id) => ({ id, blob: new Blob([id], { type: 'image/png' }) }))
+
+  const chipLabels = () =>
+    Array.from(shadow.querySelectorAll('.pulse-attached__row .pulse-chip__open span')).map((e) => e.textContent)
+
+  beforeEach(() => {
+    URL.createObjectURL = vi.fn(() => 'blob:pulse/0')
+    URL.revokeObjectURL = vi.fn()
+  })
+
+  it('numbers the chips only once there is more than one to tell apart', () => {
+    const panel = makePanel(true, { allowScreenshot: true })
+    panel.setState('open')
+
+    panel.setScreenshots(shots('a'))
+    expect(chipLabels()).toEqual(['Screenshot'])
+
+    panel.setScreenshots(shots('a', 'b', 'c'))
+    expect(chipLabels()).toEqual(['Screenshot 1', 'Screenshot 2', 'Screenshot 3'])
+  })
+
+  it('opens only the chip that was clicked', () => {
+    URL.createObjectURL = vi.fn((blob: Blob) => `blob:pulse/${(blob as Blob & { _id?: string })._id ?? '0'}`)
+    const panel = makePanel(true, { allowScreenshot: true })
+    panel.setState('open')
+    panel.setScreenshots(shots('a', 'b'))
+
+    const chips = shadow.querySelectorAll<HTMLButtonElement>('.pulse-chip__open--shot')
+    chips[1].click()
+
+    const expanded = Array.from(
+      shadow.querySelectorAll('.pulse-chip__open--shot')
+    ).map((c) => c.getAttribute('aria-expanded'))
+    expect(expanded).toEqual(['false', 'true'])
+    expect(shadow.querySelectorAll('.pulse-screenshot__img')).toHaveLength(1)
+    expect(shadow.querySelector('.pulse-screenshot__img')!.getAttribute('alt')).toBe('Screenshot 2 preview')
+  })
+
+  it('annotates and removes the expanded screenshot, not the first one', () => {
+    const panel = makePanel(true, { allowScreenshot: true })
+    panel.setState('open')
+    panel.setScreenshots(shots('a', 'b'))
+    shadow.querySelectorAll<HTMLButtonElement>('.pulse-chip__open--shot')[1].click()
+
+    const actions = Array.from(shadow.querySelectorAll<HTMLButtonElement>('.pulse-screenshot__btn'))
+    actions.find((b) => b.textContent === 'Annotate')!.click()
+    expect(config.onAnnotate).toHaveBeenCalledWith('b')
+
+    actions.find((b) => b.textContent === 'Remove')!.click()
+    expect(config.onRemoveScreenshot).toHaveBeenCalledWith('b')
+  })
+
+  it('keeps the preview open and swaps only that URL when annotation returns new bytes', () => {
+    URL.createObjectURL = vi
+      .fn()
+      .mockReturnValueOnce('blob:pulse/a')
+      .mockReturnValueOnce('blob:pulse/b')
+      .mockReturnValueOnce('blob:pulse/b2')
+    const panel = makePanel(true, { allowScreenshot: true })
+    panel.setState('open')
+    const initial = shots('a', 'b')
+    panel.setScreenshots(initial)
+    shadow.querySelectorAll<HTMLButtonElement>('.pulse-chip__open--shot')[1].click()
+
+    // Same id, new bytes: exactly what the annotation editor hands back.
+    panel.setScreenshots([initial[0], { id: 'b', blob: new Blob(['annotated'], { type: 'image/png' }) }])
+
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:pulse/b')
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:pulse/a')
+    expect(shadow.querySelector('.pulse-screenshot__img')!.getAttribute('src')).toBe('blob:pulse/b2')
+  })
+
+  it('collapses a preview whose screenshot was removed rather than reopening the next one', () => {
+    const panel = makePanel(true, { allowScreenshot: true })
+    panel.setState('open')
+    const initial = shots('a', 'b')
+    panel.setScreenshots(initial)
+    shadow.querySelectorAll<HTMLButtonElement>('.pulse-chip__open--shot')[1].click()
+    expect(shadow.querySelector('.pulse-screenshot__img')).not.toBeNull()
+
+    panel.setScreenshots([initial[0]])
     expect(shadow.querySelector('.pulse-screenshot__img')).toBeNull()
+  })
+
+  it('offers Add another until the cap, then only Annotate and Remove', () => {
+    const panel = makePanel(true, { allowScreenshot: true })
+    panel.setState('open')
+    panel.setScreenshots(shots('a'))
+    shadow.querySelector<HTMLButtonElement>('.pulse-chip__open--shot')!.click()
+
+    const labels = () =>
+      Array.from(shadow.querySelectorAll('.pulse-screenshot__btn')).map((b) => b.textContent)
+    expect(labels()).toEqual(['Annotate', 'Add another', 'Remove'])
+    ;(
+      Array.from(shadow.querySelectorAll<HTMLButtonElement>('.pulse-screenshot__btn')).find(
+        (b) => b.textContent === 'Add another'
+      )
+    )!.click()
+    expect(config.onCaptureScreenshot).toHaveBeenCalled()
+
+    // 'a' stays expanded across the re-render, so the actions are still its own.
+    panel.setScreenshots(shots('a', 'b', 'c', 'd', 'e', 'f'))
+    expect(labels()).toEqual(['Annotate', 'Remove'])
+  })
+
+  it('shows the cap refusal in the attach row, beside the control that was refused', () => {
+    const panel = makePanel(true, { allowScreenshot: true })
+    panel.setState('open')
+    panel.setAttachNote('You can attach up to 6 screenshots. Remove one to add another.')
+
+    const note = shadow.querySelector('.pulse-attach .pulse-capture-note--error')
+    expect(note?.textContent).toContain('up to 6 screenshots')
+    expect(note?.getAttribute('role')).toBe('alert')
+
+    panel.setAttachNote(null)
+    expect(shadow.querySelector('.pulse-attach .pulse-capture-note--error')).toBeNull()
+  })
+
+  it('frees every held URL when the panel is destroyed', () => {
+    URL.createObjectURL = vi.fn().mockReturnValueOnce('blob:pulse/a').mockReturnValueOnce('blob:pulse/b')
+    const panel = makePanel(true, { allowScreenshot: true })
+    panel.setState('open')
+    panel.setScreenshots(shots('a', 'b'))
+
+    panel.destroy()
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:pulse/a')
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:pulse/b')
   })
 })
 
@@ -248,7 +399,7 @@ describe('attach row layout', () => {
     panel.setState('open')
     const before = rowShape()
 
-    panel.setScreenshot(new Blob(['png'], { type: 'image/png' }))
+    panel.setScreenshots([{ id: 'a', blob: new Blob(['png'], { type: 'image/png' }) }])
     panel.setVideo(new Blob(['x'.repeat(2048)], { type: 'video/webm' }), 12_000)
     panel.setPicks([pick('a', 'button "Save"', ''), pick('b', 'nav', '')])
 
