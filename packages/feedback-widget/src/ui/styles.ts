@@ -136,7 +136,7 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 14px 16px;
+      padding: 11px 14px;
       border-bottom: 1px solid ${c.border};
     }
 
@@ -177,7 +177,7 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
 
     /* Body */
     .pulse-body {
-      padding: 16px;
+      padding: 14px;
       overflow-y: auto;
       flex: 1;
     }
@@ -186,7 +186,7 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
     .pulse-types {
       display: flex;
       gap: 6px;
-      margin-bottom: 14px;
+      margin-bottom: 10px;
     }
 
     .pulse-type-btn {
@@ -373,22 +373,23 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
     .pulse-attach {
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 5px;
       margin-bottom: 12px;
     }
 
+    /* nowrap is the guarantee, not the hope: the labels ellipsis before the
+       row is ever allowed to become two rows (PULSE-402). */
     .pulse-attach__row {
       display: flex;
       align-items: center;
-      gap: 6px;
+      flex-wrap: nowrap;
+      gap: 5px;
     }
 
     .pulse-attach__caption {
-      font-size: 11px;
+      font-size: 12px;
       font-weight: 500;
-      color: ${c.muted};
-      flex-shrink: 0;
-      margin-right: 2px;
+      color: ${c.text};
     }
 
     /* Action and caret read as one control; the caret is always drawn. */
@@ -405,9 +406,9 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 5px;
+      gap: 4px;
       height: 30px;
-      padding: 0 8px;
+      padding: 0 6px;
       border: 1px solid ${c.border};
       border-radius: 7px;
       background: transparent;
@@ -425,6 +426,11 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
       border-top-right-radius: 0;
       border-bottom-right-radius: 0;
       border-right: none;
+    }
+
+    .pulse-attach__btn span {
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .pulse-attach__btn svg {
@@ -460,7 +466,7 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 22px;
+      width: 20px;
       flex-shrink: 0;
       padding: 0;
       border: 1px solid ${c.border};
@@ -519,15 +525,15 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
     .pulse-chip__open {
       display: flex;
       align-items: center;
-      gap: 5px;
+      gap: 4px;
       min-width: 0;
       height: 24px;
-      padding: 0 7px;
+      padding: 0 6px;
       border: none;
       background: transparent;
       color: ${c.text};
       font-family: inherit;
-      font-size: 11.5px;
+      font-size: 11px;
       font-weight: 500;
       white-space: nowrap;
       cursor: pointer;
@@ -565,7 +571,7 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 20px;
+      width: 18px;
       flex-shrink: 0;
       padding: 0;
       border: none;
@@ -790,25 +796,30 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
     }
 
     /* Footer */
+    /* One row (PULSE-402): the same two facts, 25px less of the viewport. */
     .pulse-footer {
-      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 7px 14px;
       border-top: 1px solid ${c.border};
-      text-align: center;
     }
 
     .pulse-footer__text {
-      font-size: 11px;
+      font-size: 10.5px;
       color: ${c.muted};
+      flex-shrink: 0;
     }
 
     .pulse-footer__info {
       font-size: 10px;
       color: ${c.muted};
-      margin-top: 4px;
       display: flex;
       align-items: center;
-      justify-content: center;
+      justify-content: flex-end;
       gap: 4px;
+      min-width: 0;
     }
 
     .pulse-footer__info svg {

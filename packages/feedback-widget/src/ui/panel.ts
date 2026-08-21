@@ -140,16 +140,7 @@ export class FeedbackPanel {
     closeBtn.setAttribute('aria-label', 'Close')
     closeBtn.addEventListener('click', () => this.config.onClose())
 
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-    svg.setAttribute('viewBox', '0 0 16 16')
-    svg.setAttribute('fill', 'none')
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-    path.setAttribute('d', 'M4 4l8 8M12 4l-8 8')
-    path.setAttribute('stroke', 'currentColor')
-    path.setAttribute('stroke-width', '1.5')
-    path.setAttribute('stroke-linecap', 'round')
-    svg.appendChild(path)
-    closeBtn.appendChild(svg)
+    closeBtn.appendChild(icon('M4 4l8 8M12 4l-8 8', { width: '1.5' }))
     header.appendChild(closeBtn)
 
     return header
@@ -164,16 +155,8 @@ export class FeedbackPanel {
     const btn = document.createElement('button')
     btn.className = 'pulse-header__pause'
     btn.type = 'button'
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-    svg.setAttribute('viewBox', '0 0 16 16')
-    svg.setAttribute('fill', 'none')
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-    path.setAttribute('stroke', 'currentColor')
-    path.setAttribute('stroke-width', '1.5')
-    path.setAttribute('stroke-linecap', 'round')
-    path.setAttribute('stroke-linejoin', 'round')
-    svg.appendChild(path)
-    btn.appendChild(svg)
+    // The `d` is filled in by applyPauseState, which owns the play/pause swap.
+    btn.appendChild(icon('', { width: '1.5' }))
     btn.addEventListener('click', () => this.config.onTogglePause())
     this.pauseBtn = btn
     this.applyPauseState()
@@ -213,23 +196,7 @@ export class FeedbackPanel {
     const info = document.createElement('div')
     info.className = 'pulse-footer__info'
 
-    const infoSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-    infoSvg.setAttribute('viewBox', '0 0 16 16')
-    infoSvg.setAttribute('fill', 'none')
-    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
-    circle.setAttribute('cx', '8')
-    circle.setAttribute('cy', '8')
-    circle.setAttribute('r', '6.5')
-    circle.setAttribute('stroke', 'currentColor')
-    circle.setAttribute('stroke-width', '1.5')
-    infoSvg.appendChild(circle)
-    const infoLine = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-    infoLine.setAttribute('d', 'M8 7v4M8 5.5v0')
-    infoLine.setAttribute('stroke', 'currentColor')
-    infoLine.setAttribute('stroke-width', '1.5')
-    infoLine.setAttribute('stroke-linecap', 'round')
-    infoSvg.appendChild(infoLine)
-    info.appendChild(infoSvg)
+    info.appendChild(icon(['M8 1.5a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13Z', 'M8 7v4M8 5.5v0'], { width: '1.5' }))
 
     const infoText = document.createElement('span')
     infoText.textContent = 'Page info collected automatically'
@@ -288,15 +255,17 @@ export class FeedbackPanel {
     const section = document.createElement('div')
     section.className = 'pulse-attach'
 
+    // Above the row, like every other label in this panel — inline it would
+    // eat the width the three controls need to stay on one line.
+    const caption = document.createElement('div')
+    caption.className = 'pulse-attach__caption'
+    caption.textContent = 'Attach'
+    section.appendChild(caption)
+
     const row = document.createElement('div')
     row.className = 'pulse-attach__row'
     row.setAttribute('role', 'group')
     row.setAttribute('aria-label', 'Attach')
-
-    const caption = document.createElement('span')
-    caption.className = 'pulse-attach__caption'
-    caption.textContent = 'Attach'
-    row.appendChild(caption)
 
     if (this.config.allowElementPick) {
       row.appendChild(
@@ -311,8 +280,7 @@ export class FeedbackPanel {
           icon(ICONS.screenshot),
           () => this.config.onCaptureScreenshot(),
           'shot',
-          { id: 'shot', label: 'Screenshot options', build: (close) => this.buildScreenshotOptions(close) },
-          'pulse-add-screenshot-btn'
+          { id: 'shot', label: 'Screenshot options', build: (close) => this.buildScreenshotOptions(close) }
         )
       )
     }
@@ -368,11 +336,6 @@ export class FeedbackPanel {
     row.className = 'pulse-attached__row'
     row.setAttribute('role', 'group')
     row.setAttribute('aria-label', 'Attached')
-
-    const caption = document.createElement('span')
-    caption.className = 'pulse-attach__caption'
-    caption.textContent = 'Attached'
-    row.appendChild(caption)
 
     if (this.screenshotBlob) {
       row.appendChild(
@@ -655,17 +618,7 @@ export class FeedbackPanel {
       btn.type = 'button'
       btn.setAttribute('aria-pressed', String(this.formData.type === t.value))
 
-      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-      svg.setAttribute('viewBox', '0 0 16 16')
-      svg.setAttribute('fill', 'none')
-      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-      path.setAttribute('d', t.icon)
-      path.setAttribute('stroke', 'currentColor')
-      path.setAttribute('stroke-width', '1.5')
-      path.setAttribute('stroke-linecap', 'round')
-      path.setAttribute('stroke-linejoin', 'round')
-      svg.appendChild(path)
-      btn.appendChild(svg)
+      btn.appendChild(icon(t.icon, { width: '1.5' }))
 
       const label = document.createElement('span')
       label.textContent = t.label
@@ -790,14 +743,10 @@ export class FeedbackPanel {
     intent.textContent = pick.intent
     main.appendChild(intent)
     main.appendChild(
-      this.renderPickAction('Edit', `Edit ${pick.name}`, 'M11.5 2.5a1.5 1.5 0 0 1 2 2L6 12l-3 1 1-3 7.5-7.5Z', () =>
-        this.config.onEditPick(pick.id)
-      )
+      this.renderPickAction('Edit', `Edit ${pick.name}`, ICONS.edit, () => this.config.onEditPick(pick.id))
     )
     main.appendChild(
-      this.renderPickAction('Delete', `Remove ${pick.name}`, 'M3 4.5h10M6.5 4.5V3h3v1.5M5 4.5l.5 8h5l.5-8', () =>
-        this.config.onDeletePick(pick.id)
-      )
+      this.renderPickAction('Delete', `Remove ${pick.name}`, ICONS.trash, () => this.config.onDeletePick(pick.id))
     )
     row.appendChild(main)
 
@@ -811,23 +760,13 @@ export class FeedbackPanel {
     return row
   }
 
-  private renderPickAction(label: string, ariaLabel: string, icon: string, onClick: () => void): HTMLElement {
+  private renderPickAction(label: string, ariaLabel: string, glyph: string, onClick: () => void): HTMLElement {
     const btn = document.createElement('button')
     btn.type = 'button'
     btn.className = `pulse-picks__action pulse-picks__action--${label.toLowerCase()}`
     btn.setAttribute('aria-label', ariaLabel)
     btn.title = label
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-    svg.setAttribute('viewBox', '0 0 16 16')
-    svg.setAttribute('fill', 'none')
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-    path.setAttribute('d', icon)
-    path.setAttribute('stroke', 'currentColor')
-    path.setAttribute('stroke-width', '1.25')
-    path.setAttribute('stroke-linecap', 'round')
-    path.setAttribute('stroke-linejoin', 'round')
-    svg.appendChild(path)
-    btn.appendChild(svg)
+    btn.appendChild(icon(glyph))
     btn.addEventListener('click', () => onClick())
     return btn
   }
@@ -1006,17 +945,7 @@ export class FeedbackPanel {
 
     const iconWrap = document.createElement('div')
     iconWrap.className = 'pulse-status__icon pulse-status__icon--success'
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-    svg.setAttribute('viewBox', '0 0 24 24')
-    svg.setAttribute('fill', 'none')
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-    path.setAttribute('d', 'M5 13l4 4L19 7')
-    path.setAttribute('stroke', 'currentColor')
-    path.setAttribute('stroke-width', '2')
-    path.setAttribute('stroke-linecap', 'round')
-    path.setAttribute('stroke-linejoin', 'round')
-    svg.appendChild(path)
-    iconWrap.appendChild(svg)
+    iconWrap.appendChild(icon('M3.3 8.7l2.7 2.6L12.7 4.7', { width: '1.35' }))
     status.appendChild(iconWrap)
 
     const title = document.createElement('div')
@@ -1059,16 +988,7 @@ export class FeedbackPanel {
 
     const iconWrap = document.createElement('div')
     iconWrap.className = 'pulse-status__icon pulse-status__icon--error'
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-    svg.setAttribute('viewBox', '0 0 24 24')
-    svg.setAttribute('fill', 'none')
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-    path.setAttribute('d', 'M6 6l12 12M18 6L6 18')
-    path.setAttribute('stroke', 'currentColor')
-    path.setAttribute('stroke-width', '2')
-    path.setAttribute('stroke-linecap', 'round')
-    svg.appendChild(path)
-    iconWrap.appendChild(svg)
+    iconWrap.appendChild(icon('M4 4l8 8M12 4l-8 8', { width: '1.35' }))
     status.appendChild(iconWrap)
 
     const title = document.createElement('div')
