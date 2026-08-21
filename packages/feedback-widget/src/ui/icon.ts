@@ -46,6 +46,8 @@ export const ICONS = {
   element: 'M3 3l10 4.5-4.5 1.5L7 13.5 3 3Z',
   screenshot: ['M2 3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3Z', 'M2 5h12'],
   tab: 'M2 4a1 1 0 0 1 1-1h4l1.5 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4Z',
+  // Corner brackets: a frame you drag, as distinct from the solid screenshot square.
+  region: 'M2 5.5V3.5a1 1 0 0 1 1-1h2M11 2.5h2a1 1 0 0 1 1 1v2M14 10.5v2a1 1 0 0 1-1 1h-2M5 13.5H3a1 1 0 0 1-1-1v-2',
   record: ['M8 1.75a6.25 6.25 0 1 1 0 12.5 6.25 6.25 0 0 1 0-12.5Z', 'M8 5a3 3 0 1 1 0 6 3 3 0 0 1 0-6Z'],
   play: 'M5 3.5l7 4.5-7 4.5v-9Z',
   caret: 'M4.5 6.5L8 10l3.5-3.5',
