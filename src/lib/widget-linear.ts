@@ -50,21 +50,22 @@ function submissionSections(submission: WidgetSubmissionBody): string[] {
 
   lines.push("## Reporter");
   const name = reporter.name || "Unknown";
-  lines.push(`${name} (${reporter.email})`);
+  lines.push(`${escapeInline(name)} (${escapeInline(reporter.email)})`);
   lines.push("");
 
   lines.push("## Context");
-  lines.push(`- **Page:** ${metadata.url}`);
-  lines.push(`- **Browser:** ${metadata.userAgent}`);
+  lines.push(`- **Page:** ${escapeInline(metadata.url)}`);
+  lines.push(`- **Browser:** ${escapeInline(metadata.userAgent)}`);
   lines.push(
     `- **Viewport:** ${metadata.viewport.width}x${metadata.viewport.height}`
   );
-  lines.push(`- **Submitted:** ${metadata.timestamp}`);
+  lines.push(`- **Submitted:** ${escapeInline(metadata.timestamp)}`);
   lines.push("");
 
   lines.push("## Sentry");
-  if (metadata.sentry?.replayUrl) {
-    lines.push(`[Session Replay](${metadata.sentry.replayUrl})`);
+  const replayHref = safeLinkTarget(metadata.sentry?.replayUrl);
+  if (replayHref) {
+    lines.push(`[Session Replay](${replayHref})`);
   } else {
     lines.push("No replay available");
   }
@@ -74,7 +75,7 @@ function submissionSections(submission: WidgetSubmissionBody): string[] {
   lines.push("## Console (last errors)");
   if (errors.length > 0) {
     for (const entry of errors) {
-      lines.push(`- ${entry.message}`);
+      lines.push(`- ${escapeInline(entry.message)}`);
     }
   } else {
     lines.push("_No console errors_");
@@ -136,13 +137,76 @@ export async function createWidgetLinearIssue(params: {
 
 const DEFAULT_DETAIL_LEVEL: OutputDetailLevel = "standard";
 
-/** Chars that would otherwise turn page text into markup inside the body. */
+/**
+ * Chars that would otherwise turn page text into markup inside the body.
+ * Covers link/image syntax ([ ] ( ) !), headings (#) and raw HTML (< >) as
+ * well as emphasis, because every one of these strings is attacker-supplied:
+ * the site key is public and Origin is spoofable outside a browser, and the
+ * rendered issue is read by staff inside a trusted Linear ticket.
+ */
 function escapeMarkdown(value: string): string {
-  return value.replace(/([*_`|])/g, "\\$1");
+  // Escaping [ and ] alone defeats link and image injection: markdown needs
+  // `[text](url)` or `![alt](url)`, and neither can form without an unescaped
+  // bracket. Leaving ( ) unescaped keeps computed styles and user agents
+  // readable -- `rgb\(255,255,255\)` in every issue body is a real cost for no
+  // extra safety.
+  return value.replace(/([[\]#<>`*_|])/g, "\\$1");
 }
 
+/**
+ * Escape plus whitespace collapse, for values rendered on a single line. Left
+ * alone, an embedded newline starts a fresh markdown block ("# heading").
+ */
+function escapeInline(value: string): string {
+  return escapeMarkdown(value.replace(/\s+/g, " ").trim());
+}
+
+// encodeURIComponent leaves !'()*-._~ alone, and parens/brackets are exactly
+// what closes a markdown link target early.
+const URL_UNSAFE: Record<string, string> = {
+  "(": "%28",
+  ")": "%29",
+  "[": "%5B",
+  "]": "%5D",
+  "<": "%3C",
+  ">": "%3E",
+  '"': "%22",
+  "\\": "%5C",
+};
+
+/**
+ * A URL fit to use as a markdown link target: http(s) only (no javascript:,
+ * data: or other handler), with the characters that could terminate the target
+ * percent-encoded. Returns null for anything that will not parse.
+ */
+function safeLinkTarget(value: string | null | undefined): string | null {
+  if (!value) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  return parsed
+    .toString()
+    .replace(/[()[\]<>"\\\s]/g, (c) => URL_UNSAFE[c] ?? encodeURIComponent(c));
+}
+
+/**
+ * Inline code span. The fence is one backtick longer than the longest run in
+ * the value, so a value containing backticks cannot close the span early and
+ * escape into markup (escaping does not work inside a code span).
+ */
 function code(value: string): string {
-  return `\`${value}\``;
+  const flat = value.replace(/\s+/g, " ");
+  const longestRun = (flat.match(/`+/g) ?? []).reduce(
+    (max, run) => Math.max(max, run.length),
+    0
+  );
+  const fence = "`".repeat(longestRun + 1);
+  const pad = flat.startsWith("`") || flat.endsWith("`") ? " " : "";
+  return `${fence}${pad}${flat}${pad}${fence}`;
 }
 
 /** Pathname only; a metadata.url that will not parse is shown verbatim. */
@@ -166,7 +230,7 @@ function pickTitle(pick: WidgetPick): string {
 
 function computedStylesLine(styles: Record<string, string>): string {
   return Object.entries(styles)
-    .map(([k, v]) => `${k}: ${v}`)
+    .map(([k, v]) => `${escapeInline(k)}: ${escapeInline(v)}`)
     .join("; ");
 }
 
@@ -202,7 +266,7 @@ function renderPick(
   }
 
   if (detailed) {
-    if (pick.classes) lines.push(`**Classes:** ${pick.classes}`);
+    if (pick.classes) lines.push(`**Classes:** ${escapeInline(pick.classes)}`);
     lines.push(
       `**Position:** ${rect.x}px, ${rect.y}px (${rect.width}×${rect.height}px)`
     );
@@ -216,10 +280,10 @@ function renderPick(
       );
     }
     if (pick.accessibility) {
-      lines.push(`**Accessibility:** ${pick.accessibility}`);
+      lines.push(`**Accessibility:** ${escapeInline(pick.accessibility)}`);
     }
     if (pick.nearbyElements) {
-      lines.push(`**Nearby Elements:** ${pick.nearbyElements}`);
+      lines.push(`**Nearby Elements:** ${escapeInline(pick.nearbyElements)}`);
     }
   }
 
@@ -244,13 +308,15 @@ function renderPicksHeader(
   level: OutputDetailLevel,
   dpr: number
 ): string[] {
-  const lines = [`## Page Feedback: ${pageFeedbackPath(metadata.url)}`];
+  const lines = [
+    `## Page Feedback: ${escapeInline(pageFeedbackPath(metadata.url))}`,
+  ];
   const viewport = `${metadata.viewport.width}x${metadata.viewport.height}`;
 
   if (level === "forensic") {
     lines.push("");
     lines.push(
-      `**Environment:** viewport: ${viewport}, URL: ${metadata.url}, UA: ${metadata.userAgent}, dpr: ${dpr}, captured: ${metadata.timestamp}`
+      `**Environment:** viewport: ${viewport}, URL: ${escapeInline(metadata.url)}, UA: ${escapeInline(metadata.userAgent)}, dpr: ${dpr}, captured: ${escapeInline(metadata.timestamp)}`
     );
     lines.push("");
     lines.push("---");

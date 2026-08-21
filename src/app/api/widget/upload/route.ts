@@ -97,7 +97,11 @@ export async function POST(request: Request) {
     }
     const { kind, contentType, sizeBytes } = parsed.data;
 
-    if (!(baseContentType(contentType) in WIDGET_MEDIA_CONTENT_TYPES[kind])) {
+    // Object.hasOwn, not `in`: `in` walks the prototype chain, so "__proto__"
+    // and "constructor" would pass the allowlist and mint a real ticket.
+    if (
+      !Object.hasOwn(WIDGET_MEDIA_CONTENT_TYPES[kind], baseContentType(contentType))
+    ) {
       return NextResponse.json(
         {
           error: `Content type "${contentType}" is not allowed for ${kind}. Accepted: ${Object.keys(WIDGET_MEDIA_CONTENT_TYPES[kind]).join(", ")}`,

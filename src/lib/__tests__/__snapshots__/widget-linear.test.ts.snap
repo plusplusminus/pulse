@@ -73,7 +73,7 @@ Sam (sam@acme.test)
 **Region:** (40, 500) 620×240
 **Classes:** btn btn-primary
 **Position:** 40px, 500px (620×240px)
-**Context:** [before: "Get started"] CTA
+**Context:** \\[before: "Get started"\\] CTA
 **Comment:** This whole block feels cramped
 
 ---
@@ -123,7 +123,7 @@ Sam (sam@acme.test)
 **Computed Styles:** color: rgb(255,255,255); background-color: rgb(0,0,0); font-size: 16px
 **Accessibility:** role="button", aria-label="Sign up", focusable
 **Nearby Elements:** a.link, div.spacer (5 total in .cta)
-**Context:** [before: "Get started"] CTA
+**Context:** \\[before: "Get started"\\] CTA
 **Comment:** This whole block feels cramped
 
 ---
@@ -345,7 +345,7 @@ Sam (sam@acme.test)
 
 ## Page Feedback: /pricing
 
-1. **3 elements: button "Save", input [email]+1 more**: These three should line up (intent: change)
+1. **3 elements: button "Save", input \\[email\\]+1 more**: These three should line up (intent: change)
 
 ---
 *Submitted via Pulse feedback widget*"
@@ -383,12 +383,12 @@ Sam (sam@acme.test)
 
 **Viewport:** 1440x900
 
-### 1. 3 elements: button "Save", input [email]+1 more
+### 1. 3 elements: button "Save", input \\[email\\]+1 more
 **Intent:** change
 **Location:** \`main > section.hero > .cta > button\`
 **Classes:** btn btn-primary
 **Position:** 5px, 20px (345×90px)
-**Context:** [before: "Get started"] CTA
+**Context:** \\[before: "Get started"\\] CTA
 **Comment:** These three should line up
 
 ---
@@ -429,7 +429,7 @@ Sam (sam@acme.test)
 
 ---
 
-### 1. 3 elements: button "Save", input [email]+1 more
+### 1. 3 elements: button "Save", input \\[email\\]+1 more
 **Intent:** change
 **Location:** \`main > section.hero > .cta > button\`
 **Classes:** btn btn-primary
@@ -438,7 +438,7 @@ Sam (sam@acme.test)
 **Computed Styles:** color: rgb(255,255,255); background-color: rgb(0,0,0); font-size: 16px
 **Accessibility:** role="button", aria-label="Sign up", focusable
 **Nearby Elements:** a.link, div.spacer (5 total in .cta)
-**Context:** [before: "Get started"] CTA
+**Context:** \\[before: "Get started"\\] CTA
 **Comment:** These three should line up
 *Forensic data shown for first element of selection*
 
@@ -478,7 +478,7 @@ Sam (sam@acme.test)
 
 **Viewport:** 1440x900
 
-### 1. 3 elements: button "Save", input [email]+1 more
+### 1. 3 elements: button "Save", input \\[email\\]+1 more
 **Intent:** change
 **Location:** \`main > section.hero > .cta > button\`
 **Comment:** These three should line up
@@ -560,7 +560,7 @@ Sam (sam@acme.test)
 **Location:** \`main > section.hero > .cta > button\`
 **Classes:** btn btn-primary
 **Position:** 120px, 340px (180×44px)
-**Context:** [before: "Get started"] CTA
+**Context:** \\[before: "Get started"\\] CTA
 **Comment:** Make this bigger
 
 ---
@@ -610,7 +610,7 @@ Sam (sam@acme.test)
 **Computed Styles:** color: rgb(255,255,255); background-color: rgb(0,0,0); font-size: 16px
 **Accessibility:** role="button", aria-label="Sign up", focusable
 **Nearby Elements:** a.link, div.spacer (5 total in .cta)
-**Context:** [before: "Get started"] CTA
+**Context:** \\[before: "Get started"\\] CTA
 **Comment:** Make this bigger
 
 ---

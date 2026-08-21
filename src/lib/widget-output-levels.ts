@@ -3,6 +3,10 @@ import type { OutputDetailLevel } from "@/lib/widget-types";
 /**
  * Admin-facing copy for widget_configs.output_detail_level (PULSE-352).
  *
+ * Backslashes in the preview are not typos: page-derived text is markdown-
+ * escaped before it reaches Linear, and these lines have to match the real
+ * output exactly.
+ *
  * `preview` lines are real fragments of what renderSubmissionBody produces at
  * that level — widget-output-levels.test.ts asserts each line still appears in
  * the renderer's output, so the sample cannot drift away from the truth.
@@ -43,7 +47,7 @@ export const OUTPUT_LEVEL_COPY: readonly OutputLevelCopy[] = [
       "**Location:** `main > section.hero > .cta > button`",
       "**Classes:** btn btn-primary",
       "**Position:** 120px, 340px (180×44px)",
-      '**Context:** [before: "Get started"] CTA',
+      '**Context:** \\[before: "Get started"\\] CTA',
     ],
   },
   {

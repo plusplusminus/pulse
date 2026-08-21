@@ -70,15 +70,24 @@ export async function OPTIONS(request: Request) {
   });
 }
 
+/**
+ * This endpoint is public — the site key ships in the page and Origin is
+ * spoofable outside a browser — so every metadata field is bounded. Without a
+ * cap, url/userAgent/timestamp and the free-form `custom` record let anyone
+ * push megabytes into the widget_submissions.metadata JSONB and on into the
+ * Linear issue body, once per request.
+ */
+const MAX_CUSTOM_KEYS = 20;
+
 const feedbackSchema = z.object({
   title: z.string().min(1, "Title is required").max(500),
   description: z.string().max(5000).optional(),
   type: z.enum(["bug", "feedback", "idea"]).default("bug"),
   metadata: z.object({
-    url: z.string(),
-    userAgent: z.string(),
+    url: z.string().max(2048),
+    userAgent: z.string().max(500),
     viewport: z.object({ width: z.number(), height: z.number() }),
-    timestamp: z.string(),
+    timestamp: z.string().max(64),
     console: z
       .array(
         z.object({
@@ -98,7 +107,13 @@ const feedbackSchema = z.object({
       })
       .nullable()
       .default(null),
-    custom: z.record(z.string(), z.string()).default({}),
+    custom: z
+      .record(z.string().max(100), z.string().max(500))
+      .refine(
+        (r) => Object.keys(r).length <= MAX_CUSTOM_KEYS,
+        `custom: max ${MAX_CUSTOM_KEYS} keys`
+      )
+      .default({}),
     // Present only for native tab captures (PULSE-335).
     captureSurface: z.enum(CAPTURE_SURFACES).optional(),
   }),
@@ -304,12 +319,12 @@ export async function POST(request: Request) {
 
     return NextResponse.json(response, { status: 201, headers });
   } catch (error) {
+    // Public endpoint: the detail goes to the log, never to the caller. The
+    // reachable messages include Postgres error text, storage paths and Linear
+    // API errors carrying team IDs.
     console.error("POST /api/widget/feedback error:", error);
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Internal server error",
-      },
+      { error: "Internal server error" },
       { status: 500, headers }
     );
   }

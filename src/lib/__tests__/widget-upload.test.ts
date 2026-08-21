@@ -178,6 +178,27 @@ describe("signWidgetUpload", () => {
     ).rejects.toThrow(/content type/i);
   });
 
+  // Security: the extension lookup was unguarded, so an inherited key such as
+  // "__proto__" resolved to Object.prototype and produced a storage key ending
+  // ".[object Object]" instead of throwing.
+  it("rejects inherited Object.prototype keys as content types for every kind", async () => {
+    for (const kind of ["screenshot", "video", "replay"] as const) {
+      for (const contentType of [
+        "__proto__",
+        "constructor",
+        "toString",
+        "hasOwnProperty",
+        "valueOf",
+      ]) {
+        const { storage, calls } = fakeStorage();
+        await expect(
+          signWidgetUpload(baseInput(storage, { kind, contentType }))
+        ).rejects.toThrow(/content type/i);
+        expect(calls.uploadPath).toBeUndefined();
+      }
+    }
+  });
+
   it("rejects a content type that is allowed for another kind", async () => {
     const { storage, calls } = fakeStorage();
     await expect(

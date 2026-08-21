@@ -228,3 +228,186 @@ describe("buildWidgetIssueDescription", () => {
     );
   });
 });
+
+// -- Markdown / link injection (security) ---------------------------------
+
+/**
+ * Every string below is attacker-controlled: the site key is public and the
+ * Origin header is spoofable outside a browser, so anyone can post a
+ * submission. The body is then read by staff inside a trusted Linear issue,
+ * where a remote image is a beacon (viewer IP + read time) and a link is a
+ * phishing surface.
+ */
+const hostileMetadata: WidgetMetadata = {
+  url: "https://acme.test/p)![beacon](https://evil.example/b.png)",
+  userAgent:
+    "Mozilla/5.0 ![beacon](https://evil.example/ua.png)\n# Injected heading\n<img src=x>",
+  viewport: { width: 1440, height: 900 },
+  timestamp: "2026-05-12\n\n# Injected heading\n[click me](javascript:alert(1))",
+  console: [
+    {
+      level: "error",
+      message:
+        "boom ![beacon](https://evil.example/c.png)\n# Injected heading\n[phish](https://evil.example/login)",
+      timestamp: "2026-05-12T09:59:00.000Z",
+    },
+  ],
+  sentry: {
+    replayId: "r1",
+    replayUrl: "javascript:alert(document.cookie)",
+    sessionId: "s1",
+    traceId: "t1",
+  },
+  custom: {},
+};
+
+const hostilePick = basePick({
+  name: "button ![beacon](https://evil.example/n.png)",
+  classes: "btn ![beacon](https://evil.example/cl.png)",
+  // Backticks plus link syntax: with a fixed single-backtick wrapper the span
+  // closes early and the rest of the string escapes into markup.
+  elementPath: "div > `code` > [a](https://evil.example/ep.png)",
+  fullPath: "html > ``x`` > ![beacon](https://evil.example/fp.png)",
+  computedStyles: {
+    color: "red ![beacon](https://evil.example/cs.png)",
+    "font-size": "16px\n# Injected heading",
+  },
+  accessibility: 'role="button" ![beacon](https://evil.example/a11y.png)',
+  nearbyElements: "a.link ![beacon](https://evil.example/near.png)",
+  nearbyText: "hi ![beacon](https://evil.example/nt.png)",
+  comment: "please ![beacon](https://evil.example/cm.png)",
+  selectedText: "text ![beacon](https://evil.example/st.png)",
+});
+
+// Media links are server-minted, so a hostile submission is rendered with none
+// attached: anything left that renders as a link or image came from the
+// attacker's own strings.
+const hostileSubmission = {
+  description: "hostile",
+  reporter: {
+    email: "sam@acme.test",
+    name: "Sam ![beacon](https://evil.example/rep.png)",
+  },
+  metadata: hostileMetadata,
+};
+
+/**
+ * CommonMark inline code is literal, so link syntax inside a well-formed span
+ * is inert. Blank the spans out before asserting on the surrounding prose, and
+ * assert the spans themselves are fenced correctly further down.
+ */
+function stripCodeSpans(md: string): string {
+  return md.replace(/(`+)([\s\S]*?)\1/g, "CODE_SPAN");
+}
+
+const PULSE_HEADINGS = [
+  "## Feedback",
+  "## Reporter",
+  "## Context",
+  "## Sentry",
+  "## Console (last errors)",
+  "## Screenshot",
+  "### 1. button !\\[beacon\\](https://evil.example/n.png)",
+];
+
+describe("renderSubmissionBody — hostile submission", () => {
+  for (const level of OUTPUT_DETAIL_LEVELS) {
+    it(`neutralises markdown and link injection at ${level}`, () => {
+      const body = renderSubmissionBody({
+        submission: hostileSubmission,
+        picks: [hostilePick],
+        config: { output_detail_level: level },
+      });
+      const prose = stripCodeSpans(body);
+
+      // No markdown link or image can be constructed from attacker input.
+      // The property is that no UNESCAPED bracket pairs with a "(": a literal
+      // "\\[beacon\\](url)" in the output renders as text, not an image, so a
+      // bare substring check would fail on safe output while proving nothing.
+      expect(prose).not.toMatch(/(?<!\\)\]\(/);
+      expect(prose).not.toMatch(/(?<!\\)!\[/);
+      // In particular no protocol handler ends up as a link target.
+      expect(prose).not.toMatch(/(?<!\\)\]\(\s*javascript:/i);
+      // No injected heading: every '#'-leading line is one Pulse wrote itself.
+      const headings = prose.split("\n").filter((line) => line.startsWith("#"));
+      expect(headings).not.toContain("# Injected heading");
+      for (const heading of headings) {
+        expect(
+          PULSE_HEADINGS.includes(heading) ||
+            heading.startsWith("## Page Feedback: ")
+        ).toBe(true);
+      }
+      // Raw HTML cannot be smuggled in: every angle bracket is escaped.
+      expect(prose.match(/(?<!\\)[<>]/g)).toBeNull();
+    });
+  }
+
+  it("fences inline code long enough that a backticked path cannot break out", () => {
+    const body = renderSubmissionBody({
+      submission: hostileSubmission,
+      picks: [hostilePick],
+      config: { output_detail_level: "forensic" },
+    });
+    expect(body).toContain(
+      "**Location:** ``div > `code` > [a](https://evil.example/ep.png)``"
+    );
+    expect(body).toContain(
+      "**Full DOM Path:** ```html > ``x`` > ![beacon](https://evil.example/fp.png)```"
+    );
+  });
+
+  it("collapses newlines in the browser, timestamp and console lines", () => {
+    const body = renderSubmissionBody({ submission: hostileSubmission });
+    const browser = body
+      .split("\n")
+      .find((l) => l.startsWith("- **Browser:**"))!;
+    expect(browser).toContain("Injected heading");
+    const submitted = body
+      .split("\n")
+      .find((l) => l.startsWith("- **Submitted:**"))!;
+    expect(submitted).toContain("click me");
+    const consoleLine = body.split("\n").find((l) => l.startsWith("- boom"))!;
+    expect(consoleLine).toContain("phish");
+  });
+
+  it("drops a non-http replay URL instead of linking it", () => {
+    const body = renderSubmissionBody({ submission: hostileSubmission });
+    expect(body).toContain("No replay available");
+    expect(body).not.toContain("alert(document.cookie)");
+  });
+
+  it("still links a well-formed https replay URL", () => {
+    const body = renderSubmissionBody({
+      submission: {
+        ...hostileSubmission,
+        metadata: {
+          ...hostileMetadata,
+          sentry: {
+            ...hostileMetadata.sentry!,
+            replayUrl: "https://sentry.io/replay/r1",
+          },
+        },
+      },
+    });
+    expect(body).toContain("[Session Replay](https://sentry.io/replay/r1)");
+  });
+
+  it("percent-encodes a replay URL that would close its own markdown target", () => {
+    const body = renderSubmissionBody({
+      submission: {
+        ...hostileSubmission,
+        metadata: {
+          ...hostileMetadata,
+          sentry: {
+            ...hostileMetadata.sentry!,
+            replayUrl: "https://sentry.io/r)![beacon](https://evil.example/s.png",
+          },
+        },
+      },
+    });
+    expect(body).toContain(
+      "[Session Replay](https://sentry.io/r%29!%5Bbeacon%5D%28https://evil.example/s.png)"
+    );
+    expect(body).not.toContain("![beacon]");
+  });
+});

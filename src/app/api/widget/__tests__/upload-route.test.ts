@@ -242,6 +242,35 @@ describe("POST /api/widget/upload", () => {
     }
   });
 
+  // Security: the allowlist check used `in`, which walks the prototype chain,
+  // so "__proto__"/"constructor" passed it and minted a real ticket whose key
+  // ended ".[object Object]" — unmatchable by STORAGE_PATH_PATTERN, therefore
+  // invisible to the feedback route, the media proxy and retention.
+  it("rejects inherited Object.prototype keys as content types for every kind", async () => {
+    authOk("wk_proto");
+    let n = 0;
+    for (const kind of ["screenshot", "video", "replay"]) {
+      for (const contentType of [
+        "__proto__",
+        "constructor",
+        "toString",
+        "hasOwnProperty",
+        "valueOf",
+      ]) {
+        // A fresh IP each time so the per-IP budget never fires before the
+        // allowlist check we are actually asserting on.
+        const res = await post({ kind, contentType, sizeBytes: 10 }, undefined, {
+          "x-forwarded-for": `203.0.113.${++n}`,
+        });
+        expect(res.status).toBe(400);
+        expect((await readJson(res)).error).toMatch(
+          new RegExp(`not allowed for ${kind}`)
+        );
+      }
+    }
+    expect(signedUploads).toEqual([]);
+  });
+
   it("rejects a content type that is not allowed for the kind", async () => {
     authOk();
     const res = await post({
