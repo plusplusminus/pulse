@@ -1,4 +1,5 @@
 import { deepElementFromPoint, identifyElement } from './element-pick'
+import { crosshairCursor } from '../ui/cursor'
 
 /** Squared pixel distance after which a mousedown+move counts as a drag, not a click. */
 export const DRAG_THRESHOLD = 8
@@ -95,10 +96,7 @@ export class ElementPicker {
     this.overlay.appendChild(this.label)
     this.shadow.appendChild(this.overlay)
 
-    this.cursorStyle = document.createElement('style')
-    this.cursorStyle.setAttribute('data-pulse', 'pick-cursor')
-    this.cursorStyle.textContent = 'html, html * { cursor: crosshair !important; }'
-    document.head.appendChild(this.cursorStyle)
+    this.cursorStyle = crosshairCursor()
 
     document.addEventListener('mousemove', this.onMouseMove, true)
     document.addEventListener('mousedown', this.onMouseDown, true)

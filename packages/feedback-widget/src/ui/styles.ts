@@ -1018,6 +1018,34 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
       pointer-events: none;
     }
 
+    /* Region capture (PULSE-404): the same rectangle, cut out of the dim */
+    .pulse-region-dim {
+      position: fixed;
+      z-index: 2147483645;
+      inset: 0;
+      background: rgba(0,0,0,0.35);
+      pointer-events: none;
+    }
+
+    .pulse-marquee--cut {
+      background: transparent;
+      box-shadow: 0 0 0 100vmax rgba(0,0,0,0.35);
+    }
+
+    .pulse-region-size {
+      position: fixed;
+      z-index: 2147483647;
+      padding: 3px 7px;
+      background: ${c.text};
+      color: ${c.bg};
+      font-size: 11px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      border-radius: 4px;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+
     .pulse-pick-status {
       position: fixed;
       z-index: 2147483647;
