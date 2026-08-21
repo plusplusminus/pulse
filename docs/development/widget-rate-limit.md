@@ -11,7 +11,7 @@ instances; Upstash is reachable from both Node and edge runtimes.
 
 | Export | Purpose |
 | --- | --- |
-| `checkRateLimit({ key, limit, windowMs }, deps?)` | `{ allowed, remaining, retryAfterMs }`. `deps.limiter` is an injected `Ratelimit`-like instance (tests use an in-memory fake + fake clock); omitted in routes. |
+| `checkRateLimit({ key, limit, windowMs, onError? }, deps?)` | `{ allowed, remaining, retryAfterMs, unverified? }`. `onError` is the backend-failure policy (`"allow"`, the default, or `"deny"`). `deps.limiter` is an injected `Ratelimit`-like instance (tests use an in-memory fake + fake clock); omitted in routes. |
 | `siteKey(prefix)` | `widget:{siteKeyPrefix}` |
 | `reporterKey(prefix, reporterIdOrIp)` | `widget:{siteKeyPrefix}:{reporterId \| ip}` |
 | `bootstrapKey(ip)` | `widget:bootstrap:{ip}` |
@@ -32,7 +32,8 @@ round-trip.
 | `GET /api/widget/v1/bootstrap/:siteKey` | `bootstrapKey(ip)` | 60 / min |
 
 Either check denying yields `429` with `Retry-After` (seconds, rounded up,
-minimum 1) derived from the limiter's `reset` timestamp. The client IP is the
+minimum 1) derived from the limiter's `reset` timestamp — except a fail-closed
+denial on `/api/widget/upload`, which is a `503` (see below). The client IP is the
 first hop of `x-forwarded-for` (Vercel), falling back to `x-real-ip`, then
 `"unknown"` (`readClientIp` in `src/lib/widget-origin.ts`). Feedback/upload
 check the site budget right after auth and the reporter/IP budget next, so a
@@ -43,20 +44,50 @@ headers — the widget sees a failed fetch, which is the intended outcome.
 Reporter emails appear lower-cased in Redis keys for the length of the window
 (60 s). Acceptable for an internal tool; hash them if that changes.
 
-## Fail-open
+## Backend failure
 
-Availability beats strictness for an internal tool. `checkRateLimit` returns
-`allowed: true` when:
+The backend is treated as unavailable when:
 
 - `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` are not set,
 - the backend throws, or
 - the backend takes longer than 500 ms.
 
-Each fail-open emits one Sentry warning (`level: warning`,
-`tags.area = widget-rate-limit`, `extra.keyPrefix`, `extra.reason`) per minute
-per key prefix (`widget:{site}` or `widget:bootstrap`) plus a `console.warn`.
-A sustained stream of these means the limiter is effectively off — treat as
-an incident, not noise.
+What happens next is the caller's `onError` policy.
+
+### Fail-open (default): `/feedback`, bootstrap
+
+Availability beats strictness for an internal tool: `checkRateLimit` returns
+`allowed: true` and the request proceeds unmetered. A reporter can still file
+feedback while Upstash hiccups, and every accepted submission is a row that
+retention and the admin UI can see.
+
+### Fail-closed (`onError: "deny"`): `/upload`
+
+`POST /api/widget/upload` mints signed storage tickets. An object is only ever
+discovered through a non-null path column on a `widget_submissions` row, so
+bytes uploaded against a ticket that is never attached are referenced by
+nothing and `widget-retention-run.ts` never sees them. With the limiter open,
+one public site key sustains roughly 60 x 100 MB per minute of permanently
+unpurgeable storage — and the limiter opens precisely when Upstash is under the
+flood it exists to stop. So both upload budgets pass `onError: "deny"`.
+
+The verdict comes back `allowed: false, unverified: true` and the route answers
+`503` with `Retry-After: 5` and `{ "error": "rate_limit_unavailable" }` — "we
+cannot check your budget right now", which is ours, not the caller's `429`.
+CORS headers are still granted so the page can read the failure.
+
+### Warnings
+
+Each failure emits one Sentry warning (`level: warning`,
+`tags.area = widget-rate-limit`, `tags.policy` = `allow` \| `deny`,
+`extra.keyPrefix`, `extra.reason`, `extra.outcome`) plus a `console.warn`,
+throttled to one per minute per key prefix (`widget:{site}` or
+`widget:bootstrap`) **per policy** — a fail-open on `/feedback` must not
+swallow the fail-closed warning `/upload` raises for the same site in the same
+minute, because only the latter rejected a caller. A sustained stream of
+`failing open` means the limiter is effectively off; a stream of
+`failing closed` means uploads are being refused. Both are incidents, not
+noise.
 
 ## Provisioning (HITL, PULSE-325)
 

@@ -19,20 +19,37 @@ import {
 // Widget media upload tickets (PULSE-323). The API only mints signed URLs;
 // bytes go browser -> Supabase Storage directly. Budgets are distributed
 // (PULSE-313): per site, then per IP (the ticket body carries no reporter).
-const SITE_BUDGET = { limit: 60, windowMs: 60_000 };
-const IP_BUDGET = { limit: 10, windowMs: 60_000 };
+//
+// Unlike /feedback, this route fails CLOSED when the limiter backend is down
+// (`onError: "deny"`). A ticketed object is only ever discovered through a
+// non-null path column on a widget_submissions row, so bytes uploaded against
+// a ticket that is never attached are referenced by nothing and the retention
+// cron never sees them. With the limiter open, one site key sustains ~60 x
+// 100 MB per minute of storage nothing can purge — and the limiter opens
+// precisely when Upstash is under the flood it exists to stop.
+const SITE_BUDGET = { limit: 60, windowMs: 60_000, onError: "deny" } as const;
+const IP_BUDGET = { limit: 10, windowMs: 60_000, onError: "deny" } as const;
 
-function tooManyRequests(verdict: RateLimitResult, headers: Record<string, string>) {
-  return NextResponse.json(
-    { error: "Rate limit exceeded. Try again later." },
-    {
-      status: 429,
-      headers: {
-        ...headers,
-        "Retry-After": String(Math.max(1, Math.ceil(verdict.retryAfterMs / 1000))),
-      },
-    }
-  );
+function rateLimited(verdict: RateLimitResult, headers: Record<string, string>) {
+  const retryAfter = {
+    "Retry-After": String(Math.max(1, Math.ceil(verdict.retryAfterMs / 1000))),
+  };
+  // "We cannot check your budget right now" is an outage on our side, not a
+  // budget the caller blew: 503, and a distinct error code, so a client (and
+  // anything reading these logs) can tell an Upstash outage from a flood.
+  return verdict.unverified
+    ? NextResponse.json(
+        {
+          error: "rate_limit_unavailable",
+          message:
+            "Upload tickets are unavailable right now. Please try again shortly.",
+        },
+        { status: 503, headers: { ...headers, ...retryAfter } }
+      )
+    : NextResponse.json(
+        { error: "Rate limit exceeded. Try again later." },
+        { status: 429, headers: { ...headers, ...retryAfter } }
+      );
 }
 
 // CORS follows the PULSE-392 origin policy (src/lib/widget-origin.ts): headers
@@ -79,13 +96,13 @@ export async function POST(request: Request) {
       key: siteKey(config.api_key_prefix),
       ...SITE_BUDGET,
     });
-    if (!siteVerdict.allowed) return tooManyRequests(siteVerdict, headers);
+    if (!siteVerdict.allowed) return rateLimited(siteVerdict, headers);
 
     const ipVerdict = await checkRateLimit({
       key: reporterKey(config.api_key_prefix, readClientIp(request)),
       ...IP_BUDGET,
     });
-    if (!ipVerdict.allowed) return tooManyRequests(ipVerdict, headers);
+    if (!ipVerdict.allowed) return rateLimited(ipVerdict, headers);
 
     const body = await request.json().catch(() => null);
     const parsed = uploadSchema.safeParse(body);

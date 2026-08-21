@@ -198,6 +198,20 @@ describe("checkRateLimit", () => {
       expect(mockedCapture).not.toHaveBeenCalled();
     });
 
+    it("keeps failing open when a caller asks for it explicitly", async () => {
+      const limiter: RateLimiterLike = {
+        async limit() {
+          throw new Error("ECONNRESET");
+        },
+      };
+      expect(
+        await checkRateLimit(
+          { key: siteKey("sk_explicit"), limit: 4, windowMs: 60_000, onError: "allow" },
+          { limiter }
+        )
+      ).toEqual({ allowed: true, remaining: 4, retryAfterMs: 0 });
+    });
+
     it("allows the request when no backend is configured", async () => {
       vi.stubEnv("UPSTASH_REDIS_REST_URL", "");
       vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "");
@@ -208,6 +222,92 @@ describe("checkRateLimit", () => {
         await checkRateLimit({ key: siteKey("sk_noenv"), limit: 2, windowMs: 60_000 })
       ).toMatchObject({ allowed: true });
       vi.unstubAllEnvs();
+    });
+  });
+
+  // `onError: "deny"` is for callers where letting an unmetered request through
+  // costs more than refusing it — /api/widget/upload, whose tickets can become
+  // storage nothing references and nothing purges.
+  describe("fail-closed (onError: deny)", () => {
+    const throwing: RateLimiterLike = {
+      async limit() {
+        throw new Error("ECONNRESET");
+      },
+    };
+
+    it("denies as unverified when the limiter throws", async () => {
+      expect(
+        await checkRateLimit(
+          { key: siteKey("sk_closed"), limit: 60, windowMs: 60_000, onError: "deny" },
+          { limiter: throwing }
+        )
+      ).toEqual({
+        allowed: false,
+        remaining: 0,
+        retryAfterMs: 5_000,
+        unverified: true,
+      });
+    });
+
+    it("denies as unverified when no backend is configured", async () => {
+      vi.stubEnv("UPSTASH_REDIS_REST_URL", "");
+      vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "");
+      expect(
+        await checkRateLimit({
+          key: siteKey("sk_closed_noenv"),
+          limit: 2,
+          windowMs: 60_000,
+          onError: "deny",
+        })
+      ).toMatchObject({ allowed: false, unverified: true });
+      vi.unstubAllEnvs();
+    });
+
+    it("denies as unverified when the limiter exceeds the timeout", async () => {
+      const pending = checkRateLimit(
+        {
+          key: siteKey("sk_closed_slow"),
+          limit: 5,
+          windowMs: 60_000,
+          onError: "deny",
+        },
+        { limiter: { limit: () => new Promise(() => {}) }, timeoutMs: 500 }
+      );
+      await vi.advanceTimersByTimeAsync(500);
+      expect(await pending).toMatchObject({ allowed: false, unverified: true });
+    });
+
+    it("leaves an ordinary over-budget denial unflagged", async () => {
+      const limiter = limiterFor(1, 60_000);
+      const input = {
+        key: siteKey("sk_closed_budget"),
+        limit: 1,
+        windowMs: 60_000,
+        onError: "deny" as const,
+      };
+      expect(await checkRateLimit(input, { limiter })).toMatchObject({
+        allowed: true,
+      });
+      const denied = await checkRateLimit(input, { limiter });
+      expect(denied.allowed).toBe(false);
+      expect(denied.unverified).toBeUndefined();
+    });
+
+    it("warns as failing closed, throttled per prefix independently of fail-open", async () => {
+      const site = { key: siteKey("sk_both"), limit: 60, windowMs: 60_000 };
+
+      await checkRateLimit({ ...site, onError: "deny" }, { limiter: throwing });
+      await checkRateLimit({ ...site, onError: "deny" }, { limiter: throwing });
+      expect(mockedCapture).toHaveBeenCalledTimes(1);
+      expect(mockedCapture.mock.calls[0][0]).toMatch(/failing closed/);
+      expect(mockedCapture.mock.calls[0][1]).toMatchObject({
+        tags: { area: "widget-rate-limit", policy: "deny" },
+      });
+
+      // The same site failing open elsewhere still gets its own warning.
+      await checkRateLimit(site, { limiter: throwing });
+      expect(mockedCapture).toHaveBeenCalledTimes(2);
+      expect(mockedCapture.mock.calls[1][0]).toMatch(/failing open/);
     });
   });
 });
