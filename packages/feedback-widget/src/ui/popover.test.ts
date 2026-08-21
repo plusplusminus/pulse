@@ -126,6 +126,69 @@ describe('focus', () => {
   })
 })
 
+/**
+ * Regression, PULSE-402 fallout found by clicking the real widget.
+ *
+ * The widget mounts in a CLOSED shadow root, and `composedPath()` redacts nodes
+ * inside a closed tree from listeners registered outside it — a document-level
+ * handler sees the path stop at the host. The dismiss check used to ask whether
+ * the path contained the popover surface, which from `document` is never true,
+ * so the popover closed on its own item's pointerdown and detached the button
+ * before `click` could fire. Every capture option was dead to a real mouse.
+ *
+ * jsdom does not model that redaction, so an ordinary jsdom pointerdown will
+ * not reproduce it. These tests drive the handlers with the path each listener
+ * would ACTUALLY see in a browser.
+ */
+describe('dismissal with a closed shadow root (PULSE-402 regression)', () => {
+  function redactedPointerDown(host: Element) {
+    // What a document-level listener sees for a pointerdown inside a closed
+    // shadow tree: the path stops at the host.
+    const e = new PointerEvent('pointerdown', { bubbles: true, composed: true });
+    Object.defineProperty(e, 'composedPath', { value: () => [host, document.body, document] });
+    return e;
+  }
+
+  it('stays open when the pointer goes down on its own item', async () => {
+    const pop = new Popover(shadow, {
+      id: 'screenshot',
+      label: 'Screenshot',
+      build: () => {
+        const b = document.createElement('button');
+        b.textContent = 'This viewport';
+        return b;
+      },
+    });
+    shadow.appendChild(pop.caret);
+    pop.open();
+    expect(pop.isOpen).toBe(true);
+
+    // The document listener fires first, and all it can see is the host.
+    document.dispatchEvent(redactedPointerDown(shadow.host));
+
+    expect(
+      pop.isOpen,
+      'the popover closed on a pointerdown inside the widget; the item is now detached and its click will never fire'
+    ).toBe(true);
+  });
+
+  it('still closes when the pointer goes down outside the widget', () => {
+    const pop = new Popover(shadow, {
+      id: 'screenshot',
+      label: 'Screenshot',
+      build: () => document.createElement('button'),
+    });
+    shadow.appendChild(pop.caret);
+    pop.open();
+
+    const e = new PointerEvent('pointerdown', { bubbles: true, composed: true });
+    Object.defineProperty(e, 'composedPath', { value: () => [document.body, document] });
+    document.dispatchEvent(e);
+
+    expect(pop.isOpen).toBe(false);
+  });
+});
+
 describe('dismissal', () => {
   it('closes when a pointer lands anywhere else, without stealing focus back', () => {
     const popover = makePopover()
