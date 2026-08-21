@@ -10,6 +10,12 @@ import { getWidgetStyles } from './ui/styles'
 import { TriggerButton } from './ui/trigger'
 import { BAR_IN_RECORDING_NOTICE, FeedbackPanel, type PanelFormData } from './ui/panel'
 import {
+  MAX_SCREENSHOTS,
+  SCREENSHOT_CAP_NOTICE,
+  newAttachmentId,
+  type ScreenshotAttachment,
+} from './attachments'
+import {
   MicLevelMeter,
   isGetUserMediaSupported,
   micNotice,
@@ -58,10 +64,10 @@ export interface PulseCore {
     type: 'bug' | 'feedback' | 'idea'
     email: string
     name?: string
-    screenshot?: Blob | null
+    /** Every attached image, in the reporter's order (PULSE-403). */
+    screenshots?: { blob: Blob; annotations?: ScreenshotAnnotation[] }[]
     video?: { blob: Blob; mimeType: string } | null
     picks?: WidgetPick[]
-    screenshotAnnotations?: ScreenshotAnnotation[]
     captureSurface?: CaptureSurface
     onUploadProgress?: (sent: number, total: number) => void
   }): Promise<SubmitResult>
@@ -96,14 +102,12 @@ export class Widget {
   private freezer = new PageFreezer()
   private lastModifierPoint: Point | null = null
   private state: WidgetState = 'closed'
-  private currentScreenshot: Blob | null = null
-  /** Bitmap as captured, so re-annotating never stacks rects onto a flattened export. */
-  private originalScreenshot: Blob | null = null
-  /** What is submitted: in the EXPORTED image's space, so a crop is already applied. */
-  private annotations: ScreenshotAnnotation[] = []
-  /** The editor's own round-trip state (original image space). Opaque here. */
-  private editorState: AnnotationEditorState | null = null
-  private captureSurface: CaptureSurface | undefined
+  /**
+   * Every attached screenshot, in capture order (PULSE-403). Each carries its
+   * own original bitmap, export, marks and editor session, so annotating or
+   * removing one cannot touch another.
+   */
+  private screenshots: ScreenshotAttachment[] = []
   private recorder: VideoRecorder | null = null
   private recording: VideoRecording | null = null
   private recordingBar: RecordingBar | null = null
@@ -160,8 +164,8 @@ export class Widget {
         isGetUserMediaSupported(),
       onSubmit: (data) => this.handleSubmit(data),
       onClose: () => this.close(),
-      onAnnotate: () => this.startAnnotation(),
-      onRetakeScreenshot: () => this.retakeScreenshot(),
+      onAnnotate: (id) => this.startAnnotation(id),
+      onRemoveScreenshot: (id) => this.removeScreenshot(id),
       onCaptureScreenshot: () => this.captureFullScreen(),
       onCaptureRegion: () => this.startRegionCapture(),
       onCaptureTab: () => this.captureTab(),
@@ -218,7 +222,7 @@ export class Widget {
     if (this.state !== 'closed') return
     this.state = 'open'
     this.trigger.hide()
-    this.setScreenshot(null)
+    this.clearScreenshots()
     this.setRecording(null)
     this.picks = []
     this.markersById.clear()
@@ -768,15 +772,53 @@ export class Widget {
     this.themeQuery.addEventListener('change', this.themeHandler)
   }
 
-  /** Captured bitmap + its annotations move together; null clears both. */
-  private setScreenshot(blob: Blob | null, surface?: CaptureSurface): void {
-    this.originalScreenshot = blob
-    this.currentScreenshot = blob
-    this.annotations = []
-    // A retake invalidates every mark AND the crop; nothing survives a new bitmap.
-    this.editorState = null
-    this.captureSurface = blob ? surface : undefined
-    this.panel.setScreenshot(blob)
+  /**
+   * A capture APPENDS (PULSE-403). Nothing already attached is disturbed, so
+   * a reporter can walk a flow across several screens in one report.
+   */
+  private addScreenshot(blob: Blob, surface?: CaptureSurface): void {
+    if (this.screenshots.length >= MAX_SCREENSHOTS) {
+      this.panel.setAttachNote(SCREENSHOT_CAP_NOTICE)
+      return
+    }
+    this.screenshots.push({
+      id: newAttachmentId(),
+      original: blob,
+      current: blob,
+      annotations: [],
+      editorState: null,
+      surface,
+    })
+    this.panel.setAttachNote(null)
+    this.syncScreenshots()
+  }
+
+  /** Drops one image and its marks; the panel revokes that blob's URL. */
+  private removeScreenshot(id: string): void {
+    this.screenshots = this.screenshots.filter((shot) => shot.id !== id)
+    this.panel.setAttachNote(null)
+    this.syncScreenshots()
+  }
+
+  private clearScreenshots(): void {
+    this.screenshots = []
+    this.panel.setAttachNote(null)
+    this.syncScreenshots()
+  }
+
+  private syncScreenshots(): void {
+    this.panel.setScreenshots(this.screenshots.map((shot) => ({ id: shot.id, blob: shot.current })))
+  }
+
+  /**
+   * Checked BEFORE a capture starts, not after: getDisplayMedia would
+   * otherwise prompt for a permission whose result is already discarded.
+   * False leaves the reason on screen.
+   */
+  private canAddScreenshot(): boolean {
+    if (this.screenshots.length < MAX_SCREENSHOTS) return true
+    this.panel.setAttachNote(SCREENSHOT_CAP_NOTICE)
+    return false
   }
 
   /**
@@ -786,6 +828,7 @@ export class Widget {
    * to do first.
    */
   private captureTab(): void {
+    if (!this.canAddScreenshot()) return
     this.host.style.display = 'none'
     let stream: Promise<MediaStream>
     try {
@@ -801,7 +844,7 @@ export class Widget {
   private async finishTabCapture(pending: Promise<MediaStream>): Promise<void> {
     try {
       const { blob, surface } = await frameFromStream(await pending)
-      this.setScreenshot(blob, surface)
+      this.addScreenshot(blob, surface)
       this.panel.setCaptureError(null)
     } catch (e) {
       // Declining the picker is a normal outcome, not an error to report.
@@ -820,6 +863,8 @@ export class Widget {
    * has to hide (and flash) to stay out of the shot.
    */
   private async captureFullScreen(): Promise<void> {
+    if (!this.canAddScreenshot()) return
+
     let blob: Blob | null = null
     let error: string | null = null
     try {
@@ -827,7 +872,9 @@ export class Widget {
     } catch (e) {
       error = e instanceof Error ? e.message : 'Screenshot capture failed'
     }
-    this.setScreenshot(blob)
+    // A capture that produced nothing leaves what is already attached alone —
+    // an append that failed must never read as a removal.
+    if (blob) this.addScreenshot(blob)
     this.panel.setCaptureError(error)
     this.state = 'open'
     this.panel.setState('open')
@@ -841,6 +888,9 @@ export class Widget {
    */
   private startRegionCapture(): void {
     if (!this.regionSelector || this.state !== 'open') return
+    // Refused before the page dims: a full-screen selection ceremony that ends
+    // in "no room for this" is worse than never starting it (PULSE-403).
+    if (!this.canAddScreenshot()) return
     this.state = 'capturing'
     this.panel.setCaptureError(null)
     this.panel.hide()
@@ -877,18 +927,19 @@ export class Widget {
     } catch (e) {
       error = e instanceof Error ? e.message : 'Screenshot capture failed'
     }
-    this.setScreenshot(blob)
+    // Appends like every other capture path (PULSE-403); a region that failed
+    // to crop leaves the screenshots already attached alone.
+    if (blob) this.addScreenshot(blob)
     this.panel.setCaptureError(error)
     this.state = 'open'
     this.panel.setState('open')
   }
 
-  private startAnnotation(): void {
-    // Always annotate the ORIGINAL capture: marks are re-applied from scratch,
-    // so re-opening the editor never bakes the previous pass into the bitmap.
-    const source = this.originalScreenshot
-    if (!source) return
-    void this.openEditor(source)
+  /** Marks belong to one screenshot, so the editor is opened against one. */
+  private startAnnotation(id: string): void {
+    const shot = this.screenshots.find((s) => s.id === id)
+    if (!shot) return
+    void this.openEditor(shot)
   }
 
   /**
@@ -896,7 +947,7 @@ export class Widget {
    * the widget that can fail on a network hop. A failed load is not fatal: the
    * screenshot stays attached exactly as captured and the panel says so.
    */
-  private async openEditor(source: Blob): Promise<void> {
+  private async openEditor(shot: ScreenshotAttachment): Promise<void> {
     let editor
     try {
       editor = await loadAnnotationEditor(this.config.apiUrl)
@@ -913,10 +964,16 @@ export class Widget {
       {
         onSave: (blob, annotations, state) => {
           this.host.classList.remove('pulse-annotating')
-          this.currentScreenshot = blob
-          this.annotations = annotations
-          this.editorState = state
-          this.panel.setScreenshot(blob)
+          // Re-looked-up, not captured: the reporter can remove this
+          // screenshot's chip while the editor is open, and a save must not
+          // resurrect it.
+          const target = this.screenshots.find((s) => s.id === shot.id)
+          if (target) {
+            target.current = blob
+            target.annotations = annotations
+            target.editorState = state
+            this.syncScreenshots()
+          }
           this.state = 'open'
           this.annotation = null
         },
@@ -929,11 +986,9 @@ export class Widget {
       this.resolveTheme()
     )
 
-    await this.annotation.show(source, this.editorState)
-  }
-
-  private async retakeScreenshot(): Promise<void> {
-    await this.captureFullScreen()
+    // Always the ORIGINAL capture: marks are re-applied from scratch, so
+    // re-opening the editor never bakes the previous pass into the bitmap.
+    await this.annotation.show(shot.original, shot.editorState)
   }
 
   private async handleSubmit(formData: PanelFormData): Promise<SubmitResult> {
@@ -947,23 +1002,23 @@ export class Widget {
       type: formData.type,
       email: formData.email,
       name: formData.name,
-      screenshot: this.currentScreenshot,
+      screenshots: this.screenshots.map((shot) => ({
+        blob: shot.current,
+        annotations: shot.annotations,
+      })),
       video: this.recording
         ? { blob: this.recording.blob, mimeType: this.recording.mimeType }
         : null,
       picks: this.picks,
-      screenshotAnnotations: this.annotations,
-      captureSurface: this.captureSurface,
+      // Submission-level metadata predates multiple screenshots: report the
+      // first image's surface, the one the legacy media URL still resolves to.
+      captureSurface: this.screenshots[0]?.surface,
       onUploadProgress: (sent, total) => this.panel.setUploadProgress(sent, total),
     })
 
     if (result.status === 'created') {
       this.state = 'success'
-      this.originalScreenshot = null
-      this.currentScreenshot = null
-      this.annotations = []
-      this.editorState = null
-      this.captureSurface = undefined
+      this.screenshots = []
       // The panel clears its own opt-in on a submitted report; keep the two in
       // step, so the next reporter has to choose the microphone again.
       this.voiceOver = false

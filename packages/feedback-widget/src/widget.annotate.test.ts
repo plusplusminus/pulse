@@ -201,7 +201,7 @@ describe('Annotate', () => {
     expect(fake.shows[1]).toEqual(state)
   })
 
-  it('drops marks and crop on a retake, so nothing lands on the wrong bitmap', async () => {
+  it('gives a second capture its own blank session, leaving the first one marked', async () => {
     const fake = fakeEditorModule()
     setAnnotationEditorModule(fake.module)
     mount()
@@ -209,17 +209,29 @@ describe('Annotate', () => {
 
     button('Annotate').click()
     await vi.waitFor(() => expect(fake.configs).toHaveLength(1))
-    fake.configs[0].onSave(new Blob(['flattened'], { type: 'image/png' }), [], {
+    const first: AnnotationEditorState = {
       annotations: [{ kind: 'hide', x: 1, y: 2, w: 3, h: 4 }],
       crop: { x: 5, y: 6, w: 7, h: 8 },
-    })
+    }
+    fake.configs[0].onSave(new Blob(['flattened'], { type: 'image/png' }), [], first)
 
-    button('Retake').click()
+    // "Add another" appends (PULSE-403); the marked screenshot is untouched.
+    button('Add another').click()
     await vi.waitFor(() => expect(captured).toBe(2))
+    await vi.waitFor(() =>
+      expect(shadow.querySelectorAll('.pulse-chip__open--shot')).toHaveLength(2)
+    )
 
+    const chips = shadow.querySelectorAll<HTMLButtonElement>('.pulse-chip__open--shot')
+    chips[1].click()
     button('Annotate').click()
     await vi.waitFor(() => expect(fake.shows).toHaveLength(2))
     expect(fake.shows[1]).toBeNull()
+
+    chips[0].click()
+    button('Annotate').click()
+    await vi.waitFor(() => expect(fake.shows).toHaveLength(3))
+    expect(fake.shows[2]).toEqual(first)
   })
 
   it('goes full-screen only once the editor has arrived', async () => {
@@ -249,6 +261,6 @@ describe('Annotate', () => {
     const host = document.getElementById('pulse-widget')
     expect(host?.classList.contains('pulse-annotating')).toBe(false)
     // The capture is still attached: annotation failed, the screenshot did not.
-    expect(button('Retake')).toBeTruthy()
+    expect(button('Add another')).toBeTruthy()
   })
 })
