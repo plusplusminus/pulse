@@ -449,14 +449,18 @@ describe('video recording controls (PULSE-338)', () => {
 })
 
 describe('voice-over opt-in (PULSE-400)', () => {
-  const toggle = () =>
-    shadow.querySelector('.pulse-voiceover__toggle') as HTMLButtonElement | null
+  // PULSE-402: voice-over is a setting on Record, not a peer of it, so the
+  // toggle now lives under Record's caret rather than in its own panel block.
+  const openRecordOptions = () =>
+    (shadow.querySelector('.pulse-caret[aria-label="Recording options"]') as HTMLButtonElement).click()
+  const toggle = () => shadow.querySelector('.pulse-voiceover__toggle') as HTMLButtonElement | null
   const noteTexts = () =>
-    Array.from(shadow.querySelectorAll('.pulse-capture-note')).map((n) => n.textContent ?? '')
+    Array.from(shadow.querySelectorAll('.pulse-capture-note, .pulse-pop__note')).map((n) => n.textContent ?? '')
 
   it('renders nothing when the site does not allow a microphone', () => {
     const panel = makePanel(false, { allowVideo: true, allowVoiceOver: false })
     panel.setState('open')
+    openRecordOptions()
 
     expect(toggle()).toBeNull()
     expect(noteTexts()).not.toContain(VOICE_OVER_NOTICE)
@@ -467,27 +471,28 @@ describe('voice-over opt-in (PULSE-400)', () => {
   it('states that audio is captured before the toggle is ever clicked', () => {
     const panel = makePanel(false, { allowVideo: true, allowVoiceOver: true })
     panel.setState('open')
+    openRecordOptions()
 
     expect(noteTexts()).toContain(VOICE_OVER_NOTICE)
     expect(config.onToggleVoiceOver).not.toHaveBeenCalled()
   })
 
-  it('sits with the record control, so the choice comes before the picker', () => {
+  it('sits under Record, above the notice, so the choice comes before the picker', () => {
     const panel = makePanel(false, { allowVideo: true, allowVoiceOver: true })
     panel.setState('open')
+    // Nothing about the microphone is in the panel body any more.
+    expect(shadow.querySelector('.pulse-body .pulse-voiceover__toggle')).toBeNull()
 
-    const body = shadow.querySelector('.pulse-body')!
-    const order = Array.from(body.children).map((c) => c.className)
-    const voiceOver = order.findIndex((c) => c.includes('pulse-voiceover'))
-    const record = order.findIndex((c) => c.includes('pulse-attach'))
-    expect(voiceOver).toBeGreaterThanOrEqual(0)
-    expect(record).toBeGreaterThanOrEqual(0)
-    expect(record).toBeLessThan(voiceOver)
+    openRecordOptions()
+    const rows = Array.from(shadow.querySelectorAll('.pulse-pop__list > *')).map((c) => c.className)
+    expect(rows[0]).toContain('pulse-voiceover__toggle')
+    expect(shadow.querySelectorAll('.pulse-pop__note')[0]?.textContent).toBe(VOICE_OVER_NOTICE)
   })
 
   it('routes the click straight through — getUserMedia needs that activation', () => {
     const panel = makePanel(false, { allowVideo: true, allowVoiceOver: true })
     panel.setState('open')
+    openRecordOptions()
 
     toggle()!.click()
 
@@ -497,29 +502,33 @@ describe('voice-over opt-in (PULSE-400)', () => {
   it('reflects state in aria-pressed and in a word, never in colour alone', () => {
     const panel = makePanel(false, { allowVideo: true, allowVoiceOver: true })
     panel.setState('open')
+    openRecordOptions()
     expect(toggle()!.getAttribute('aria-pressed')).toBe('false')
     expect(shadow.querySelector('.pulse-voiceover__state')!.textContent).toBe('Off')
 
     panel.setVoiceOver(true)
 
+    // The popover survived the re-render the toggle caused, and focus with it.
     expect(toggle()!.getAttribute('aria-pressed')).toBe('true')
     expect(shadow.querySelector('.pulse-voiceover__state')!.textContent).toBe('On')
+    expect(shadow.activeElement).toBe(toggle())
     expect(panel.isVoiceOverOn()).toBe(true)
   })
 
-  it('shows a microphone problem as a status, not as a form error', () => {
+  it('shows a microphone problem as a status in the panel, not behind the caret', () => {
     const panel = makePanel(false, { allowVideo: true, allowVoiceOver: true })
     panel.setState('open')
 
     panel.setVoiceOverNote('No microphone was found — the recording continues without voice-over.')
 
-    const note = shadow.querySelector('.pulse-voiceover .pulse-capture-note--error')!
+    // A mic that dies mid-recording has to be readable with every popover shut.
+    const note = shadow.querySelector('.pulse-attach .pulse-capture-note--status')!
     expect(note.textContent).toContain('No microphone was found')
     // status, not alert: nothing failed, the recording just has no narration.
     expect(note.getAttribute('role')).toBe('status')
   })
 
-  it('keeps the option visible next to a finished recording, so Re-record obeys it', () => {
+  it('keeps the option available next to a finished recording, so Re-record obeys it', () => {
     URL.createObjectURL = vi.fn(() => 'blob:pulse/0')
     URL.revokeObjectURL = vi.fn()
     const panel = makePanel(false, { allowVideo: true, allowVoiceOver: true })
@@ -527,6 +536,7 @@ describe('voice-over opt-in (PULSE-400)', () => {
     panel.setVoiceOver(true)
     panel.setVideo(new Blob(['x'], { type: 'video/webm;codecs=vp9,opus' }), 1_000)
 
+    openRecordOptions()
     expect(toggle()!.getAttribute('aria-pressed')).toBe('true')
     expect(shadow.querySelector('.pulse-video__player')).not.toBeNull()
   })

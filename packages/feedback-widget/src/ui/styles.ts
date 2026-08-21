@@ -553,6 +553,40 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
       line-height: 1.3;
     }
 
+    /* Voice-over lives here now (PULSE-402): a setting on Record, not a peer. */
+    .pulse-pop__toggle {
+      align-items: center;
+    }
+
+    .pulse-pop__toggle svg {
+      margin-top: 0;
+    }
+
+    .pulse-pop__toggle .pulse-pop__text {
+      flex: 1;
+    }
+
+    .pulse-pop__toggle[aria-pressed='true'] svg {
+      color: ${c.primary};
+    }
+
+    .pulse-voiceover__state {
+      flex-shrink: 0;
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: ${c.muted};
+      padding: 2px 6px;
+      border: 1px solid ${c.border};
+      border-radius: 5px;
+    }
+
+    .pulse-pop__toggle[aria-pressed='true'] .pulse-voiceover__state {
+      color: ${c.primary};
+      border-color: ${c.primary};
+    }
+
     .pulse-pop__hint,
     .pulse-pop__note {
       font-size: 11px;
@@ -582,68 +616,6 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
 
     .pulse-capture-note--status {
       color: ${c.muted};
-    }
-
-    /* Voice-over opt-in (PULSE-400). Inherits .pulse-add-screenshot chrome. */
-    .pulse-voiceover {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      margin-bottom: 12px;
-    }
-
-    .pulse-voiceover__toggle {
-      width: 100%;
-      border-style: solid;
-      font-size: 13px;
-    }
-
-    .pulse-voiceover__label {
-      flex: 1;
-      text-align: left;
-    }
-
-    /* The word, not just the border: "On" / "Off" is the state, colour a hint. */
-    .pulse-voiceover__state {
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.03em;
-      text-transform: uppercase;
-    }
-
-    .pulse-voiceover__toggle[aria-pressed='true'] {
-      border-color: ${c.primary};
-      color: ${c.text};
-    }
-
-    .pulse-add-screenshot {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      padding: 10px 8px;
-      border: 1px dashed ${c.border};
-      border-radius: 8px;
-      background: transparent;
-      color: ${c.muted};
-      font-family: inherit;
-      font-size: 12px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
-    }
-
-    .pulse-add-screenshot:hover {
-      border-color: ${c.primary};
-      color: ${c.primary};
-      background: ${c.inputBg};
-    }
-
-    .pulse-add-screenshot svg {
-      width: 14px;
-      height: 14px;
-      flex-shrink: 0;
     }
 
     /* Video preview (PULSE-338) */

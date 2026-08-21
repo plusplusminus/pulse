@@ -263,10 +263,6 @@ export class FeedbackPanel {
       this.bodyEl.appendChild(this.renderScreenshotPreview())
     }
 
-    if (this.config.allowVoiceOver) {
-      this.bodyEl.appendChild(this.renderVoiceOverOption())
-    }
-
     if (this.videoBlob) {
       this.bodyEl.appendChild(this.renderVideoPreview())
     }
@@ -440,11 +436,57 @@ export class FeedbackPanel {
     return list
   }
 
+  /**
+   * Voice-over is not a second recording feature — it is how you record, so
+   * it lives under Record rather than beside it (PULSE-402). The consent copy
+   * comes with it: the microphone prompt must never be the first time a
+   * reporter learns their voice is part of the attachment (PULSE-400).
+   */
   private buildRecordOptions(): HTMLElement {
     const list = document.createElement('div')
     list.className = 'pulse-pop__list'
+
+    if (this.config.allowVoiceOver) {
+      list.appendChild(this.renderVoiceOverToggle())
+      list.appendChild(this.popNote(VOICE_OVER_NOTICE))
+    }
+
     list.appendChild(this.popNote(RECORDING_NOTICE))
     return list
+  }
+
+  private renderVoiceOverToggle(): HTMLButtonElement {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'pulse-pop__item pulse-pop__toggle pulse-voiceover__toggle'
+    btn.setAttribute('aria-pressed', this.voiceOver ? 'true' : 'false')
+
+    const { svg } = micIcon()
+    btn.appendChild(svg)
+
+    const text = document.createElement('span')
+    text.className = 'pulse-pop__text'
+    const name = document.createElement('span')
+    name.className = 'pulse-pop__name pulse-voiceover__label'
+    name.textContent = 'Voice-over'
+    text.appendChild(name)
+    const hint = document.createElement('span')
+    hint.className = 'pulse-pop__hint'
+    hint.textContent = 'Narrate the recording as you go'
+    text.appendChild(hint)
+    btn.appendChild(text)
+
+    // The word, not just the border: "On" / "Off" is the state, colour a hint.
+    const state = document.createElement('span')
+    state.className = 'pulse-voiceover__state'
+    state.textContent = this.voiceOver ? 'On' : 'Off'
+    btn.appendChild(state)
+
+    // getUserMedia wants the activation from this click: nothing awaited
+    // first, and the popover deliberately stays open so the answer lands in
+    // view rather than behind a caret the reporter has to reopen.
+    btn.addEventListener('click', () => this.config.onToggleVoiceOver?.())
+    return btn
   }
 
   private popItem(label: string, hint: string, glyph: SVGSVGElement, onClick: () => void): HTMLButtonElement {
@@ -703,54 +745,6 @@ export class FeedbackPanel {
     return `${(kb / 1024).toFixed(1)} MB`
   }
 
-  /**
-   * Sits ABOVE the record control, and stays there while a recording is
-   * attached so Re-record is governed by the same choice. Its copy is what
-   * makes the microphone prompt expected rather than a surprise.
-   */
-  private renderVoiceOverOption(): HTMLElement {
-    const container = document.createElement('div')
-    container.className = 'pulse-voiceover'
-
-    const btn = document.createElement('button')
-    // Shares the "add a capture" chrome; the voiceover rule only adds what differs.
-    btn.className = 'pulse-add-screenshot pulse-voiceover__toggle'
-    btn.type = 'button'
-    btn.setAttribute('aria-pressed', this.voiceOver ? 'true' : 'false')
-
-    const { svg } = micIcon()
-    btn.appendChild(svg)
-
-    const label = document.createElement('span')
-    label.className = 'pulse-voiceover__label'
-    label.textContent = 'Record with voice-over'
-    btn.appendChild(label)
-
-    const state = document.createElement('span')
-    state.className = 'pulse-voiceover__state'
-    state.textContent = this.voiceOver ? 'On' : 'Off'
-    btn.appendChild(state)
-
-    // getUserMedia wants the activation from this click: nothing awaited first.
-    btn.addEventListener('click', () => this.config.onToggleVoiceOver?.())
-    container.appendChild(btn)
-
-    const note = document.createElement('div')
-    note.className = 'pulse-capture-note'
-    note.textContent = VOICE_OVER_NOTICE
-    container.appendChild(note)
-
-    if (this.voiceOverNote) {
-      const problem = document.createElement('div')
-      problem.className = 'pulse-capture-note pulse-capture-note--error'
-      problem.setAttribute('role', 'status')
-      problem.textContent = this.voiceOverNote
-      container.appendChild(problem)
-    }
-
-    return container
-  }
-
   private renderVideoPreview(): HTMLElement {
     const container = document.createElement('div')
     container.className = 'pulse-screenshot pulse-video'
@@ -839,6 +833,7 @@ export class FeedbackPanel {
    */
   setVoiceOver(on: boolean): void {
     this.voiceOver = on
+    this.reopenFocus = '.pulse-voiceover__toggle'
     if (this.state === 'open') this.renderForm()
   }
 
@@ -849,6 +844,7 @@ export class FeedbackPanel {
   /** Denied, missing or broken microphone. Never an error state — a note. */
   setVoiceOverNote(message: string | null): void {
     this.voiceOverNote = message
+    this.reopenFocus = '.pulse-voiceover__toggle'
     if (this.state === 'open') this.renderForm()
   }
 

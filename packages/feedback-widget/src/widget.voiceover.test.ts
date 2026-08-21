@@ -177,14 +177,21 @@ function click(selector: string): void {
 }
 
 function notes(): string[] {
-  return Array.from(shadow.querySelectorAll('.pulse-capture-note')).map(
+  // PULSE-402: consent copy moved under the Record caret it belongs to.
+  return Array.from(shadow.querySelectorAll('.pulse-capture-note, .pulse-pop__note')).map(
     (n) => n.textContent ?? ''
   )
+}
+
+/** Voice-over is a setting on Record, so it is reached through Record's caret. */
+function openRecordOptions(): void {
+  click('.pulse-caret[aria-label="Recording options"]')
 }
 
 /** Open the panel and turn the voice-over option on, the way a reporter does. */
 async function optIn(): Promise<void> {
   click('.pulse-trigger')
+  openRecordOptions()
   click('.pulse-voiceover__toggle')
   await flush()
 }
@@ -233,7 +240,8 @@ describe('capture.voiceOver false', () => {
 
   it('renders no voice-over option at all', () => {
     click('.pulse-trigger')
-    expect(q('.pulse-voiceover')).toBeNull()
+    openRecordOptions()
+    expect(q('.pulse-voiceover__toggle')).toBeNull()
     expect(q('.pulse-record-btn')).not.toBeNull()
   })
 
@@ -270,6 +278,7 @@ describe('the opt-in', () => {
 
   it('says audio is captured BEFORE the prompt can appear', () => {
     click('.pulse-trigger')
+    openRecordOptions()
 
     expect(notes()).toContain(VOICE_OVER_NOTICE)
     expect(VOICE_OVER_NOTICE).toMatch(/microphone is recorded/i)
@@ -279,6 +288,7 @@ describe('the opt-in', () => {
 
   it('is off until the reporter turns it on', () => {
     click('.pulse-trigger')
+    openRecordOptions()
     expect(q('.pulse-voiceover__toggle')!.getAttribute('aria-pressed')).toBe('false')
     expect(q('.pulse-voiceover__state')!.textContent).toBe('Off')
   })
@@ -302,6 +312,7 @@ describe('the opt-in', () => {
     click('.pulse-voiceover__toggle')
     await flush()
 
+    // The popover stayed open across the state change, so the answer is in view.
     expect(q('.pulse-voiceover__toggle')!.getAttribute('aria-pressed')).toBe('false')
     expect(getUserMedia).toHaveBeenCalledTimes(1)
   })
@@ -489,6 +500,7 @@ describe('recording with a voice-over', () => {
     await flush()
     const calls = getUserMedia.mock.calls.length
 
+    openRecordOptions()
     click('.pulse-voiceover__toggle')
     expect(q('.pulse-voiceover__toggle')!.getAttribute('aria-pressed')).toBe('false')
     // Turning it off is free; turning it back on re-uses the granted permission.
