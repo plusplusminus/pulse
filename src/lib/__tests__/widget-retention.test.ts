@@ -6,8 +6,10 @@ import {
   RETENTION_DAYS,
   RETENTION_PATH_COLUMNS,
   candidateCutoff,
+  planAssetRetentionDeletes,
   planRetentionDeletes,
   retentionPatch,
+  type RetentionAsset,
   type RetentionSubmission,
 } from "../widget-retention";
 
@@ -263,6 +265,156 @@ describe("retentionPatch", () => {
   it("stamps media_purged_at even for an empty column set", () => {
     expect(retentionPatch([], NOW.toISOString())).toEqual({
       media_purged_at: NOW.toISOString(),
+    });
+  });
+});
+
+// -- Per-asset retention (PULSE-403) --------------------------------------
+
+function asset(
+  overrides: Partial<RetentionAsset> & { id: string }
+): RetentionAsset {
+  return {
+    submission_id: "sub-1",
+    kind: "screenshot",
+    storage_path: `${HUB}/screenshots/${overrides.id}.png`,
+    created_at: agedDays(0),
+    purged_at: null,
+    ...overrides,
+  };
+}
+
+describe("planAssetRetentionDeletes", () => {
+  it("expires an asset at exactly its window, not a millisecond before", () => {
+    const onTheDay = planAssetRetentionDeletes({
+      now: NOW,
+      assets: [asset({ id: "a", created_at: agedDays(90) })],
+    });
+    const oneMsShort = planAssetRetentionDeletes({
+      now: NOW,
+      assets: [asset({ id: "a", created_at: agedDays(90, 1) })],
+    });
+
+    expect(onTheDay.expired).toHaveLength(1);
+    expect(oneMsShort.expired).toEqual([]);
+    expect(oneMsShort.storagePathsToDelete).toEqual([]);
+  });
+
+  it("measures from the asset's own created_at, not the submission's", () => {
+    // A screenshot attached today to a two-year-old submission keeps its window.
+    const plan = planAssetRetentionDeletes({
+      now: NOW,
+      assets: [asset({ id: "fresh", created_at: agedDays(1) })],
+    });
+    expect(plan.expired).toEqual([]);
+  });
+
+  it("applies the per-kind window", () => {
+    const plan = planAssetRetentionDeletes({
+      now: NOW,
+      assets: [
+        asset({ id: "shot", kind: "screenshot", created_at: agedDays(45) }),
+        asset({
+          id: "clip",
+          kind: "video",
+          storage_path: `${HUB}/videos/clip.webm`,
+          created_at: agedDays(45),
+        }),
+        asset({
+          id: "rec",
+          kind: "replay",
+          storage_path: `${HUB}/replays/rec.json`,
+          created_at: agedDays(45),
+        }),
+      ],
+    });
+
+    expect(plan.expired.map((e) => e.assetId).sort()).toEqual(["clip", "rec"]);
+  });
+
+  it("carries the submission id so the parent flag can be stamped", () => {
+    const plan = planAssetRetentionDeletes({
+      now: NOW,
+      assets: [
+        asset({ id: "a", submission_id: "sub-9", created_at: agedDays(200) }),
+      ],
+    });
+
+    expect(plan.expired[0]).toEqual({
+      assetId: "a",
+      submissionId: "sub-9",
+      kind: "screenshot",
+      storagePath: `${HUB}/screenshots/a.png`,
+    });
+  });
+
+  it("skips an asset already stamped purged", () => {
+    const plan = planAssetRetentionDeletes({
+      now: NOW,
+      assets: [
+        asset({
+          id: "a",
+          created_at: agedDays(200),
+          purged_at: agedDays(1),
+        }),
+      ],
+    });
+    expect(plan.expired).toEqual([]);
+  });
+
+  it("skips an asset with no path left", () => {
+    const plan = planAssetRetentionDeletes({
+      now: NOW,
+      assets: [
+        asset({ id: "a", created_at: agedDays(200), storage_path: null }),
+      ],
+    });
+    expect(plan.expired).toEqual([]);
+  });
+
+  it("keeps media it cannot prove is expired", () => {
+    const plan = planAssetRetentionDeletes({
+      now: NOW,
+      assets: [
+        asset({ id: "bad-date", created_at: "not-a-date" }),
+        asset({ id: "bad-kind", kind: "document", created_at: agedDays(3650) }),
+        asset({ id: "proto", kind: "__proto__", created_at: agedDays(3650) }),
+      ],
+    });
+    expect(plan.expired).toEqual([]);
+    expect(plan.storagePathsToDelete).toEqual([]);
+  });
+
+  it("de-duplicates a path shared by two asset rows", () => {
+    const shared = `${HUB}/screenshots/shared.png`;
+    const plan = planAssetRetentionDeletes({
+      now: NOW,
+      assets: [
+        asset({ id: "a", created_at: agedDays(200), storage_path: shared }),
+        asset({ id: "b", created_at: agedDays(200), storage_path: shared }),
+      ],
+    });
+
+    expect(plan.storagePathsToDelete).toEqual([shared]);
+    expect(plan.expired).toHaveLength(2);
+  });
+
+  it("stamps every asset in one run with the same instant", () => {
+    const plan = planAssetRetentionDeletes({
+      now: NOW,
+      assets: [
+        asset({ id: "a", created_at: agedDays(200) }),
+        asset({ id: "b", created_at: agedDays(200) }),
+      ],
+    });
+    expect(plan.purgedAt).toBe(NOW.toISOString());
+  });
+
+  it("plans nothing for an empty page", () => {
+    expect(planAssetRetentionDeletes({ now: NOW, assets: [] })).toEqual({
+      storagePathsToDelete: [],
+      expired: [],
+      purgedAt: NOW.toISOString(),
     });
   });
 });

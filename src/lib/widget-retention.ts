@@ -145,3 +145,91 @@ export function planRetentionDeletes(
 
   return { storagePathsToDelete: [...paths], rowUpdates };
 }
+
+// -- Per-asset retention (PULSE-403) ---------------------------------------
+
+/**
+ * `widget_submission_assets` holds one row per attachment, so retention walks
+ * assets as well as submission columns. Both passes run for as long as the
+ * legacy columns are written: the column pass keeps `media_purged_at` correct
+ * (the proxy's 410-vs-404 signal) and covers rows the backfill has not reached,
+ * the asset pass covers the second and later attachments, which have no column.
+ *
+ * Windows are the same per-kind RETENTION_DAYS, measured from the ASSET's
+ * `created_at` — an attachment added to an old submission still gets its full
+ * window.
+ */
+
+/** The subset of `widget_submission_assets` the policy reads. */
+export type RetentionAsset = {
+  id: string;
+  submission_id: string;
+  /** Text column; a value outside RETENTION_DAYS is left alone, not guessed. */
+  kind: string;
+  storage_path: string | null;
+  created_at: string;
+  purged_at: string | null;
+};
+
+/** One asset past its window that still has an object to delete. */
+export type AssetExpiry = {
+  assetId: string;
+  submissionId: string;
+  kind: WidgetMediaKind;
+  storagePath: string;
+};
+
+export type AssetRetentionPlan = {
+  /** Flattened, de-duplicated union of every `expired[].storagePath`. */
+  storagePathsToDelete: string[];
+  expired: AssetExpiry[];
+  /** Value for `purged_at` on the asset and `media_purged_at` on its parent. */
+  purgedAt: string;
+};
+
+export type PlanAssetRetentionDeletesInput = {
+  now: Date;
+  assets: Iterable<RetentionAsset>;
+};
+
+function isMediaKind(kind: string): kind is WidgetMediaKind {
+  return Object.hasOwn(RETENTION_DAYS, kind);
+}
+
+/**
+ * Decide which assets to purge. An asset contributes only when it is at or past
+ * its window, still holds a path, and has not been stamped already — which is
+ * what makes a re-run the same day a no-op.
+ */
+export function planAssetRetentionDeletes(
+  input: PlanAssetRetentionDeletesInput
+): AssetRetentionPlan {
+  const nowMs = input.now.getTime();
+  const purgedAt = input.now.toISOString();
+
+  const expired: AssetExpiry[] = [];
+  const paths = new Set<string>();
+
+  for (const asset of input.assets) {
+    if (asset.purged_at) continue;
+    if (!asset.storage_path) continue;
+    // Object.hasOwn via isMediaKind, not a bare index: an unrecognised kind has
+    // no window we can prove, so the media stays. Failing closed here is the
+    // only safe direction, exactly as for an unparseable timestamp.
+    if (!isMediaKind(asset.kind)) continue;
+
+    const createdMs = Date.parse(asset.created_at);
+    if (Number.isNaN(createdMs)) continue;
+    if (nowMs - createdMs < RETENTION_DAYS[asset.kind] * DAY_MS) continue;
+
+    expired.push({
+      assetId: asset.id,
+      submissionId: asset.submission_id,
+      kind: asset.kind,
+      storagePath: asset.storage_path,
+    });
+    paths.add(asset.storage_path);
+  }
+
+  return { storagePathsToDelete: [...paths], expired, purgedAt };
+}
