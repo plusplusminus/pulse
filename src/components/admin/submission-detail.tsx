@@ -39,6 +39,7 @@ import type {
   WidgetPick,
   WidgetSubmission,
 } from "@/lib/widget-types";
+import { retrySubmissionSync } from "@/lib/widget-retry-sync";
 import { ReplayPlayerFromUrl } from "./replay-player";
 
 const TYPE_BADGE: Record<string, string> = {
@@ -78,14 +79,7 @@ export function SubmissionDetail({
   const retrySync = async () => {
     setRetrying(true);
     try {
-      const res = await fetch(
-        `/api/widget/submissions/${submission.id}/retry`,
-        { method: "POST" }
-      );
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? "Retry failed");
-      }
+      await retrySubmissionSync(submission.id);
       toast.success("Sync retried");
       router.refresh();
     } catch (e) {

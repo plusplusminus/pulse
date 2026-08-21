@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useEffect, useCallback } from "react";
+import { useState, useTransition, useEffect, useCallback, useMemo } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useFetch } from "@/hooks/use-fetch";
@@ -100,12 +100,11 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
   const [triggerText, setTriggerText] = useState("Feedback");
   const [origins, setOrigins] = useState<string[]>([]);
   const [originInput, setOriginInput] = useState("");
-  const [capture, setCapture] = useState<Record<CaptureToggleKey, boolean>>(
+  const [capture, setCapture] = useState<Record<CaptureToggleKey, boolean>>(() =>
     captureFromConfig({})
   );
   const [maskText, setMaskText] = useState("");
   const [outputLevel, setOutputLevel] = useState<OutputDetailLevel>(DEFAULT_OUTPUT_LEVEL);
-  const [dirty, setDirty] = useState(false);
 
   // Sync state from fetched config
   useEffect(() => {
@@ -118,14 +117,12 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
       setCapture(captureFromConfig(activeConfig.config));
       setMaskText(maskTextFromConfig(activeConfig.config));
       setOutputLevel(outputLevelFromConfig(activeConfig));
-      setDirty(false);
     }
   }, [activeConfig]);
 
-  // Track dirty state
-  useEffect(() => {
-    if (!activeConfig) return;
-    const isDirty =
+  const dirty = useMemo(() => {
+    if (!activeConfig) return false;
+    return (
       widgetName !== activeConfig.name ||
       theme !== (activeConfig.config.theme ?? "auto") ||
       position !== (activeConfig.config.position ?? "bottom-right") ||
@@ -134,8 +131,8 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
       JSON.stringify(capture) !== JSON.stringify(captureFromConfig(activeConfig.config)) ||
       JSON.stringify(parseMaskText(maskText)) !==
         JSON.stringify(activeConfig.config.privacy?.maskSelectors ?? []) ||
-      outputLevel !== outputLevelFromConfig(activeConfig);
-    setDirty(isDirty);
+      outputLevel !== outputLevelFromConfig(activeConfig)
+    );
   }, [widgetName, theme, position, triggerText, origins, capture, maskText, outputLevel, activeConfig]);
 
   const generateKey = useCallback(() => {
@@ -265,7 +262,6 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
           throw new Error(err.message ?? err.error ?? "Failed to save");
         }
         toast.success("Configuration saved");
-        setDirty(false);
         refetch();
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "Failed to save");
