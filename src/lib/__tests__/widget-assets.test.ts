@@ -9,7 +9,11 @@ import {
   exceedsSizeCap,
   findAssetCapViolation,
   firstAssetOfKind,
+  legacyAnnotations,
+  legacyPathColumns,
+  normalizeSubmissionAssets,
   resolveSubmissionAssets,
+  type AssetInput,
   type LegacySubmissionMedia,
   type WidgetSubmissionAsset,
 } from "@/lib/widget-assets";
@@ -322,5 +326,250 @@ describe("exceedsSizeCap", () => {
   it("does not reject an asset that reports no size", () => {
     expect(exceedsSizeCap("screenshot", null)).toBe(false);
     expect(exceedsSizeCap("screenshot", undefined)).toBe(false);
+  });
+});
+
+describe("normalizeSubmissionAssets", () => {
+  function shot(name: string, extra: Partial<AssetInput> = {}): AssetInput {
+    return {
+      kind: "screenshot",
+      storagePath: `${HUB}/screenshots/${name}.png`,
+      contentType: "image/png",
+      ...extra,
+    };
+  }
+
+  function ok(result: ReturnType<typeof normalizeSubmissionAssets>) {
+    if (!result.ok) throw new Error(`expected ok, got: ${result.error}`);
+    return result.assets;
+  }
+
+  it("renumbers sparse positions densely, preserving the reporter's order", () => {
+    const assets = ok(
+      normalizeSubmissionAssets({
+        assets: [
+          shot("c", { position: 90 }),
+          shot("a", { position: 5 }),
+          shot("b", { position: 40 }),
+        ],
+        hubId: HUB,
+      })
+    );
+
+    expect(assets.map((a) => [a.storagePath.slice(-5), a.position])).toEqual([
+      ["a.png", 0],
+      ["b.png", 1],
+      ["c.png", 2],
+    ]);
+  });
+
+  it("falls back to submission order when positions are omitted", () => {
+    const assets = ok(
+      normalizeSubmissionAssets({
+        assets: [shot("a"), shot("b"), shot("c")],
+        hubId: HUB,
+      })
+    );
+    expect(assets.map((a) => a.storagePath.slice(-5))).toEqual([
+      "a.png",
+      "b.png",
+      "c.png",
+    ]);
+    expect(assets.map((a) => a.position)).toEqual([0, 1, 2]);
+  });
+
+  it("breaks a position tie by submission order", () => {
+    const assets = ok(
+      normalizeSubmissionAssets({
+        assets: [
+          shot("a", { position: 3 }),
+          shot("b", { position: 3 }),
+          shot("c", { position: 1 }),
+        ],
+        hubId: HUB,
+      })
+    );
+    expect(assets.map((a) => a.storagePath.slice(-5))).toEqual([
+      "c.png",
+      "a.png",
+      "b.png",
+    ]);
+  });
+
+  it("numbers each kind from 0 independently", () => {
+    const assets = ok(
+      normalizeSubmissionAssets({
+        assets: [
+          shot("a"),
+          shot("b"),
+          {
+            kind: "video",
+            storagePath: `${HUB}/videos/v.webm`,
+            contentType: "video/webm",
+          },
+        ],
+        hubId: HUB,
+      })
+    );
+
+    expect(assets.map((a) => [a.kind, a.position])).toEqual([
+      ["screenshot", 0],
+      ["screenshot", 1],
+      ["video", 0],
+    ]);
+  });
+
+  it("derives the content type when the client omits it", () => {
+    const assets = ok(
+      normalizeSubmissionAssets({
+        assets: [{ kind: "screenshot", storagePath: `${HUB}/screenshots/a.jpg` }],
+        hubId: HUB,
+      })
+    );
+    expect(assets[0].contentType).toBe("image/jpeg");
+  });
+
+  it("accepts a parameterised recorder content type", () => {
+    const assets = ok(
+      normalizeSubmissionAssets({
+        assets: [
+          {
+            kind: "video",
+            storagePath: `${HUB}/videos/v.webm`,
+            contentType: "video/webm;codecs=vp9,opus",
+          },
+        ],
+        hubId: HUB,
+      })
+    );
+    expect(assets[0].contentType).toBe("video/webm;codecs=vp9,opus");
+  });
+
+  it("does not let a prototype key pass the MIME allowlist", () => {
+    for (const contentType of ["__proto__", "constructor", "toString"]) {
+      const result = normalizeSubmissionAssets({
+        assets: [shot("a", { contentType })],
+        hubId: HUB,
+      });
+      expect(result.ok).toBe(false);
+    }
+  });
+
+  it("rejects a path scoped to another hub", () => {
+    const other = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    const result = normalizeSubmissionAssets({
+      assets: [{ kind: "screenshot", storagePath: `${other}/screenshots/a.png` }],
+      hubId: HUB,
+    });
+    expect(result).toEqual({
+      ok: false,
+      error: "assets[0] (screenshot): storage path does not belong to this site",
+    });
+  });
+
+  it("never echoes the submitted path back to a public caller", () => {
+    const result = normalizeSubmissionAssets({
+      assets: [{ kind: "screenshot", storagePath: `${HUB}/videos/sneaky.webm` }],
+      hubId: HUB,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).not.toContain("sneaky");
+  });
+
+  it("rejects a traversing path even if zod is bypassed", () => {
+    const result = normalizeSubmissionAssets({
+      assets: [{ kind: "screenshot", storagePath: "../../etc/passwd" }],
+      hubId: HUB,
+    });
+    expect(result).toEqual({
+      ok: false,
+      error: "assets[0] (screenshot): invalid storage path",
+    });
+  });
+
+  it("bounds the list before counting kinds", () => {
+    const result = normalizeSubmissionAssets({
+      assets: Array.from({ length: 20 }, (_, i) => shot(`s${i}`)),
+      hubId: HUB,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("Too many attachments");
+  });
+
+  it("is empty for a submission with nothing attached", () => {
+    expect(normalizeSubmissionAssets({ hubId: HUB })).toEqual({
+      ok: true,
+      assets: [],
+    });
+  });
+
+  it("drops annotations submitted against a video", () => {
+    const assets = ok(
+      normalizeSubmissionAssets({
+        assets: [
+          {
+            kind: "video",
+            storagePath: `${HUB}/videos/v.webm`,
+            contentType: "video/webm",
+            annotations: [{ kind: "highlight", x: 1, y: 1, w: 1, h: 1 }],
+          },
+        ],
+        hubId: HUB,
+      })
+    );
+    expect(assets[0].annotations).toEqual([]);
+  });
+
+  it("never overwrites per-asset annotations with the legacy submission field", () => {
+    const assets = ok(
+      normalizeSubmissionAssets({
+        assets: [
+          shot("a", {
+            annotations: [{ kind: "hide", x: 9, y: 9, w: 9, h: 9 }],
+          }),
+        ],
+        screenshotAnnotations: [{ kind: "highlight", x: 1, y: 1, w: 1, h: 1 }],
+        hubId: HUB,
+      })
+    );
+    expect(assets[0].annotations).toEqual([
+      { kind: "hide", x: 9, y: 9, w: 9, h: 9 },
+    ]);
+  });
+});
+
+describe("legacyPathColumns / legacyAnnotations", () => {
+  it("takes the first of each kind and null for the rest", () => {
+    const result = normalizeSubmissionAssets({
+      assets: [
+        {
+          kind: "screenshot",
+          storagePath: `${HUB}/screenshots/a.png`,
+          annotations: [{ kind: "highlight", x: 1, y: 1, w: 1, h: 1 }],
+        },
+        { kind: "screenshot", storagePath: `${HUB}/screenshots/b.png` },
+        { kind: "video", storagePath: `${HUB}/videos/v.webm` },
+      ],
+      hubId: HUB,
+    });
+    if (!result.ok) throw new Error(result.error);
+
+    expect(legacyPathColumns(result.assets)).toEqual({
+      screenshot_storage_path: `${HUB}/screenshots/a.png`,
+      video_storage_path: `${HUB}/videos/v.webm`,
+      replay_storage_path: null,
+    });
+    expect(legacyAnnotations(result.assets)).toEqual([
+      { kind: "highlight", x: 1, y: 1, w: 1, h: 1 },
+    ]);
+  });
+
+  it("is all null for a submission with no attachments", () => {
+    expect(legacyPathColumns([])).toEqual({
+      screenshot_storage_path: null,
+      video_storage_path: null,
+      replay_storage_path: null,
+    });
+    expect(legacyAnnotations([])).toEqual([]);
   });
 });

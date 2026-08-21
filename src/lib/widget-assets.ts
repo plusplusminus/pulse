@@ -13,8 +13,11 @@
 
 import type { ScreenshotAnnotation, WidgetSubmission } from "@/lib/widget-types";
 import {
+  STORAGE_PATH_PATTERN,
   WIDGET_MEDIA_CONTENT_TYPES,
+  WIDGET_MEDIA_FOLDERS,
   WIDGET_MEDIA_MAX_BYTES,
+  baseContentType,
   type WidgetMediaKind,
 } from "@/lib/widget-upload";
 
@@ -263,4 +266,232 @@ export function exceedsSizeCap(
 ): boolean {
   if (sizeBytes === null || sizeBytes === undefined) return false;
   return sizeBytes > WIDGET_MEDIA_MAX_BYTES[kind];
+}
+
+// -- Request normalisation (POST /api/widget/feedback) ---------------------
+
+/**
+ * One attachment as the widget submits it. `storagePath` is an object key
+ * minted by POST /api/widget/upload — bytes never travel through the feedback
+ * endpoint.
+ */
+export type AssetInput = {
+  kind: WidgetMediaKind;
+  storagePath: string;
+  contentType?: string | null;
+  sizeBytes?: number | null;
+  annotations?: ScreenshotAnnotation[] | null;
+  position?: number | null;
+};
+
+/** A validated attachment, ready to become a `widget_submission_assets` row. */
+export type NormalizedAsset = {
+  kind: WidgetMediaKind;
+  storagePath: string;
+  contentType: string;
+  sizeBytes: number | null;
+  annotations: ScreenshotAnnotation[];
+  /** Dense 0-based ordering within the kind, regardless of what was submitted. */
+  position: number;
+};
+
+export type NormalizeAssetsInput = {
+  assets?: readonly AssetInput[] | null;
+  /**
+   * The pre-PULSE-403 payload fields. Still accepted for one release so an
+   * embed already in the wild keeps working; mapped onto the asset list here.
+   */
+  screenshotStoragePath?: string | null;
+  videoStoragePath?: string | null;
+  /**
+   * The pre-PULSE-403 submission-level annotations. Applied to the first
+   * screenshot when no asset carries annotations of its own, which is what an
+   * older embed sends alongside `screenshotStoragePath`.
+   */
+  screenshotAnnotations?: readonly ScreenshotAnnotation[] | null;
+  /** The site's hub, from the validated site key. */
+  hubId: string;
+};
+
+export type NormalizeAssetsResult =
+  | { ok: true; assets: NormalizedAsset[] }
+  | { ok: false; error: string };
+
+/**
+ * A path's hub segment must be this site's hub and its folder must match the
+ * kind it was submitted as: a ticket minted for another site — or a video key
+ * passed off as a screenshot — cannot be attached here (PULSE-324).
+ */
+export function pathBelongsToSite(
+  storagePath: string,
+  hubId: string,
+  kind: WidgetMediaKind
+): boolean {
+  const [pathHubId, pathFolder] = storagePath.split("/");
+  return (
+    pathHubId.toLowerCase() === hubId.toLowerCase() &&
+    pathFolder === WIDGET_MEDIA_FOLDERS[kind]
+  );
+}
+
+/**
+ * Merge the modern `assets` list with the legacy single-path fields, validate
+ * every attachment, and renumber positions densely per kind.
+ *
+ * Errors never echo the submitted path back. The endpoint is public and its
+ * responses are readable by the page, so a rejection identifies the attachment
+ * by kind and index only.
+ */
+export function normalizeSubmissionAssets(
+  input: NormalizeAssetsInput
+): NormalizeAssetsResult {
+  const candidates: AssetInput[] = [...(input.assets ?? [])];
+
+  // Merge rather than choose: an embed mid-upgrade could send both, and
+  // dropping either side would silently lose an attachment. Same path twice is
+  // one attachment — the unique (submission_id, storage_path) index says so.
+  const seen = new Set(candidates.map((a) => a.storagePath));
+  for (const [kind, path] of [
+    ["screenshot", input.screenshotStoragePath],
+    ["video", input.videoStoragePath],
+  ] as const) {
+    if (path && !seen.has(path)) {
+      candidates.push({ kind, storagePath: path });
+      seen.add(path);
+    }
+  }
+
+  if (candidates.length > MAX_ASSETS_PER_SUBMISSION) {
+    return {
+      ok: false,
+      error: `Too many attachments: ${candidates.length} submitted, ${MAX_ASSETS_PER_SUBMISSION} allowed per submission`,
+    };
+  }
+
+  const capViolation = findAssetCapViolation(candidates);
+  if (capViolation) {
+    return { ok: false, error: assetCapMessage(capViolation) };
+  }
+
+  const perKind = new Map<WidgetMediaKind, NormalizedAsset[]>();
+
+  for (const [index, candidate] of candidates.entries()) {
+    const where = `assets[${index}] (${candidate.kind})`;
+
+    if (!STORAGE_PATH_PATTERN.test(candidate.storagePath)) {
+      return { ok: false, error: `${where}: invalid storage path` };
+    }
+    if (!pathBelongsToSite(candidate.storagePath, input.hubId, candidate.kind)) {
+      return {
+        ok: false,
+        error: `${where}: storage path does not belong to this site`,
+      };
+    }
+
+    const contentType =
+      candidate.contentType?.trim() ||
+      contentTypeForStoragePath(candidate.storagePath, candidate.kind);
+    if (!contentType) {
+      return { ok: false, error: `${where}: unknown content type` };
+    }
+    if (
+      !Object.hasOwn(
+        WIDGET_MEDIA_CONTENT_TYPES[candidate.kind],
+        baseContentType(contentType)
+      )
+    ) {
+      // Object.hasOwn, not `in`: `in` walks the prototype chain, so
+      // "__proto__" and "constructor" would pass the allowlist.
+      return {
+        ok: false,
+        error: `${where}: content type is not allowed for ${candidate.kind}`,
+      };
+    }
+
+    const sizeBytes = candidate.sizeBytes ?? null;
+    if (exceedsSizeCap(candidate.kind, sizeBytes)) {
+      return {
+        ok: false,
+        error: `${where}: exceeds the ${WIDGET_MEDIA_MAX_BYTES[candidate.kind]} byte limit for ${candidate.kind}`,
+      };
+    }
+
+    const bucket = perKind.get(candidate.kind) ?? [];
+    bucket.push({
+      kind: candidate.kind,
+      storagePath: candidate.storagePath,
+      contentType,
+      sizeBytes,
+      // Annotations are only coherent on an image.
+      annotations:
+        candidate.kind === "screenshot" ? (candidate.annotations ?? []) : [],
+      // Held as submitted for the sort below, then replaced.
+      position: candidate.position ?? index,
+    });
+    perKind.set(candidate.kind, bucket);
+  }
+
+  const assets: NormalizedAsset[] = [];
+  for (const kind of KINDS) {
+    const bucket = perKind.get(kind);
+    if (!bucket) continue;
+    // Stable sort on the submitted position, then a dense renumber: the
+    // reporter's ordering is honoured but the stored positions are always
+    // 0..n-1, so "first by position" is unambiguous for the legacy proxy URL.
+    bucket
+      .sort((a, b) => a.position - b.position)
+      .forEach((normalized, position) => {
+        assets.push({ ...normalized, position });
+      });
+  }
+
+  // An older embed sends its annotations at the top level, not on the
+  // attachment. Fold them onto the screenshot they describe — but never over
+  // per-asset annotations, which are the authoritative source once the widget
+  // sends them.
+  const carried = input.screenshotAnnotations ?? [];
+  if (
+    carried.length > 0 &&
+    !assets.some((a) => a.kind === "screenshot" && a.annotations.length > 0)
+  ) {
+    const first = assets.find((a) => a.kind === "screenshot");
+    if (first) first.annotations = [...carried];
+  }
+
+  return { ok: true, assets };
+}
+
+/**
+ * The legacy one-column-per-kind fields for a submission, from its first asset
+ * of each kind. Written alongside the asset rows for as long as the columns
+ * exist: retention's `media_purged_at`, the admin table and any reader not yet
+ * moved onto `resolveSubmissionAssets` all still depend on them.
+ */
+export function legacyPathColumns(assets: readonly NormalizedAsset[]): {
+  screenshot_storage_path: string | null;
+  video_storage_path: string | null;
+  replay_storage_path: string | null;
+} {
+  const firstOf = (kind: WidgetMediaKind) =>
+    assets.find((a) => a.kind === kind && a.position === 0)?.storagePath ?? null;
+
+  return {
+    screenshot_storage_path: firstOf("screenshot"),
+    video_storage_path: firstOf("video"),
+    replay_storage_path: firstOf("replay"),
+  };
+}
+
+/**
+ * The submission-level `screenshot_annotations` column for a set of assets:
+ * the first screenshot's. Kept in step so a reader still on the legacy column
+ * sees annotations that match the screenshot the legacy URL resolves to.
+ */
+export function legacyAnnotations(
+  assets: readonly NormalizedAsset[]
+): ScreenshotAnnotation[] {
+  return (
+    assets.find((a) => a.kind === "screenshot" && a.position === 0)
+      ?.annotations ?? []
+  );
 }
