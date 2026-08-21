@@ -56,9 +56,9 @@ export const OUTPUT_LEVEL_COPY: readonly OutputLevelCopy[] = [
     help: "Adds computed CSS, accessibility, and nearby elements. Best for design / a11y triage.",
     preview: [
       "**Full DOM Path:** `html > body > main.app > section.hero > div.cta > button.btn`",
-      "**Computed Styles:** color: rgb\\(255,255,255\\); font-size: 16px",
+      "**Computed Styles:** color: rgb(255,255,255); font-size: 16px",
       '**Accessibility:** role="button", aria-label="Sign up", focusable',
-      "**Nearby Elements:** a.link, div.spacer \\(5 total in .cta\\)",
+      "**Nearby Elements:** a.link, div.spacer (5 total in .cta)",
     ],
   },
 ];

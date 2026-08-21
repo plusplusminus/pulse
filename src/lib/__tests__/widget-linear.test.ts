@@ -307,7 +307,7 @@ const PULSE_HEADINGS = [
   "## Sentry",
   "## Console (last errors)",
   "## Screenshot",
-  "### 1. button \\!\\[beacon\\]\\(https://evil.example/n.png\\)",
+  "### 1. button !\\[beacon\\](https://evil.example/n.png)",
 ];
 
 describe("renderSubmissionBody — hostile submission", () => {
@@ -321,10 +321,13 @@ describe("renderSubmissionBody — hostile submission", () => {
       const prose = stripCodeSpans(body);
 
       // No markdown link or image can be constructed from attacker input.
-      expect(prose).not.toContain("](");
-      expect(prose).not.toContain("![");
+      // The property is that no UNESCAPED bracket pairs with a "(": a literal
+      // "\\[beacon\\](url)" in the output renders as text, not an image, so a
+      // bare substring check would fail on safe output while proving nothing.
+      expect(prose).not.toMatch(/(?<!\\)\]\(/);
+      expect(prose).not.toMatch(/(?<!\\)!\[/);
       // In particular no protocol handler ends up as a link target.
-      expect(prose).not.toMatch(/\]\(\s*javascript:/i);
+      expect(prose).not.toMatch(/(?<!\\)\]\(\s*javascript:/i);
       // No injected heading: every '#'-leading line is one Pulse wrote itself.
       const headings = prose.split("\n").filter((line) => line.startsWith("#"));
       expect(headings).not.toContain("# Injected heading");

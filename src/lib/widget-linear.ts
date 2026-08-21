@@ -145,7 +145,12 @@ const DEFAULT_DETAIL_LEVEL: OutputDetailLevel = "standard";
  * rendered issue is read by staff inside a trusted Linear ticket.
  */
 function escapeMarkdown(value: string): string {
-  return value.replace(/([[\]()!#<>`*_|])/g, "\\$1");
+  // Escaping [ and ] alone defeats link and image injection: markdown needs
+  // `[text](url)` or `![alt](url)`, and neither can form without an unescaped
+  // bracket. Leaving ( ) unescaped keeps computed styles and user agents
+  // readable -- `rgb\(255,255,255\)` in every issue body is a real cost for no
+  // extra safety.
+  return value.replace(/([[\]#<>`*_|])/g, "\\$1");
 }
 
 /**
