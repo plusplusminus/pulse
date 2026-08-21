@@ -15,7 +15,7 @@
  * Failure here is never fatal: an unfixed recording still plays, so a failed
  * load degrades to "cannot seek" rather than "no video".
  */
-import { normaliseApiUrl } from '../config'
+import { createLazyGlobal } from '../lazy-script'
 import type { VideoPostProcess } from './video'
 
 export interface WebmDurationFixer {
@@ -25,8 +25,18 @@ export interface WebmDurationFixer {
 /** Same-origin with the widget bundle, so a host's script-src for Pulse covers it. */
 export const WEBM_DURATION_PATH = '/widget/v1/webm-duration.js'
 
-let fixer: WebmDurationFixer | null = null
-let pending: Promise<WebmDurationFixer> | null = null
+/** Reads as a plain sentence: it only ever reaches a console, never the panel. */
+const LOAD_ERROR = 'Could not load the WebM duration fixer'
+
+const fixer = createLazyGlobal<WebmDurationFixer>({
+  path: WEBM_DURATION_PATH,
+  marker: 'data-pulse-webm-duration',
+  read: () => {
+    const g = window.__PulseWebmDuration
+    return g && typeof g.fixWebmDuration === 'function' ? g : null
+  },
+  error: LOAD_ERROR,
+})
 
 /**
  * Bypasses the network load with an already-bundled fixer. The npm SDK calls
@@ -35,68 +45,15 @@ let pending: Promise<WebmDurationFixer> | null = null
  * loading (and is how tests reset the module).
  */
 export function setWebmDurationFixer(next: WebmDurationFixer | null): void {
-  fixer = next
-  pending = null
+  fixer.set(next)
 }
 
 export function webmDurationUrl(apiUrl?: string): string {
-  return `${normaliseApiUrl(apiUrl)}${WEBM_DURATION_PATH}`
+  return fixer.url(apiUrl)
 }
 
-/**
- * Injects the fixer script once. The promise is cached so concurrent recordings
- * share a single load; a failed load clears the cache so the next recording can
- * try again rather than being stuck with the first failure forever.
- */
 export function loadWebmDurationFixer(apiUrl?: string): Promise<WebmDurationFixer> {
-  if (fixer) return Promise.resolve(fixer)
-
-  // A second Pulse instance, or a host that preloads the artefact itself.
-  const existing = window.__PulseWebmDuration
-  if (existing && typeof existing.fixWebmDuration === 'function') {
-    fixer = existing
-    return Promise.resolve(fixer)
-  }
-
-  if (pending) return pending
-
-  const attempt = new Promise<WebmDurationFixer>((resolve, reject) => {
-    const script = document.createElement('script')
-    script.src = webmDurationUrl(apiUrl)
-    script.async = true
-    // /widget/v1/* is served with Access-Control-Allow-Origin: *, so anonymous
-    // CORS costs nothing and gives real error details instead of "Script error".
-    script.crossOrigin = 'anonymous'
-    script.setAttribute('data-pulse-webm-duration', '')
-
-    const fail = () => {
-      script.remove()
-      reject(new Error('Could not load the WebM duration fixer'))
-    }
-
-    script.addEventListener(
-      'load',
-      () => {
-        const loaded = window.__PulseWebmDuration
-        if (loaded && typeof loaded.fixWebmDuration === 'function') {
-          fixer = loaded
-          resolve(loaded)
-        } else {
-          fail()
-        }
-      },
-      { once: true }
-    )
-    script.addEventListener('error', fail, { once: true })
-
-    ;(document.head ?? document.documentElement).appendChild(script)
-  })
-
-  pending = attempt
-  attempt.catch(() => {
-    if (pending === attempt) pending = null
-  })
-  return attempt
+  return fixer.load(apiUrl)
 }
 
 /**

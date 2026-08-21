@@ -1,6 +1,6 @@
 import { z } from "zod";
 import {
-  ANNOTATION_KINDS,
+  ANNOTATION_COLORS,
   OUTPUT_DETAIL_LEVELS,
   PICK_INTENTS,
   type OutputDetailLevel,
@@ -67,16 +67,64 @@ export const widgetPickSchema = z.object({
 
 export const picksSchema = z.array(widgetPickSchema).max(MAX_PICKS).default([]);
 
-// Screenshot annotations (PULSE-333): vector rects in image-pixel space.
+// Screenshot annotations (PULSE-333, union in PULSE-401): vector marks in
+// image-pixel space. `satisfies z.ZodType<ScreenshotAnnotation>` at the bottom
+// is what keeps this in lockstep with the two hand-written declarations in
+// src/lib/widget-types.ts and packages/feedback-widget/src/types.ts — adding a
+// kind to either without adding it here is a compile error.
 export const MAX_ANNOTATIONS = 50;
 
-export const screenshotAnnotationSchema = z.object({
-  kind: z.enum(ANNOTATION_KINDS),
+/** A freehand path longer than this is a scribble nobody will read; it also bounds the JSONB row. */
+export const MAX_PEN_POINTS = 2000;
+export const MAX_ANNOTATION_TEXT = 500;
+
+/**
+ * Sizes are in image pixels with DPR already applied, so a 2x capture legitimately
+ * carries a 2x stroke. The ceiling is a sanity bound, not a design limit.
+ */
+const strokeWidthSchema = z.number().positive().max(400);
+
+const colorSchema = z.enum(ANNOTATION_COLORS);
+
+const rectGeometry = {
   x: z.number(),
   y: z.number(),
   w: z.number().nonnegative(),
   h: z.number().nonnegative(),
-}) satisfies z.ZodType<ScreenshotAnnotation>;
+};
+
+const strokeFields = {
+  color: colorSchema,
+  strokeWidth: strokeWidthSchema,
+};
+
+export const screenshotAnnotationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("highlight"), ...rectGeometry }),
+  z.object({ kind: z.literal("hide"), ...rectGeometry }),
+  z.object({ kind: z.literal("rect"), ...rectGeometry, ...strokeFields }),
+  z.object({ kind: z.literal("ellipse"), ...rectGeometry, ...strokeFields }),
+  z.object({
+    kind: z.literal("arrow"),
+    x1: z.number(),
+    y1: z.number(),
+    x2: z.number(),
+    y2: z.number(),
+    ...strokeFields,
+  }),
+  z.object({
+    kind: z.literal("pen"),
+    points: z.array(z.number()).max(MAX_PEN_POINTS),
+    ...strokeFields,
+  }),
+  z.object({
+    kind: z.literal("text"),
+    x: z.number(),
+    y: z.number(),
+    text: z.string().min(1).max(MAX_ANNOTATION_TEXT),
+    color: colorSchema,
+    fontSize: z.number().positive().max(2000),
+  }),
+]) satisfies z.ZodType<ScreenshotAnnotation>;
 
 export const screenshotAnnotationsSchema = z
   .array(screenshotAnnotationSchema)

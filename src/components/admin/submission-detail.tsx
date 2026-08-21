@@ -270,6 +270,47 @@ function ArtefactSlot({
   return <Empty>{absent}</Empty>;
 }
 
+/**
+ * Renders the stored vector marks over the screenshot. Marks are in the
+ * capture's own pixel space, so everything is expressed as a percentage of the
+ * natural size and stays aligned at any display width.
+ */
+function AnnotationOverlay({
+  annotations,
+  natural,
+}: {
+  annotations: ScreenshotAnnotation[];
+  natural: { w: number; h: number };
+}) {
+  return (
+    <>
+      {annotations.map((annotation, index) => {
+        if (annotation.kind !== "highlight" && annotation.kind !== "hide") {
+          return null;
+        }
+        return (
+          <span
+            key={index}
+            aria-hidden
+            style={{
+              left: `${(annotation.x / natural.w) * 100}%`,
+              top: `${(annotation.y / natural.h) * 100}%`,
+              width: `${(annotation.w / natural.w) * 100}%`,
+              height: `${(annotation.h / natural.h) * 100}%`,
+            }}
+            className={cn(
+              "absolute rounded-sm pointer-events-none",
+              annotation.kind === "highlight"
+                ? "ring-2 ring-primary ring-offset-0"
+                : "bg-foreground"
+            )}
+          />
+        );
+      })}
+    </>
+  );
+}
+
 function ScreenshotPanel({
   src,
   annotations,
@@ -306,28 +347,9 @@ function ScreenshotPanel({
           onError={() => setFailed(true)}
           className="max-w-full h-auto rounded-md border border-border block"
         />
-        {showAnnotations &&
-          natural &&
-          natural.w > 0 &&
-          natural.h > 0 &&
-          annotations.map((annotation, index) => (
-            <span
-              key={index}
-              aria-hidden
-              style={{
-                left: `${(annotation.x / natural.w) * 100}%`,
-                top: `${(annotation.y / natural.h) * 100}%`,
-                width: `${(annotation.w / natural.w) * 100}%`,
-                height: `${(annotation.h / natural.h) * 100}%`,
-              }}
-              className={cn(
-                "absolute rounded-sm pointer-events-none",
-                annotation.kind === "highlight"
-                  ? "ring-2 ring-primary ring-offset-0"
-                  : "bg-foreground"
-              )}
-            />
-          ))}
+        {showAnnotations && natural && natural.w > 0 && natural.h > 0 && (
+          <AnnotationOverlay annotations={annotations} natural={natural} />
+        )}
       </div>
 
       <div className="flex items-center gap-3 text-xs text-muted-foreground">

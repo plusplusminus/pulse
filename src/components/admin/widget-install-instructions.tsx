@@ -81,9 +81,14 @@ Pulse.init({
           </p>
           <CodeBlock code={scriptSnippet} copyable={hasFullKey} />
           <p className="text-[11px] text-muted-foreground mt-1.5">
-            Screenshot capture is fetched on first use from{" "}
+            Screenshot capture and the screenshot editor are fetched on first
+            use from{" "}
             <code className="text-[11px] bg-muted px-1 rounded">
               {origin}/widget/v1/capture-engine.js
+            </code>{" "}
+            and{" "}
+            <code className="text-[11px] bg-muted px-1 rounded">
+              {origin}/widget/v1/annotation-editor.js
             </code>
             , the same origin as the snippet above — if you run a Content
             Security Policy, the{" "}

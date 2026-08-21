@@ -19,6 +19,10 @@ const files = [
   // as the capture engine, so it must sit next to pulse.js.
   ["webm-duration.global.js", "webm-duration.js"],
   ["webm-duration.global.js.map", "webm-duration.js.map"],
+  // Lazily fetched on the first click of Annotate (PULSE-401); same origin rule
+  // as the capture engine, so it must sit next to pulse.js.
+  ["annotation-editor.global.js", "annotation-editor.js"],
+  ["annotation-editor.global.js.map", "annotation-editor.js.map"],
   ["pulse-loader.global.js", "pulse-loader.js"],
 ];
 

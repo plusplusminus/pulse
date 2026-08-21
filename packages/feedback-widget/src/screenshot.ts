@@ -1,4 +1,4 @@
-import { normaliseApiUrl } from './config'
+import { createLazyGlobal } from './lazy-script'
 
 /** Beyond this a PNG is re-encoded as JPEG; uploads, not fidelity, set the ceiling. */
 export const MAX_SIZE_BYTES = 2 * 1024 * 1024
@@ -70,8 +70,15 @@ export const CAPTURE_ENGINE_PATH = '/widget/v1/capture-engine.js'
 export const ENGINE_LOAD_ERROR =
   'Could not load the screenshot engine — use Capture tab instead.'
 
-let engine: CaptureEngine | null = null
-let pending: Promise<CaptureEngine> | null = null
+const engine = createLazyGlobal<CaptureEngine>({
+  path: CAPTURE_ENGINE_PATH,
+  marker: 'data-pulse-capture-engine',
+  read: () => {
+    const g = window.__PulseCaptureEngine
+    return g && typeof g.captureViewport === 'function' ? g : null
+  },
+  error: ENGINE_LOAD_ERROR,
+})
 
 /**
  * Bypasses the network load with an already-bundled engine. The npm SDK calls
@@ -80,69 +87,15 @@ let pending: Promise<CaptureEngine> | null = null
  * restores lazy loading (and is how tests reset the module).
  */
 export function setCaptureEngine(next: CaptureEngine | null): void {
-  engine = next
-  pending = null
+  engine.set(next)
 }
 
 export function captureEngineUrl(apiUrl?: string): string {
-  return `${normaliseApiUrl(apiUrl)}${CAPTURE_ENGINE_PATH}`
+  return engine.url(apiUrl)
 }
 
-/**
- * Injects the engine script once. The promise is cached so concurrent captures
- * share a single load and later captures reuse it. A failed load clears the
- * cache so a retry (or the user's "Retake") can try again rather than being
- * stuck with the first failure forever.
- */
 export function loadCaptureEngine(apiUrl?: string): Promise<CaptureEngine> {
-  if (engine) return Promise.resolve(engine)
-
-  // A second Pulse instance, or a host that preloads the engine itself.
-  const existing = window.__PulseCaptureEngine
-  if (existing && typeof existing.captureViewport === 'function') {
-    engine = existing
-    return Promise.resolve(engine)
-  }
-
-  if (pending) return pending
-
-  const attempt = new Promise<CaptureEngine>((resolve, reject) => {
-    const script = document.createElement('script')
-    script.src = captureEngineUrl(apiUrl)
-    script.async = true
-    // /widget/v1/* is served with Access-Control-Allow-Origin: *, so anonymous
-    // CORS costs nothing and gives real error details instead of "Script error".
-    script.crossOrigin = 'anonymous'
-    script.setAttribute('data-pulse-capture-engine', '')
-
-    const fail = () => {
-      script.remove()
-      reject(new Error(ENGINE_LOAD_ERROR))
-    }
-
-    script.addEventListener(
-      'load',
-      () => {
-        const loaded = window.__PulseCaptureEngine
-        if (loaded && typeof loaded.captureViewport === 'function') {
-          engine = loaded
-          resolve(loaded)
-        } else {
-          fail()
-        }
-      },
-      { once: true }
-    )
-    script.addEventListener('error', fail, { once: true })
-
-    ;(document.head ?? document.documentElement).appendChild(script)
-  })
-
-  pending = attempt
-  attempt.catch(() => {
-    if (pending === attempt) pending = null
-  })
-  return attempt
+  return engine.load(apiUrl)
 }
 
 /**
