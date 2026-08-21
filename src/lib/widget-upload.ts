@@ -141,9 +141,13 @@ export async function signWidgetUpload(
     throw new Error(`Invalid media kind: ${String(input.kind)}`);
   }
 
-  const ext =
-    WIDGET_MEDIA_CONTENT_TYPES[input.kind][baseContentType(input.contentType)];
-  if (!ext) {
+  // Inherited keys ("__proto__", "constructor", "toString") resolve to values
+  // on Object.prototype, which are truthy and would survive a bare `!ext`
+  // guard, so the lookup is own-property-gated and the result type-asserted.
+  const allowed = WIDGET_MEDIA_CONTENT_TYPES[input.kind];
+  const base = baseContentType(input.contentType);
+  const ext = Object.hasOwn(allowed, base) ? allowed[base] : undefined;
+  if (typeof ext !== "string") {
     throw new Error(
       `Unsupported content type for ${input.kind}: ${input.contentType}`
     );
