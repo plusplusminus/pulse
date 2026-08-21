@@ -5,7 +5,10 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
-// Anon client for client-side reads (RLS is off, queries filter by user_id)
+// Anon client for client-side reads. RLS is ON for every table in `public`
+// (see supabase/migrations/20260821_codify_rls.sql); the hub and widget tables
+// carry no policies, so this key reads nothing from them. Server code uses
+// `supabaseAdmin` below, which bypasses RLS via the service role.
 export const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey)
 
 // Service role client for API routes (server-side only)
