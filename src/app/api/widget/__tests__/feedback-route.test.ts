@@ -5,15 +5,24 @@ const HUB_B = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
 const inserts: Array<Record<string, unknown>> = [];
 const updates: Array<Record<string, unknown>> = [];
+// widget_submission_assets rows (PULSE-403), kept apart from the submission
+// insert so the pre-existing assertions on `inserts` still mean one submission.
+const assetInserts: Array<Record<string, unknown>> = [];
+const db = { assetInsertError: null as { message: string } | null };
 
 vi.mock("@/lib/supabase", () => ({
   supabaseAdmin: {
     from: (table: string) => ({
-      insert: (row: Record<string, unknown>) => {
-        inserts.push(row);
+      insert: (row: Record<string, unknown> | Array<Record<string, unknown>>) => {
+        if (table === "widget_submission_assets") {
+          assetInserts.push(...(Array.isArray(row) ? row : [row]));
+          return Promise.resolve({ error: db.assetInsertError });
+        }
+        const single = row as Record<string, unknown>;
+        inserts.push(single);
         return {
           select: () => ({
-            single: async () => ({ data: { id: row.id }, error: null }),
+            single: async () => ({ data: { id: single.id }, error: null }),
           }),
         };
       },
@@ -43,7 +52,10 @@ vi.mock("@/lib/widget-auth", () => ({
   isKnownWidgetOrigin: vi.fn(async () => true),
 }));
 
-vi.mock("@sentry/nextjs", () => ({ captureMessage: vi.fn() }));
+vi.mock("@sentry/nextjs", () => ({
+  captureMessage: vi.fn(),
+  captureException: vi.fn(),
+}));
 
 // Real checkRateLimit over an injected in-memory limiter (one per budget).
 const rateLimit = vi.hoisted(() => ({
@@ -148,12 +160,16 @@ function post(body: unknown, extraHeaders: Record<string, string> = {}) {
 beforeEach(() => {
   inserts.length = 0;
   updates.length = 0;
+  assetInserts.length = 0;
+  db.assetInsertError = null;
   mockedValidate.mockReset();
   mockedCreateIssue.mockClear();
   rateLimit.fakes?.reset();
   rateLimit.backendDown = false;
   vi.mocked(Sentry.captureMessage).mockClear();
+  vi.mocked(Sentry.captureException).mockClear();
   vi.spyOn(console, "warn").mockImplementation(() => {});
+  vi.spyOn(console, "error").mockImplementation(() => {});
   vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://pulse.test");
 });
 
@@ -484,6 +500,7 @@ describe("POST /api/widget/feedback (metadata bounds)", () => {
 });
 
 
+
 describe("POST /api/widget/feedback (screenshot annotations)", () => {
   /** One of every kind the editor can produce (PULSE-401). */
   const annotations = [
@@ -501,7 +518,12 @@ describe("POST /api/widget/feedback (screenshot annotations)", () => {
   });
 
   it("stores every kind on the row exactly as it was sent", async () => {
-    const res = await post(payload({ screenshotAnnotations: annotations }));
+    const res = await post(
+      payload({
+        screenshotStoragePath: `${HUB_A}/screenshots/shot.png`,
+        screenshotAnnotations: annotations,
+      })
+    );
     expect(res.status).toBe(201);
     expect(inserts[0].screenshot_annotations).toEqual(annotations);
   });
@@ -528,7 +550,12 @@ describe("POST /api/widget/feedback (screenshot annotations)", () => {
 
   it("still accepts a rect-only row written before the union existed", async () => {
     const legacy = [{ kind: "highlight", x: 1, y: 2, w: 3, h: 4 }];
-    const res = await post(payload({ screenshotAnnotations: legacy }));
+    const res = await post(
+      payload({
+        screenshotStoragePath: `${HUB_A}/screenshots/shot.png`,
+        screenshotAnnotations: legacy,
+      })
+    );
     expect(res.status).toBe(201);
     expect(inserts[0].screenshot_annotations).toEqual(legacy);
   });
@@ -536,5 +563,317 @@ describe("POST /api/widget/feedback (screenshot annotations)", () => {
   it("caps the set so one report cannot bloat the JSONB row", async () => {
     const many = Array.from({ length: 51 }, () => annotations[0]);
     expect((await post(payload({ screenshotAnnotations: many }))).status).toBe(400);
+  });
+});
+
+describe("POST /api/widget/feedback (multiple attachments, PULSE-403)", () => {
+  function shots(n: number, hub = HUB_A) {
+    return Array.from({ length: n }, (_, i) => ({
+      kind: "screenshot" as const,
+      storagePath: `${hub}/screenshots/shot-${i}.png`,
+      contentType: "image/png",
+      position: i,
+    }));
+  }
+
+  it("writes one asset row per attachment, in position order", async () => {
+    authOk(HUB_A);
+    const res = await post(payload({ assets: shots(3) }));
+
+    expect(res.status).toBe(201);
+    expect(inserts).toHaveLength(1);
+    expect(assetInserts).toHaveLength(3);
+    expect(assetInserts.map((a) => a.position)).toEqual([0, 1, 2]);
+    expect(assetInserts.map((a) => a.storage_path)).toEqual([
+      `${HUB_A}/screenshots/shot-0.png`,
+      `${HUB_A}/screenshots/shot-1.png`,
+      `${HUB_A}/screenshots/shot-2.png`,
+    ]);
+    expect(assetInserts.every((a) => a.submission_id === inserts[0].id)).toBe(
+      true
+    );
+    expect(assetInserts[0].content_type).toBe("image/png");
+  });
+
+  it("keeps writing the legacy columns from the first asset of each kind", async () => {
+    authOk(HUB_A);
+    await post(
+      payload({
+        assets: [
+          ...shots(2),
+          {
+            kind: "video",
+            storagePath: `${HUB_A}/videos/clip.webm`,
+            contentType: "video/webm",
+          },
+        ],
+      })
+    );
+
+    // Dual-read, not a cutover: readers still on the columns keep working.
+    expect(inserts[0].screenshot_storage_path).toBe(
+      `${HUB_A}/screenshots/shot-0.png`
+    );
+    expect(inserts[0].video_storage_path).toBe(`${HUB_A}/videos/clip.webm`);
+    expect(inserts[0].screenshot_url).toBe(
+      `https://pulse.test/api/widget/media/${inserts[0].id}/screenshot`
+    );
+  });
+
+  it("accepts exactly 6 screenshots, 1 video and 1 replay", async () => {
+    authOk(HUB_A);
+    const res = await post(
+      payload({
+        assets: [
+          ...shots(6),
+          {
+            kind: "video",
+            storagePath: `${HUB_A}/videos/clip.webm`,
+            contentType: "video/webm",
+          },
+          {
+            kind: "replay",
+            storagePath: `${HUB_A}/replays/r.json`,
+            contentType: "application/json",
+          },
+        ],
+      })
+    );
+
+    expect(res.status).toBe(201);
+    expect(assetInserts).toHaveLength(8);
+  });
+
+  it("rejects a 7th screenshot even though the client cap was bypassed", async () => {
+    authOk(HUB_A);
+    const res = await post(payload({ assets: shots(7) }));
+
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain("Too many screenshot");
+    expect(inserts).toEqual([]);
+    expect(assetInserts).toEqual([]);
+    expect(mockedCreateIssue).not.toHaveBeenCalled();
+  });
+
+  it("rejects a second video and a second replay", async () => {
+    authOk(HUB_A);
+    const video = {
+      kind: "video" as const,
+      storagePath: `${HUB_A}/videos/a.webm`,
+      contentType: "video/webm",
+    };
+    const res = await post(
+      payload({
+        assets: [video, { ...video, storagePath: `${HUB_A}/videos/b.webm` }],
+      })
+    );
+
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain("Too many video");
+    expect(inserts).toEqual([]);
+  });
+
+  it("rejects an assets array long enough to be an attack, at the schema", async () => {
+    authOk(HUB_A);
+    const res = await post(payload({ assets: shots(200) }));
+    expect(res.status).toBe(400);
+    expect(inserts).toEqual([]);
+  });
+
+  it("validates every path in the list, not just the first", async () => {
+    authOk(HUB_A);
+    const res = await post(
+      payload({
+        assets: [
+          ...shots(2),
+          {
+            kind: "screenshot",
+            storagePath: `${HUB_B}/screenshots/other.png`,
+            contentType: "image/png",
+          },
+        ],
+      })
+    );
+
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain("does not belong to this site");
+    expect(inserts).toEqual([]);
+    expect(assetInserts).toEqual([]);
+  });
+
+  it("rejects an asset whose folder does not match its kind", async () => {
+    authOk(HUB_A);
+    const res = await post(
+      payload({
+        assets: [
+          {
+            kind: "screenshot",
+            storagePath: `${HUB_A}/videos/clip.webm`,
+            contentType: "image/png",
+          },
+        ],
+      })
+    );
+    expect(res.status).toBe(400);
+    expect(inserts).toEqual([]);
+  });
+
+  it("rejects a content type outside the per-kind allowlist", async () => {
+    authOk(HUB_A);
+    const res = await post(
+      payload({
+        assets: [
+          {
+            kind: "screenshot",
+            storagePath: `${HUB_A}/screenshots/a.png`,
+            contentType: "image/svg+xml",
+          },
+        ],
+      })
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain("content type");
+    expect(inserts).toEqual([]);
+  });
+
+  it("keeps the per-kind size caps", async () => {
+    authOk(HUB_A);
+    const res = await post(
+      payload({
+        assets: [
+          {
+            kind: "screenshot",
+            storagePath: `${HUB_A}/screenshots/a.png`,
+            contentType: "image/png",
+            sizeBytes: 10 * 1024 * 1024 + 1,
+          },
+        ],
+      })
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain("byte limit");
+    expect(inserts).toEqual([]);
+  });
+
+  it("carries annotations onto the asset they belong to", async () => {
+    authOk(HUB_A);
+    await post(
+      payload({
+        assets: [
+          {
+            kind: "screenshot",
+            storagePath: `${HUB_A}/screenshots/a.png`,
+            contentType: "image/png",
+            position: 0,
+            annotations: [{ kind: "highlight", x: 1, y: 2, w: 3, h: 4 }],
+          },
+          {
+            kind: "screenshot",
+            storagePath: `${HUB_A}/screenshots/b.png`,
+            contentType: "image/png",
+            position: 1,
+            annotations: [{ kind: "hide", x: 5, y: 6, w: 7, h: 8 }],
+          },
+        ],
+      })
+    );
+
+    expect(assetInserts[0].annotations).toEqual([
+      { kind: "highlight", x: 1, y: 2, w: 3, h: 4 },
+    ]);
+    expect(assetInserts[1].annotations).toEqual([
+      { kind: "hide", x: 5, y: 6, w: 7, h: 8 },
+    ]);
+    // The submission column tracks the screenshot the legacy URL resolves to.
+    expect(inserts[0].screenshot_annotations).toEqual([
+      { kind: "highlight", x: 1, y: 2, w: 3, h: 4 },
+    ]);
+  });
+
+  it("saves the report even when the asset insert fails, and alerts", async () => {
+    authOk(HUB_A);
+    db.assetInsertError = { message: "deadlock detected" };
+
+    const res = await post(payload({ assets: shots(2) }));
+
+    expect(res.status).toBe(201);
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0].screenshot_storage_path).toBe(
+      `${HUB_A}/screenshots/shot-0.png`
+    );
+    expect(vi.mocked(Sentry.captureException)).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("POST /api/widget/feedback (older embed compatibility, PULSE-403)", () => {
+  it("maps the legacy single-path fields onto asset rows", async () => {
+    authOk(HUB_A);
+    const res = await post(
+      payload({
+        screenshotStoragePath: `${HUB_A}/screenshots/abc.png`,
+        videoStoragePath: `${HUB_A}/videos/clip.webm`,
+      })
+    );
+
+    expect(res.status).toBe(201);
+    expect(assetInserts).toHaveLength(2);
+    expect(assetInserts.map((a) => [a.kind, a.storage_path])).toEqual([
+      ["screenshot", `${HUB_A}/screenshots/abc.png`],
+      ["video", `${HUB_A}/videos/clip.webm`],
+    ]);
+    expect(assetInserts.map((a) => a.content_type)).toEqual([
+      "image/png",
+      "video/webm",
+    ]);
+    expect(assetInserts.every((a) => a.position === 0)).toBe(true);
+  });
+
+  it("carries a legacy embed's submission-level annotations onto its screenshot", async () => {
+    authOk(HUB_A);
+    await post(
+      payload({
+        screenshotStoragePath: `${HUB_A}/screenshots/abc.png`,
+        screenshotAnnotations: [{ kind: "highlight", x: 1, y: 2, w: 3, h: 4 }],
+      })
+    );
+
+    expect(assetInserts[0].annotations).toEqual([
+      { kind: "highlight", x: 1, y: 2, w: 3, h: 4 },
+    ]);
+    expect(inserts[0].screenshot_annotations).toEqual([
+      { kind: "highlight", x: 1, y: 2, w: 3, h: 4 },
+    ]);
+  });
+
+  it("merges both payload shapes without losing or duplicating an attachment", async () => {
+    authOk(HUB_A);
+    await post(
+      payload({
+        assets: [
+          {
+            kind: "screenshot",
+            storagePath: `${HUB_A}/screenshots/new.png`,
+            contentType: "image/png",
+          },
+        ],
+        // Same object as the asset above, plus one the new list omits.
+        screenshotStoragePath: `${HUB_A}/screenshots/new.png`,
+        videoStoragePath: `${HUB_A}/videos/clip.webm`,
+      })
+    );
+
+    expect(assetInserts.map((a) => a.storage_path)).toEqual([
+      `${HUB_A}/screenshots/new.png`,
+      `${HUB_A}/videos/clip.webm`,
+    ]);
+  });
+
+  it("writes no asset rows for a submission with no attachments", async () => {
+    authOk(HUB_A);
+    const res = await post(payload());
+
+    expect(res.status).toBe(201);
+    expect(assetInserts).toEqual([]);
+    expect(inserts[0].screenshot_storage_path).toBeNull();
   });
 });

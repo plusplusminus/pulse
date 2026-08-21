@@ -7,8 +7,10 @@ import {
 import {
   MIN_RETENTION_DAYS,
   candidateCutoff,
+  planAssetRetentionDeletes,
   planRetentionDeletes,
   retentionPatch,
+  type RetentionAsset,
   type RetentionPatch,
   type RetentionPathColumn,
   type RetentionSubmission,
@@ -46,6 +48,9 @@ const DELETE_CHUNK = 100;
 const SELECT_COLUMNS =
   "id, created_at, screenshot_storage_path, video_storage_path, replay_storage_path";
 
+const ASSET_SELECT_COLUMNS =
+  "id, submission_id, kind, storage_path, created_at, purged_at";
+
 const HAS_ANY_MEDIA =
   "screenshot_storage_path.not.is.null,video_storage_path.not.is.null,replay_storage_path.not.is.null";
 
@@ -58,6 +63,14 @@ export type RetentionRunResult = {
   rowUpdatesFailed: number;
   /** True when MAX_PAGES was hit and candidates remain for the next run. */
   truncated: boolean;
+  // Per-asset pass (PULSE-403), reported separately from the column pass.
+  assetsScanned: number;
+  assetPages: number;
+  assetObjectsDeleted: number;
+  assetObjectsFailed: number;
+  assetsPurged: number;
+  assetPurgesFailed: number;
+  assetsTruncated: boolean;
 };
 
 /** I/O seam — the real implementations are below; tests inject fakes. */
@@ -70,6 +83,20 @@ export type RetentionDeps = {
   ): Promise<RetentionSubmission[]>;
   deleteObjects(paths: string[]): Promise<void>;
   applyPatch(ids: string[], patch: RetentionPatch): Promise<void>;
+  /** Assets past their window that still hold an object, in id order. */
+  fetchAssetPage(
+    cutoffIso: string,
+    afterId: string | null,
+    limit: number
+  ): Promise<RetentionAsset[]>;
+  /** Stamp `purged_at` on the given assets. */
+  purgeAssets(ids: string[], purgedAt: string): Promise<void>;
+  /**
+   * Stamp `media_purged_at` on the given submissions. Keeps the proxy's
+   * 410-vs-404 signal correct for a submission whose media only ever existed as
+   * asset rows.
+   */
+  stampSubmissionsPurged(ids: string[], purgedAt: string): Promise<void>;
 };
 
 /**
@@ -125,6 +152,13 @@ export async function runWidgetRetention(
     rowsUpdated: 0,
     rowUpdatesFailed: 0,
     truncated: false,
+    assetsScanned: 0,
+    assetPages: 0,
+    assetObjectsDeleted: 0,
+    assetObjectsFailed: 0,
+    assetsPurged: 0,
+    assetPurgesFailed: 0,
+    assetsTruncated: false,
   };
 
   let cursor: string | null = null;
@@ -216,7 +250,109 @@ export async function runWidgetRetention(
     if (page === MAX_PAGES - 1) result.truncated = true;
   }
 
+  await runAssetRetention(deps, cutoffIso, result);
+
   return result;
+}
+
+/**
+ * The per-asset pass (PULSE-403). Same shape as the column pass: page in id
+ * order, ask the pure policy what has outlived its window, delete the objects,
+ * then stamp `purged_at` only on the assets whose object is confirmed gone.
+ *
+ * `media_purged_at` is stamped on the parent submissions too. The column pass
+ * already does that for a submission whose first attachment lives in a column,
+ * but a submission whose media exists only as asset rows would otherwise 404
+ * after purging instead of 410.
+ */
+async function runAssetRetention(
+  deps: RetentionDeps,
+  cutoffIso: string,
+  result: RetentionRunResult
+): Promise<void> {
+  let cursor: string | null = null;
+
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const assets = await deps.fetchAssetPage(cutoffIso, cursor, PAGE_SIZE);
+    if (assets.length === 0) break;
+
+    result.assetPages++;
+    result.assetsScanned += assets.length;
+    cursor = assets[assets.length - 1].id;
+
+    const plan = planAssetRetentionDeletes({ now: deps.now, assets });
+    if (plan.expired.length === 0) {
+      if (assets.length < PAGE_SIZE) break;
+      continue;
+    }
+
+    // A path that cannot address a widget-media object is never handed to the
+    // bucket; a wildcard is not something we want near a delete call.
+    const failedPaths = new Set<string>();
+    const deletable: string[] = [];
+    for (const path of plan.storagePathsToDelete) {
+      if (STORAGE_PATH_PATTERN.test(path)) {
+        deletable.push(path);
+      } else {
+        failedPaths.add(path);
+        console.error(`[widget-retention] Refusing malformed asset path: ${path}`);
+        Sentry.captureException(
+          new Error(`Malformed widget media storage path: ${path}`),
+          { tags: { area: "widget" } }
+        );
+      }
+    }
+
+    const undeleted = await deleteWithFallback(deletable, deps.deleteObjects);
+    for (const path of undeleted) failedPaths.add(path);
+
+    result.assetObjectsDeleted += deletable.length - undeleted.size;
+    result.assetObjectsFailed += failedPaths.size;
+
+    const purgeable = plan.expired.filter(
+      (expiry) => !failedPaths.has(expiry.storagePath)
+    );
+    if (purgeable.length === 0) continue;
+
+    const assetIds = purgeable.map((expiry) => expiry.assetId);
+    try {
+      await deps.purgeAssets(assetIds, plan.purgedAt);
+      result.assetsPurged += assetIds.length;
+    } catch (purgeError) {
+      result.assetPurgesFailed += assetIds.length;
+      console.error(
+        `[widget-retention] Failed to stamp purged_at on ${assetIds.length} asset(s):`,
+        purgeError
+      );
+      Sentry.captureException(purgeError, {
+        tags: { area: "widget" },
+        extra: { assetCount: assetIds.length },
+      });
+      // The objects are gone but the rows still point at them; tomorrow's run
+      // re-plans them and the delete is idempotent.
+      continue;
+    }
+
+    const submissionIds = [...new Set(purgeable.map((e) => e.submissionId))];
+    try {
+      await deps.stampSubmissionsPurged(submissionIds, plan.purgedAt);
+    } catch (stampError) {
+      // Not fatal: the assets are correctly marked purged, so the proxy answers
+      // 410 from the asset row. Only a submission with no asset rows left would
+      // fall back to the flag, and the column pass stamps that one.
+      console.error(
+        `[widget-retention] Failed to stamp media_purged_at on ${submissionIds.length} submission(s):`,
+        stampError
+      );
+      Sentry.captureException(stampError, {
+        tags: { area: "widget" },
+        extra: { submissionCount: submissionIds.length },
+      });
+    }
+
+    if (assets.length < PAGE_SIZE) break;
+    if (page === MAX_PAGES - 1) result.assetsTruncated = true;
+  }
 }
 
 async function fetchPage(
@@ -256,6 +392,54 @@ async function applyPatch(
 }
 
 
+async function fetchAssetPage(
+  cutoffIso: string,
+  afterId: string | null,
+  limit: number
+): Promise<RetentionAsset[]> {
+  let query = supabaseAdmin
+    .from("widget_submission_assets")
+    .select(ASSET_SELECT_COLUMNS)
+    .lte("created_at", cutoffIso)
+    .is("purged_at", null)
+    .not("storage_path", "is", null)
+    .order("id", { ascending: true })
+    .limit(limit);
+
+  if (afterId) query = query.gt("id", afterId);
+
+  const { data, error } = await query;
+  if (error) {
+    throw new Error(`Failed to fetch asset retention candidates: ${error.message}`);
+  }
+  return (data ?? []) as unknown as RetentionAsset[];
+}
+
+async function purgeAssets(ids: string[], purgedAt: string): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from("widget_submission_assets")
+    .update({ purged_at: purgedAt })
+    .in("id", ids);
+
+  if (error) {
+    throw new Error(`Failed to stamp purged_at on assets: ${error.message}`);
+  }
+}
+
+async function stampSubmissionsPurged(
+  ids: string[],
+  purgedAt: string
+): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from("widget_submissions")
+    .update({ media_purged_at: purgedAt })
+    .in("id", ids);
+
+  if (error) {
+    throw new Error(`Failed to stamp media_purged_at: ${error.message}`);
+  }
+}
+
 /** The production I/O wiring; the route passes this straight to the runner. */
 export function liveRetentionDeps(now: Date): RetentionDeps {
   return {
@@ -263,5 +447,8 @@ export function liveRetentionDeps(now: Date): RetentionDeps {
     fetchPage,
     deleteObjects: (paths) => deleteWidgetObjects(paths),
     applyPatch,
+    fetchAssetPage,
+    purgeAssets,
+    stampSubmissionsPurged,
   };
 }

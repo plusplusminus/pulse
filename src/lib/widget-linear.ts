@@ -25,6 +25,16 @@ export function widgetMediaUrl(
   return `${getAppUrl()}/api/widget/media/${submissionId}/${kind}`;
 }
 
+/**
+ * Media-proxy URL for one specific attachment (PULSE-403). A submission can
+ * hold several screenshots; `widgetMediaUrl` resolves to the first by position
+ * and stays the shape already written into existing Linear issues, so anything
+ * naming a later attachment must use this instead.
+ */
+export function widgetMediaAssetUrl(assetId: string): string {
+  return `${getAppUrl()}/api/widget/media/asset/${assetId}`;
+}
+
 export type WidgetSubmissionBody = {
   description?: string;
   reporter: { email: string; name?: string };

@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
     const durationMs = Date.now() - startTime;
 
     console.log(
-      `widget-retention cron completed in ${durationMs}ms — scanned ${result.scanned} over ${result.pages} page(s), deleted ${result.objectsDeleted} object(s), purged ${result.rowsUpdated} row(s), ${result.objectsFailed} object failure(s), ${result.rowUpdatesFailed} row update failure(s)${result.truncated ? ", TRUNCATED (more candidates remain)" : ""}`
+      `widget-retention cron completed in ${durationMs}ms — scanned ${result.scanned} over ${result.pages} page(s), deleted ${result.objectsDeleted} object(s), purged ${result.rowsUpdated} row(s), ${result.objectsFailed} object failure(s), ${result.rowUpdatesFailed} row update failure(s)${result.truncated ? ", TRUNCATED (more candidates remain)" : ""}; assets: scanned ${result.assetsScanned} over ${result.assetPages} page(s), deleted ${result.assetObjectsDeleted} object(s), purged ${result.assetsPurged}, ${result.assetObjectsFailed} object failure(s), ${result.assetPurgesFailed} purge failure(s)${result.assetsTruncated ? ", TRUNCATED (more assets remain)" : ""}`
     );
 
     // Partial failures retry tomorrow, but a run that cannot finish its backlog
@@ -48,7 +48,10 @@ export async function GET(request: NextRequest) {
     const degraded =
       result.truncated ||
       result.objectsFailed > 0 ||
-      result.rowUpdatesFailed > 0;
+      result.rowUpdatesFailed > 0 ||
+      result.assetsTruncated ||
+      result.assetObjectsFailed > 0 ||
+      result.assetPurgesFailed > 0;
 
     Sentry.captureCheckIn({
       checkInId,
