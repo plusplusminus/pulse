@@ -114,6 +114,22 @@ export async function POST(request: Request) {
     }
     const { kind, contentType, sizeBytes } = parsed.data;
 
+    // Nothing in the codebase ever writes `replay_storage_path` — the session
+    // replay recorder (PULSE-318) has not landed — so a replay ticket can only
+    // produce an object no submission references: invisible to the media proxy
+    // and to the retention cron, therefore never purged. Minting one is pure
+    // orphan storage. Drop this guard when PULSE-318 lands; the replay kind in
+    // widget-upload.ts, retention and the media proxy is ready for it.
+    if (kind === "replay") {
+      return NextResponse.json(
+        {
+          error:
+            "Session replay uploads are not available yet (PULSE-318).",
+        },
+        { status: 400, headers }
+      );
+    }
+
     // Object.hasOwn, not `in`: `in` walks the prototype chain, so "__proto__"
     // and "constructor" would pass the allowlist and mint a real ticket.
     if (

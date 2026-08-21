@@ -249,7 +249,8 @@ describe("POST /api/widget/upload", () => {
   it("rejects inherited Object.prototype keys as content types for every kind", async () => {
     authOk("wk_proto");
     let n = 0;
-    for (const kind of ["screenshot", "video", "replay"]) {
+    // No "replay": it is refused before the content-type check (PULSE-318).
+    for (const kind of ["screenshot", "video"]) {
       for (const contentType of [
         "__proto__",
         "constructor",
@@ -288,7 +289,6 @@ describe("POST /api/widget/upload", () => {
     const cases: Array<[string, string, number]> = [
       ["screenshot", "image/png", 10 * 1024 * 1024 + 1],
       ["video", "video/webm", 100 * 1024 * 1024 + 1],
-      ["replay", "application/json", 20 * 1024 * 1024 + 1],
     ];
     for (const [kind, contentType, sizeBytes] of cases) {
       const res = await post({ kind, contentType, sizeBytes });
@@ -307,6 +307,48 @@ describe("POST /api/widget/upload", () => {
     });
     expect(res.status).toBe(200);
     expect((await readJson(res)).storagePath).toMatch(/\/videos\/.+\.mp4$/);
+  });
+
+  // Security: `replay` is a valid media kind, but nothing in the codebase ever
+  // writes replay_storage_path (the recorder, PULSE-318, is not built), so a
+  // replay object is an orphan by construction — referenced by no submission
+  // row, therefore never seen by the retention cron.
+  it("refuses replay tickets until PULSE-318 lands, before signing anything", async () => {
+    authOk("wk_replay");
+    const res = await post({
+      kind: "replay",
+      contentType: "application/json",
+      sizeBytes: 1024,
+    });
+    expect(res.status).toBe(400);
+    expect((await readJson(res)).error).toMatch(/not available yet \(PULSE-318\)/);
+    expect(signedUploads).toEqual([]);
+  });
+
+  it("refuses a replay ticket whatever the content type or size", async () => {
+    authOk("wk_replay2");
+    for (const [contentType, sizeBytes] of [
+      ["application/json", 1],
+      ["image/png", 1],
+      ["application/json", 20 * 1024 * 1024 + 1],
+    ] as Array<[string, number]>) {
+      const res = await post({ kind: "replay", contentType, sizeBytes });
+      expect(res.status).toBe(400);
+      expect((await readJson(res)).error).toMatch(/PULSE-318/);
+    }
+    expect(signedUploads).toEqual([]);
+  });
+
+  it("still mints tickets for the kinds a submission can reference", async () => {
+    authOk("wk_kinds");
+    for (const [kind, contentType] of [
+      ["screenshot", "image/png"],
+      ["video", "video/webm"],
+    ] as Array<[string, string]>) {
+      const res = await post({ kind, contentType, sizeBytes: 1024 });
+      expect(res.status).toBe(200);
+    }
+    expect(signedUploads).toHaveLength(2);
   });
 
   it("rate-limits an IP after 10 tickets per minute; another IP still gets tickets", async () => {

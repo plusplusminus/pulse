@@ -14,10 +14,21 @@ attempt is retired.
 | MIME allowlist | `image/png`, `image/jpeg`, `video/webm`, `video/mp4`, `application/json` |
 | Bucket size limit | 100 MB per object (Supabase `file_size_limit`) |
 | Per-kind caps (API) | screenshot 10 MB, video 100 MB, replay 20 MB — enforced in `POST /api/widget/upload` before a URL is minted |
+| Uploadable kinds | `screenshot`, `video`. `replay` is refused with a `400` until PULSE-318 lands (see below) |
 | Access | service role only. Restrictive RLS policies deny `anon`/`authenticated` on `storage.objects` for this bucket |
 
 The per-hub prefix is part of the path pattern (`src/lib/widget-upload.ts`),
 so a leaked signed URL can only ever read or write inside its own hub folder.
+
+### `replay` tickets are refused until PULSE-318
+
+`replay` is a valid kind through the whole pipeline — `widget-upload.ts`, the
+retention cron, the media proxy — but nothing writes `replay_storage_path`,
+because the recorder (PULSE-318) is not built. A replay object created today
+would therefore be referenced by no submission row: invisible to the proxy and
+to retention, and never purged. `POST /api/widget/upload` rejects
+`kind: "replay"` with a `400` naming PULSE-318. Whoever lands PULSE-318 removes
+that guard; the rest of the scaffolding is already correct.
 
 ## Flow
 
