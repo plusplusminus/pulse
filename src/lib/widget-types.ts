@@ -28,7 +28,6 @@ export type WidgetUIConfig = {
   theme?: 'auto' | 'light' | 'dark'
   position?: 'bottom-right' | 'bottom-left'
   triggerText?: string
-  accentColor?: string
   capture?: WidgetCaptureConfig
   privacy?: {
     maskSelectors?: string[]
@@ -201,25 +200,6 @@ export type SentryContext = {
 
 // -- API request/response types -------------------------------------------
 
-export type WidgetFeedbackRequest = {
-  title: string
-  description?: string
-  type?: 'bug' | 'feedback' | 'idea'
-  metadata: WidgetMetadata
-  reporter: {
-    email: string
-    name?: string
-  }
-  /** Object key in the private widget-media bucket, minted by POST /api/widget/upload */
-  screenshotStoragePath?: string
-  /** Screen recording object key under {hubId}/videos/ (PULSE-337) */
-  videoStoragePath?: string
-  /** Element picks; max 50 (PULSE-329) */
-  picks?: WidgetPick[]
-  /** Screenshot annotation rects; max 50 (PULSE-333) */
-  screenshotAnnotations?: ScreenshotAnnotation[]
-}
-
 export type WidgetFeedbackResponse = {
   id: string
   linearIssueId: string | null
@@ -228,12 +208,6 @@ export type WidgetFeedbackResponse = {
 }
 
 // -- Admin API types ------------------------------------------------------
-
-export type WidgetConfigCreateRequest = {
-  name?: string
-  allowed_origins?: string[]
-  config?: WidgetUIConfig
-}
 
 export type WidgetConfigCreateResponse = {
   id: string
@@ -246,12 +220,4 @@ export type WidgetConfigRotateResponse = {
   id: string
   apiKey: string
   apiKeyPrefix: string
-}
-
-export type WidgetConfigUpdateRequest = {
-  name?: string
-  is_active?: boolean
-  allowed_origins?: string[]
-  config?: WidgetUIConfig
-  output_detail_level?: OutputDetailLevel
 }

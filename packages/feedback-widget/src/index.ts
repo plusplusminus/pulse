@@ -184,10 +184,6 @@ export class Pulse implements PulseInstance {
     return { ...this.user }
   }
 
-  getWidgetHost(): HTMLElement | null {
-    return this.widgetHost
-  }
-
   setWidgetHost(host: HTMLElement): void {
     this.widgetHost = host
   }

@@ -239,10 +239,6 @@ export function WidgetConfigForm({ hubId }: WidgetConfigFormProps) {
 
   const saveConfig = useCallback(() => {
     if (!activeConfig) return;
-    if (!isOutputDetailLevel(outputLevel)) {
-      toast.error("Pick a valid output detail level");
-      return;
-    }
     startTransition(async () => {
       try {
         const res = await fetch(`/api/widget/config/${activeConfig.id}`, {
