@@ -33,6 +33,15 @@ export function mediaProxyUrl(
 }
 
 /**
+ * Relative proxy URL for one specific attachment (PULSE-403). Use this whenever
+ * an asset has an id; `mediaProxyUrl` only ever reaches the first of its kind,
+ * and is the fallback for an attachment still living in a legacy column.
+ */
+export function mediaAssetProxyUrl(assetId: string): string {
+  return `/api/widget/media/asset/${assetId}`;
+}
+
+/**
  * Screenshots predate the storage-path migration: rows created before PULSE-324
  * carry a directly usable `screenshot_url` and no path. Prefer the proxy when
  * there is a path, fall back to the stored URL, otherwise there is nothing to

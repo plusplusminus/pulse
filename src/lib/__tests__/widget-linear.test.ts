@@ -3,6 +3,8 @@ import {
   buildWidgetIssueDescription,
   pageFeedbackPath,
   renderSubmissionBody,
+  widgetMediaAssetUrl,
+  widgetMediaUrl,
 } from "@/lib/widget-linear";
 import {
   OUTPUT_DETAIL_LEVELS,
@@ -409,5 +411,22 @@ describe("renderSubmissionBody — hostile submission", () => {
       "[Session Replay](https://sentry.io/r%29!%5Bbeacon%5D%28https://evil.example/s.png)"
     );
     expect(body).not.toContain("![beacon]");
+  });
+});
+
+describe("media proxy URLs (PULSE-403)", () => {
+  const SUB = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const ASSET = "11111111-1111-4111-8111-111111111111";
+
+  it("keeps the :submissionId/:kind shape already written into Linear issues", () => {
+    expect(widgetMediaUrl(SUB, "screenshot")).toBe(
+      `http://localhost:3000/api/widget/media/${SUB}/screenshot`
+    );
+  });
+
+  it("addresses a specific attachment under the static `asset` segment", () => {
+    expect(widgetMediaAssetUrl(ASSET)).toBe(
+      `http://localhost:3000/api/widget/media/asset/${ASSET}`
+    );
   });
 });
