@@ -52,6 +52,7 @@ export class Popover {
   readonly caret: HTMLButtonElement
   private surface: HTMLElement | null = null
   private outsideHandler: ((e: Event) => void) | null = null
+  private insideHandler: ((e: Event) => void) | null = null
 
   constructor(
     private shadow: ShadowRoot,
@@ -99,9 +100,26 @@ export class Popover {
     this.place()
     this.caret.setAttribute('aria-expanded', 'true')
 
-    this.outsideHandler = (e: Event) => {
+    // The widget lives in a CLOSED shadow root, and `composedPath()` redacts
+    // nodes inside a closed tree from listeners outside it: a document-level
+    // handler sees the path stop at the host. Testing for `surface` there is
+    // therefore always false, which closed the popover on its own item's
+    // pointerdown and detached the button before `click` could fire — every
+    // capture option was dead to a real mouse while passing every synthetic
+    // test. So the check is split by where it can actually see.
+    //
+    // Inside the shadow the full path is visible, so the precise test works.
+    this.insideHandler = (e: Event) => {
       const path = (e as MouseEvent).composedPath?.() ?? []
       if (!path.includes(surface) && !path.includes(this.caret)) this.close(false)
+    }
+    this.shadow.addEventListener('pointerdown', this.insideHandler, true)
+
+    // Outside it, the host is the most we can see — and that is enough, because
+    // its presence means the pointer went down somewhere in the widget.
+    this.outsideHandler = (e: Event) => {
+      const path = (e as MouseEvent).composedPath?.() ?? []
+      if (!path.includes(this.shadow.host)) this.close(false)
     }
     document.addEventListener('pointerdown', this.outsideHandler, true)
 
@@ -117,6 +135,10 @@ export class Popover {
     if (this.outsideHandler) {
       document.removeEventListener('pointerdown', this.outsideHandler, true)
       this.outsideHandler = null
+    }
+    if (this.insideHandler) {
+      this.shadow.removeEventListener('pointerdown', this.insideHandler, true)
+      this.insideHandler = null
     }
     this.config.onClose?.()
     if (restoreFocus) this.caret.focus()
