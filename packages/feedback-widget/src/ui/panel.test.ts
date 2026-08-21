@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest'
-import { BAR_IN_RECORDING_NOTICE, FeedbackPanel } from './panel'
+import { BAR_IN_RECORDING_NOTICE, FeedbackPanel, VOICE_OVER_NOTICE } from './panel'
 import { ENGINE_LOAD_ERROR } from '../screenshot'
 import type { WidgetPick } from '../types'
 
@@ -27,11 +27,17 @@ let config: {
   onCaptureTab: Mock<() => void>
   onRecordVideo: Mock<() => void>
   onRemoveVideo: Mock<() => void>
+  onToggleVoiceOver: Mock<() => void>
 }
 
 function makePanel(
   allowElementPick = true,
-  extra: { allowScreenshot?: boolean; allowCaptureTab?: boolean; allowVideo?: boolean } = {}
+  extra: {
+    allowScreenshot?: boolean
+    allowCaptureTab?: boolean
+    allowVideo?: boolean
+    allowVoiceOver?: boolean
+  } = {}
 ): FeedbackPanel {
   return new FeedbackPanel(shadow, {
     position: 'bottom-right',
@@ -58,6 +64,7 @@ beforeEach(() => {
     onCaptureTab: vi.fn<() => void>(),
     onRecordVideo: vi.fn<() => void>(),
     onRemoveVideo: vi.fn<() => void>(),
+    onToggleVoiceOver: vi.fn<() => void>(),
   }
 })
 
@@ -348,5 +355,88 @@ describe('video recording controls (PULSE-338)', () => {
     expect(label()).toBe('Uploading 90%')
     panel.setUploadProgress(100, 100)
     expect(label()).toBe('Submitting...')
+  })
+})
+
+describe('voice-over opt-in (PULSE-400)', () => {
+  const toggle = () =>
+    shadow.querySelector('.pulse-voiceover__toggle') as HTMLButtonElement | null
+  const noteTexts = () =>
+    Array.from(shadow.querySelectorAll('.pulse-capture-note')).map((n) => n.textContent ?? '')
+
+  it('renders nothing when the site does not allow a microphone', () => {
+    const panel = makePanel(false, { allowVideo: true, allowVoiceOver: false })
+    panel.setState('open')
+
+    expect(toggle()).toBeNull()
+    expect(noteTexts()).not.toContain(VOICE_OVER_NOTICE)
+    // The record button is untouched: voice-over is an option on video, not video.
+    expect(shadow.querySelector('.pulse-record-btn')).not.toBeNull()
+  })
+
+  it('states that audio is captured before the toggle is ever clicked', () => {
+    const panel = makePanel(false, { allowVideo: true, allowVoiceOver: true })
+    panel.setState('open')
+
+    expect(noteTexts()).toContain(VOICE_OVER_NOTICE)
+    expect(config.onToggleVoiceOver).not.toHaveBeenCalled()
+  })
+
+  it('sits above the record control, so the choice comes before the picker', () => {
+    const panel = makePanel(false, { allowVideo: true, allowVoiceOver: true })
+    panel.setState('open')
+
+    const body = shadow.querySelector('.pulse-body')!
+    const order = Array.from(body.children).map((c) => c.className)
+    const voiceOver = order.findIndex((c) => c.includes('pulse-voiceover'))
+    const record = order.findIndex((c) => c.includes('pulse-screenshot-options'))
+    expect(voiceOver).toBeGreaterThanOrEqual(0)
+    expect(voiceOver).toBeLessThan(record)
+  })
+
+  it('routes the click straight through — getUserMedia needs that activation', () => {
+    const panel = makePanel(false, { allowVideo: true, allowVoiceOver: true })
+    panel.setState('open')
+
+    toggle()!.click()
+
+    expect(config.onToggleVoiceOver).toHaveBeenCalledTimes(1)
+  })
+
+  it('reflects state in aria-pressed and in a word, never in colour alone', () => {
+    const panel = makePanel(false, { allowVideo: true, allowVoiceOver: true })
+    panel.setState('open')
+    expect(toggle()!.getAttribute('aria-pressed')).toBe('false')
+    expect(shadow.querySelector('.pulse-voiceover__state')!.textContent).toBe('Off')
+
+    panel.setVoiceOver(true)
+
+    expect(toggle()!.getAttribute('aria-pressed')).toBe('true')
+    expect(shadow.querySelector('.pulse-voiceover__state')!.textContent).toBe('On')
+    expect(panel.isVoiceOverOn()).toBe(true)
+  })
+
+  it('shows a microphone problem as a status, not as a form error', () => {
+    const panel = makePanel(false, { allowVideo: true, allowVoiceOver: true })
+    panel.setState('open')
+
+    panel.setVoiceOverNote('No microphone was found — the recording continues without voice-over.')
+
+    const note = shadow.querySelector('.pulse-voiceover .pulse-capture-note--error')!
+    expect(note.textContent).toContain('No microphone was found')
+    // status, not alert: nothing failed, the recording just has no narration.
+    expect(note.getAttribute('role')).toBe('status')
+  })
+
+  it('keeps the option visible next to a finished recording, so Re-record obeys it', () => {
+    URL.createObjectURL = vi.fn(() => 'blob:pulse/0')
+    URL.revokeObjectURL = vi.fn()
+    const panel = makePanel(false, { allowVideo: true, allowVoiceOver: true })
+    panel.setState('open')
+    panel.setVoiceOver(true)
+    panel.setVideo(new Blob(['x'], { type: 'video/webm;codecs=vp9,opus' }), 1_000)
+
+    expect(toggle()!.getAttribute('aria-pressed')).toBe('true')
+    expect(shadow.querySelector('.pulse-video__player')).not.toBeNull()
   })
 })

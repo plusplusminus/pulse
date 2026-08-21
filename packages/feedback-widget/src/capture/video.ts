@@ -15,6 +15,9 @@
  *   4. `video/mp4;codecs=avc1`   — desktop Safari only ever writes MP4/H.264
  *   5. `video/mp4`
  *
+ * When the stream carries a voice-over track, `AUDIO_MIME_CANDIDATES` — the
+ * Opus/AAC-paired equivalents — are probed ahead of all five (PULSE-400).
+ *
  * WebM first because it is what the overwhelming majority of desktop browsers
  * record natively; MP4 exists purely so desktop Safari is not left without a
  * recorder. (iOS has no `getDisplayMedia` at all — PULSE-339 hides the button
@@ -58,6 +61,8 @@ export interface VideoRecorderOptions {
   /** Hard cap; the recorder stops itself on reaching it. */
   maxDurationMs?: number
   videoBitsPerSecond?: number
+  /** Ignored unless the stream carries a voice-over track. */
+  audioBitsPerSecond?: number
   onProgress?: (progress: VideoProgress) => void
   /**
    * Fired exactly once when recording ends, by any route. `stop()` still
@@ -92,6 +97,13 @@ export const MAX_RECORDING_MS = 120_000
 
 export const VIDEO_BITS_PER_SECOND = 2_500_000
 
+/**
+ * Voice-over only (PULSE-400), and ignored when the stream carries no audio.
+ * 64 kbps Opus is transparent for speech; the browser default of ~128 kbps
+ * would put another megabyte on a two-minute upload for nothing audible.
+ */
+export const AUDIO_BITS_PER_SECOND = 64_000
+
 /** Chunk cadence. Small enough that a crash loses little, large enough to be cheap. */
 export const TIMESLICE_MS = 2_000
 
@@ -103,6 +115,22 @@ export const MIME_CANDIDATES = [
   'video/webm',
   'video/mp4;codecs=avc1',
   'video/mp4',
+] as const
+
+/**
+ * Probed ahead of `MIME_CANDIDATES` when the stream carries a microphone track
+ * (PULSE-400). A video-only codec string is not a promise that the recorder
+ * will drop the audio track — behaviour varies — so naming the audio codec is
+ * the only way to be sure a voice-over is actually written.
+ *
+ * Opus for WebM, AAC-LC for MP4: desktop Safari records nothing but MP4/H.264
+ * and pairs it with AAC. The bare fallbacks in `MIME_CANDIDATES` follow, where
+ * the browser picks both codecs itself.
+ */
+export const AUDIO_MIME_CANDIDATES = [
+  'video/webm;codecs=vp9,opus',
+  'video/webm;codecs=vp8,opus',
+  'video/mp4;codecs=avc1,mp4a.40.2',
 ] as const
 
 export class VideoRecorderError extends Error {
@@ -149,11 +177,20 @@ function defaultIsTypeSupported(mimeType: string): boolean {
   )
 }
 
-/** First supported candidate, or null where nothing in the list can be recorded. */
+/**
+ * First supported candidate, or null where nothing in the list can be recorded.
+ * With `withAudio`, the Opus/AAC-paired types are probed first; the video-only
+ * list still follows, so a browser that supports neither pairing records the
+ * video rather than refusing outright.
+ */
 export function negotiateMimeType(
-  isTypeSupported: (mimeType: string) => boolean = defaultIsTypeSupported
+  isTypeSupported: (mimeType: string) => boolean = defaultIsTypeSupported,
+  withAudio = false
 ): string | null {
-  for (const candidate of MIME_CANDIDATES) {
+  const candidates: readonly string[] = withAudio
+    ? [...AUDIO_MIME_CANDIDATES, ...MIME_CANDIDATES]
+    : MIME_CANDIDATES
+  for (const candidate of candidates) {
     if (isTypeSupported(candidate)) return candidate
   }
   return null
@@ -168,7 +205,8 @@ export function extensionFor(mimeType: string): VideoExtension {
   return /^video\/mp4\b/i.test(mimeType) ? 'mp4' : 'webm'
 }
 
-function stopTracks(stream: MediaStream | null): void {
+/** Exported so the mic path has one release helper, not a second copy. */
+export function stopTracks(stream: MediaStream | null | undefined): void {
   if (!stream) return
   for (const track of stream.getTracks()) track.stop()
 }
@@ -211,7 +249,11 @@ class DisplayRecorder implements VideoRecorder {
       throw new VideoRecorderError('Recording cancelled')
     }
 
-    const mimeType = negotiateMimeType(this.options.isTypeSupported)
+    // Read off the stream we were actually handed rather than a flag the caller
+    // set earlier: a mic that failed to open degrades to silent video, and the
+    // negotiated type has to follow the truth (PULSE-400).
+    const withAudio = (stream.getAudioTracks?.() ?? []).length > 0
+    const mimeType = negotiateMimeType(this.options.isTypeSupported, withAudio)
     if (!mimeType) {
       stopTracks(stream)
       throw new VideoRecorderError('This browser cannot record video')
@@ -220,6 +262,7 @@ class DisplayRecorder implements VideoRecorder {
     const recorder = new MediaRecorder(stream, {
       mimeType,
       videoBitsPerSecond: this.options.videoBitsPerSecond ?? VIDEO_BITS_PER_SECOND,
+      audioBitsPerSecond: this.options.audioBitsPerSecond ?? AUDIO_BITS_PER_SECOND,
     })
 
     this.stream = stream
@@ -249,7 +292,9 @@ class DisplayRecorder implements VideoRecorder {
     }
 
     // The browser's own "Stop sharing" bar ends the track, not the recorder.
-    for (const track of stream.getTracks()) {
+    // VIDEO tracks only: a microphone unplugged mid-recording must cost the
+    // reporter the voice-over, never the recording (PULSE-400).
+    for (const track of stream.getVideoTracks()) {
       track.addEventListener('ended', () => this.endBecause('source-ended'), { once: true })
     }
 

@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
+  AUDIO_BITS_PER_SECOND,
+  AUDIO_MIME_CANDIDATES,
   MAX_RECORDING_MS,
   MIME_CANDIDATES,
   TIMESLICE_MS,
@@ -53,7 +55,7 @@ class FakeMediaRecorder {
 
   constructor(
     readonly stream: MediaStream,
-    readonly options: { mimeType: string; videoBitsPerSecond?: number }
+    readonly options: { mimeType: string; videoBitsPerSecond?: number; audioBitsPerSecond?: number }
   ) {
     instances.push(this)
   }
@@ -163,6 +165,66 @@ describe('negotiateMimeType', () => {
     supported = ['video/webm']
     expect(negotiateMimeType()).toBe('video/webm')
     expect(FakeMediaRecorder.isTypeSupported).toHaveBeenCalledWith(WEBM_VP9)
+  })
+})
+
+// -- voice-over codec negotiation (PULSE-400) --------------------------------
+
+const WEBM_VP9_OPUS = 'video/webm;codecs=vp9,opus'
+const WEBM_VP8_OPUS = 'video/webm;codecs=vp8,opus'
+const MP4_AVC1_AAC = 'video/mp4;codecs=avc1,mp4a.40.2'
+
+describe('negotiateMimeType with a voice-over track', () => {
+  it('prefers the Opus-paired WebM types over every video-only candidate', () => {
+    expect(negotiateMimeType(() => true, true)).toBe(WEBM_VP9_OPUS)
+    expect(negotiateMimeType((t) => t !== WEBM_VP9_OPUS, true)).toBe(WEBM_VP8_OPUS)
+  })
+
+  it('pairs MP4 with AAC for desktop Safari, which records nothing else', () => {
+    expect(negotiateMimeType((t) => t === MP4_AVC1_AAC, true)).toBe(MP4_AVC1_AAC)
+  })
+
+  it('probes every audio pairing before falling back to the video-only list', () => {
+    const seen: string[] = []
+    negotiateMimeType((t) => {
+      seen.push(t)
+      return t === WEBM_VP9
+    }, true)
+    expect(seen).toEqual([WEBM_VP9_OPUS, WEBM_VP8_OPUS, MP4_AVC1_AAC, WEBM_VP9])
+  })
+
+  it('still records video where no pairing is supported, rather than refusing', () => {
+    // Losing the narration is bad; losing the repro because of it is worse.
+    expect(negotiateMimeType((t) => t === 'video/webm', true)).toBe('video/webm')
+  })
+
+  it('is null only when nothing at all can be recorded', () => {
+    expect(negotiateMimeType(() => false, true)).toBeNull()
+  })
+
+  it('leaves the silent path untouched — no audio track, no Opus probe', () => {
+    const seen: string[] = []
+    negotiateMimeType((t) => {
+      seen.push(t)
+      return false
+    })
+    expect(seen).toEqual([...MIME_CANDIDATES])
+    expect(seen.some((t) => t.includes('opus'))).toBe(false)
+  })
+
+  it('every audio candidate normalises to a container the upload allowlist knows', () => {
+    // src/lib/widget-upload.ts keys WIDGET_MEDIA_CONTENT_TYPES on the base type
+    // ("video/webm" / "video/mp4"), so a candidate outside those two would be
+    // negotiated happily by the widget and then 400'd on upload.
+    for (const candidate of AUDIO_MIME_CANDIDATES) {
+      expect(candidate.split(';')[0]).toMatch(/^video\/(webm|mp4)$/)
+    }
+  })
+
+  it('gives every audio candidate the extension its container implies', () => {
+    expect(extensionFor(WEBM_VP9_OPUS)).toBe('webm')
+    expect(extensionFor(WEBM_VP8_OPUS)).toBe('webm')
+    expect(extensionFor(MP4_AVC1_AAC)).toBe('mp4')
   })
 })
 
@@ -424,5 +486,118 @@ describe('duration post-processing', () => {
 
     expect(recording.blob.size).toBe(64)
     expect(recording.mimeType).toBe(WEBM_VP9)
+  })
+})
+
+// -- recording a composed voice-over stream (PULSE-400) ----------------------
+
+function audioTrack() {
+  return { ...fakeTrack(), kind: 'audio' as const }
+}
+
+/** Display video + microphone audio, the shape MediaRecorder is handed. */
+function composedStream(video: FakeTrack, audio: FakeTrack) {
+  const tracks = [video, audio]
+  return {
+    tracks,
+    getTracks: () => tracks,
+    getVideoTracks: () => [video],
+    getAudioTracks: () => [audio],
+  } as unknown as MediaStream & { tracks: FakeTrack[] }
+}
+
+describe('recording with a voice-over track', () => {
+  beforeEach(() => {
+    supported = [...AUDIO_MIME_CANDIDATES, ...MIME_CANDIDATES]
+  })
+
+  it('negotiates an Opus-paired type off the stream it was handed, not a flag', async () => {
+    const recorder = createVideoRecorder()
+    await recorder.start(composedStream(fakeTrack(), audioTrack()))
+
+    expect(instances[0].options.mimeType).toBe('video/webm;codecs=vp9,opus')
+    recorder.cancel()
+  })
+
+  it('stays video-only when the microphone never opened', async () => {
+    // The composed stream degraded to display-only: the negotiated type has to
+    // follow the truth, or the recorder claims an audio track it does not have.
+    const recorder = createVideoRecorder()
+    await recorder.start(fakeStream())
+
+    expect(instances[0].options.mimeType).toBe(WEBM_VP9)
+    recorder.cancel()
+  })
+
+  it('spends 64 kbps on speech rather than the browser default', async () => {
+    const recorder = createVideoRecorder()
+    await recorder.start(composedStream(fakeTrack(), audioTrack()))
+
+    expect(instances[0].options.audioBitsPerSecond).toBe(AUDIO_BITS_PER_SECOND)
+    recorder.cancel()
+  })
+
+  it('never ends the recording because the microphone died', async () => {
+    const video = fakeTrack()
+    const audio = audioTrack()
+    const onEnd = vi.fn()
+    const recorder = createVideoRecorder({ onEnd })
+    await recorder.start(composedStream(video, audio))
+
+    // A mic unplugged mid-repro must cost the narration, never the video.
+    expect(audio.addEventListener).not.toHaveBeenCalled()
+    expect(video.addEventListener).toHaveBeenCalledWith('ended', expect.any(Function), {
+      once: true,
+    })
+
+    audio.end()
+    expect(onEnd).not.toHaveBeenCalled()
+    expect(recorder.isRecording).toBe(true)
+
+    video.end()
+    expect(onEnd).toHaveBeenCalledWith('source-ended')
+  })
+
+  it('releases the microphone when the recording finishes, not before', async () => {
+    const video = fakeTrack()
+    const audio = audioTrack()
+    const recorder = createVideoRecorder()
+    await recorder.start(composedStream(video, audio))
+    instances[0].emit(32)
+
+    // Mid-recording: muting is the caller's job and it is never a stop().
+    expect(audio.stop).not.toHaveBeenCalled()
+
+    await recorder.stop()
+
+    // No lingering microphone indicator in the tab once the recording ends.
+    expect(audio.stop).toHaveBeenCalledTimes(1)
+    expect(video.stop).toHaveBeenCalledTimes(1)
+  })
+
+  it('releases the microphone on discard too', async () => {
+    const video = fakeTrack()
+    const audio = audioTrack()
+    const recorder = createVideoRecorder()
+    await recorder.start(composedStream(video, audio))
+
+    recorder.cancel()
+
+    expect(audio.stop).toHaveBeenCalledTimes(1)
+    expect(video.stop).toHaveBeenCalledTimes(1)
+  })
+
+  it('releases the microphone when the recorder errors', async () => {
+    const video = fakeTrack()
+    const audio = audioTrack()
+    const recorder = createVideoRecorder()
+    await recorder.start(composedStream(video, audio))
+
+    // The error path, not the stop path: nothing has asked it to end.
+    instances[0].onerror?.()
+    await expect(recorder.stop()).rejects.toThrow(/Recording failed/)
+
+    expect(audio.stop).toHaveBeenCalledTimes(1)
+    expect(video.stop).toHaveBeenCalledTimes(1)
   })
 })

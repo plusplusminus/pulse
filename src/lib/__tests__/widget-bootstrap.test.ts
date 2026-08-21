@@ -109,3 +109,43 @@ describe("parseMaskSelectors", () => {
     expect(parseMaskSelectors(undefined)).toEqual([]);
   });
 });
+
+describe("capture.voiceOver (PULSE-400)", () => {
+  it("defaults false — a microphone is a higher consent bar than a screenshot", () => {
+    expect(BOOTSTRAP_DEFAULTS.capture.voiceOver).toBe(false);
+    expect(
+      buildBootstrapPayload(row, { apiBase: "https://pulse.test" }).capture.voiceOver
+    ).toBe(false);
+  });
+
+  it("is served only when the site explicitly stored true", () => {
+    const on = buildBootstrapPayload(
+      { ...row, config: { capture: { video: true, voiceOver: true } } },
+      { apiBase: "https://pulse.test" }
+    );
+    expect(on.capture.voiceOver).toBe(true);
+
+    const off = buildBootstrapPayload(
+      { ...row, config: { capture: { video: true, voiceOver: false } } },
+      { apiBase: "https://pulse.test" }
+    );
+    expect(off.capture.voiceOver).toBe(false);
+  });
+
+  it("falls back to false for a non-boolean, rather than coercing it on", () => {
+    const payload = buildBootstrapPayload(
+      // Hand-edited JSONB is the realistic source of a value like this.
+      { ...row, config: { capture: { voiceOver: "yes" } } as never },
+      { apiBase: "https://pulse.test" }
+    );
+    expect(payload.capture.voiceOver).toBe(false);
+  });
+
+  it("is independent of capture.video in the payload; the widget gates on both", () => {
+    const payload = buildBootstrapPayload(
+      { ...row, config: { capture: { video: false, voiceOver: true } } },
+      { apiBase: "https://pulse.test" }
+    );
+    expect(payload.capture).toMatchObject({ video: false, voiceOver: true });
+  });
+});

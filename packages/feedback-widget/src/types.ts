@@ -160,6 +160,8 @@ export interface BootstrapPayload {
     captureTab: boolean
     elementPick: boolean
     video: boolean
+    /** Microphone voice-over on recordings (PULSE-400); false means no getUserMedia path exists. */
+    voiceOver: boolean
     console: boolean
     sentry: boolean
     replay: { enabled: boolean; bufferSeconds: number; maskAllInputs: boolean }

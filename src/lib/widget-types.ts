@@ -39,6 +39,8 @@ export type WidgetCaptureConfig = {
   captureTab?: boolean
   elementPick?: boolean
   video?: boolean
+  /** Microphone voice-over on recordings (PULSE-400). Defaults false: a higher consent bar than a screenshot. */
+  voiceOver?: boolean
   console?: boolean
   sentry?: boolean
   replay?: {
@@ -57,6 +59,7 @@ export type WidgetBootstrapPayload = {
     captureTab: boolean
     elementPick: boolean
     video: boolean
+    voiceOver: boolean
     console: boolean
     sentry: boolean
     replay: { enabled: boolean; bufferSeconds: number; maskAllInputs: boolean }

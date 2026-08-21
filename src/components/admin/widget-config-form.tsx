@@ -38,6 +38,11 @@ const CAPTURE_TOGGLES: Array<{ key: CaptureToggleKey; label: string; hint: strin
   { key: "captureTab", label: "Capture tab", hint: "Native tab capture (getDisplayMedia)" },
   { key: "elementPick", label: "Element pick", hint: "Click an element to attach its selector + markup" },
   { key: "video", label: "Video", hint: "Short screen recording" },
+  {
+    key: "voiceOver",
+    label: "Voice-over",
+    hint: "Let reporters narrate a recording with their microphone (opt-in, per recording)",
+  },
   { key: "console", label: "Console errors", hint: "Attach recent console.error / warn entries" },
   { key: "sentry", label: "Sentry context", hint: "Link the reporter's Sentry replay / trace when present" },
 ];
@@ -50,6 +55,7 @@ function captureFromConfig(config: WidgetUIConfig): Record<CaptureToggleKey, boo
     captureTab: c.captureTab ?? d.captureTab,
     elementPick: c.elementPick ?? d.elementPick,
     video: c.video ?? d.video,
+    voiceOver: c.voiceOver ?? d.voiceOver,
     console: c.console ?? d.console,
     sentry: c.sentry ?? d.sentry,
   };

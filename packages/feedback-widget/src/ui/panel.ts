@@ -1,5 +1,6 @@
 import type { WidgetState, SubmitResult, WidgetPick } from '../types'
 import { CROSS_ORIGIN_NOTICE } from '../screenshot'
+import { micIcon } from './mic-icon'
 
 /**
  * The panel and trigger hide for the recording, but a compact control bar
@@ -16,6 +17,14 @@ export const RECORDING_NOTICE =
  */
 export const BAR_IN_RECORDING_NOTICE =
   'You shared this tab, so the recording bar is visible in your recording — a page cannot leave itself out of its own capture.'
+
+/**
+ * Shown next to the voice-over toggle, BEFORE it is clicked (PULSE-400). The
+ * microphone prompt must never be the first time a reporter learns that their
+ * voice is part of the attachment.
+ */
+export const VOICE_OVER_NOTICE =
+  'Your microphone is recorded into the video. Your browser will ask for permission, and you can mute at any time from the recording bar.'
 
 export interface PanelFormData {
   title: string
@@ -36,6 +45,8 @@ export class FeedbackPanel {
   private videoDurationMs = 0
   private videoError: string | null = null
   private videoNotice: string | null = null
+  private voiceOver = false
+  private voiceOverNote: string | null = null
   private uploadPercent: number | null = null
   private picks: WidgetPick[] = []
   private paused = false
@@ -59,6 +70,12 @@ export class FeedbackPanel {
       allowCaptureTab?: boolean
       /** capture.video AND getDisplayMedia support; hides the record button when false (PULSE-339). */
       allowVideo?: boolean
+      /**
+       * capture.voiceOver AND getUserMedia support (PULSE-400). False means no
+       * voice-over option is rendered and no microphone code path can be
+       * reached from the panel at all.
+       */
+      allowVoiceOver?: boolean
       onSubmit: (data: PanelFormData) => Promise<SubmitResult>
       onClose: () => void
       onAnnotate: () => void
@@ -67,6 +84,8 @@ export class FeedbackPanel {
       onCaptureTab: () => void
       onRecordVideo: () => void
       onRemoveVideo: () => void
+      /** Fires on the opt-in click; the mic prompt hangs off this activation. */
+      onToggleVoiceOver?: () => void
       onPickElement: () => void
       onEditPick: (id: string) => void
       onDeletePick: (id: string) => void
@@ -228,6 +247,10 @@ export class FeedbackPanel {
       this.bodyEl.appendChild(this.renderScreenshotPreview())
     } else if (this.config.allowScreenshot !== false) {
       this.bodyEl.appendChild(this.renderAddScreenshotButtons())
+    }
+
+    if (this.config.allowVoiceOver) {
+      this.bodyEl.appendChild(this.renderVoiceOverOption())
     }
 
     if (this.config.allowVideo || this.videoBlob) {
@@ -548,6 +571,54 @@ export class FeedbackPanel {
     return this.videoBlob ? this.renderVideoPreview() : this.renderRecordButton()
   }
 
+  /**
+   * Sits ABOVE the record control, and stays there while a recording is
+   * attached so Re-record is governed by the same choice. Its copy is what
+   * makes the microphone prompt expected rather than a surprise.
+   */
+  private renderVoiceOverOption(): HTMLElement {
+    const container = document.createElement('div')
+    container.className = 'pulse-voiceover'
+
+    const btn = document.createElement('button')
+    // Shares the "add a capture" chrome; the voiceover rule only adds what differs.
+    btn.className = 'pulse-add-screenshot pulse-voiceover__toggle'
+    btn.type = 'button'
+    btn.setAttribute('aria-pressed', this.voiceOver ? 'true' : 'false')
+
+    const { svg } = micIcon()
+    btn.appendChild(svg)
+
+    const label = document.createElement('span')
+    label.className = 'pulse-voiceover__label'
+    label.textContent = 'Record with voice-over'
+    btn.appendChild(label)
+
+    const state = document.createElement('span')
+    state.className = 'pulse-voiceover__state'
+    state.textContent = this.voiceOver ? 'On' : 'Off'
+    btn.appendChild(state)
+
+    // getUserMedia wants the activation from this click: nothing awaited first.
+    btn.addEventListener('click', () => this.config.onToggleVoiceOver?.())
+    container.appendChild(btn)
+
+    const note = document.createElement('div')
+    note.className = 'pulse-capture-note'
+    note.textContent = VOICE_OVER_NOTICE
+    container.appendChild(note)
+
+    if (this.voiceOverNote) {
+      const problem = document.createElement('div')
+      problem.className = 'pulse-capture-note pulse-capture-note--error'
+      problem.setAttribute('role', 'status')
+      problem.textContent = this.voiceOverNote
+      container.appendChild(problem)
+    }
+
+    return container
+  }
+
   private renderVideoPreview(): HTMLElement {
     const container = document.createElement('div')
     container.className = 'pulse-screenshot pulse-video'
@@ -681,6 +752,25 @@ export class FeedbackPanel {
   /** Sits under the finished recording; only rendered once there is one. */
   setVideoNotice(message: string | null): void {
     this.videoNotice = message
+    if (this.state === 'open') this.renderForm()
+  }
+
+  /**
+   * Voice-over is armed only once the widget has a granted microphone; the
+   * panel never assumes the click succeeded (PULSE-400).
+   */
+  setVoiceOver(on: boolean): void {
+    this.voiceOver = on
+    if (this.state === 'open') this.renderForm()
+  }
+
+  isVoiceOverOn(): boolean {
+    return this.voiceOver
+  }
+
+  /** Denied, missing or broken microphone. Never an error state — a note. */
+  setVoiceOverNote(message: string | null): void {
+    this.voiceOverNote = message
     if (this.state === 'open') this.renderForm()
   }
 
@@ -844,6 +934,10 @@ export class FeedbackPanel {
       this.screenshotUrl = null
     }
     this.videoError = null
+    // The opt-in does not survive a submitted report: the next reporter on the
+    // same page must choose the microphone again, deliberately.
+    this.voiceOver = false
+    this.voiceOverNote = null
     this.uploadPercent = null
     this.setVideo(null)
   }
