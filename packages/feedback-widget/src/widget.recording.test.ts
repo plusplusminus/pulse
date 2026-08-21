@@ -140,6 +140,11 @@ function click(selector: string): void {
   ;(el as HTMLButtonElement).click()
 }
 
+/** PULSE-402: a finished recording is a chip; its preview is one click in. */
+function openVideo(): void {
+  click('.pulse-chip__open--video')
+}
+
 function pressEscape(): void {
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
 }
@@ -250,6 +255,8 @@ describe('stop keeps, discard drops', () => {
     click('.pulse-recbar__btn--stop')
     await flush()
 
+    openVideo()
+
     expect(q('.pulse-video__player')).toBeTruthy()
     expect(q('.pulse-recbar')).toBeNull()
     expect(q('.pulse-panel')!.classList.contains('pulse-panel--visible')).toBe(true)
@@ -286,6 +293,8 @@ describe('stop keeps, discard drops', () => {
     pressEscape()
     await flush()
 
+    openVideo()
+
     expect(q('.pulse-video__player')).toBeTruthy()
     expect(q('.pulse-recbar')).toBeNull()
   })
@@ -297,6 +306,8 @@ describe('stop keeps, discard drops', () => {
     await vi.advanceTimersByTimeAsync(MAX_RECORDING_MS + 250)
     await flush()
 
+    openVideo()
+
     expect(q('.pulse-video__player')).toBeTruthy()
     expect(q('.pulse-recbar')).toBeNull()
   })
@@ -306,6 +317,8 @@ describe('stop keeps, discard drops', () => {
 
     track.end()
     await flush()
+
+    openVideo()
 
     expect(q('.pulse-video__player')).toBeTruthy()
     expect(q('.pulse-recbar')).toBeNull()
@@ -325,6 +338,7 @@ describe('when this tab is the shared surface', () => {
     click('.pulse-recbar__btn--stop')
     await flush()
 
+    openVideo()
     expect(shadow.textContent).toContain(BAR_IN_RECORDING_NOTICE)
   })
 
@@ -359,7 +373,8 @@ describe('when this tab is the shared surface', () => {
     click('.pulse-recbar__btn--stop')
     await flush()
 
-    click('.pulse-screenshot__btn--danger')
+    // PULSE-402: removal moved onto the chip.
+    click('.pulse-chip__remove')
     await flush()
 
     expect(shadow.textContent).not.toContain(BAR_IN_RECORDING_NOTICE)

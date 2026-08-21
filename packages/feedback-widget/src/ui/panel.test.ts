@@ -1,8 +1,13 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest'
 import { BAR_IN_RECORDING_NOTICE, FeedbackPanel, VOICE_OVER_NOTICE } from './panel'
-import { ENGINE_LOAD_ERROR } from '../screenshot'
+import { CROSS_ORIGIN_NOTICE, ENGINE_LOAD_ERROR } from '../screenshot'
 import type { WidgetPick } from '../types'
+
+/** PULSE-402: a finished recording is a chip; its preview is one click in. */
+function openVideo(): void {
+  ;(shadow.querySelector('.pulse-chip__open--video') as HTMLButtonElement).click()
+}
 
 function pick(id: string, name: string, comment: string, intent: WidgetPick['intent'] = 'fix'): WidgetPick {
   return {
@@ -25,6 +30,7 @@ let config: {
   onPickElement: Mock<() => void>
   onTogglePause: Mock<() => void>
   onCaptureTab: Mock<() => void>
+  onCaptureScreenshot: Mock<() => void>
   onRecordVideo: Mock<() => void>
   onRemoveVideo: Mock<() => void>
   onToggleVoiceOver: Mock<() => void>
@@ -48,7 +54,6 @@ function makePanel(
     onClose: vi.fn(),
     onAnnotate: vi.fn(),
     onRetakeScreenshot: vi.fn(),
-    onCaptureScreenshot: vi.fn(),
     ...config,
   })
 }
@@ -62,6 +67,7 @@ beforeEach(() => {
     onPickElement: vi.fn<() => void>(),
     onTogglePause: vi.fn<() => void>(),
     onCaptureTab: vi.fn<() => void>(),
+    onCaptureScreenshot: vi.fn<() => void>(),
     onRecordVideo: vi.fn<() => void>(),
     onRemoveVideo: vi.fn<() => void>(),
     onToggleVoiceOver: vi.fn<() => void>(),
@@ -69,11 +75,40 @@ beforeEach(() => {
 })
 
 describe('picks list', () => {
+  // PULSE-402: picks collapse to one chip; the list is what the chip opens.
+  const openPicks = () => (shadow.querySelector('.pulse-chip__open--picks') as HTMLButtonElement).click()
+
+  it('collapses to a single chip that counts them and opens the list', () => {
+    const panel = makePanel()
+    panel.setState('open')
+    expect(shadow.querySelector('.pulse-chip__open--picks')).toBeNull()
+
+    panel.setPicks([pick('a', 'button "Save"', '')])
+    expect(shadow.querySelector('.pulse-chip__open--picks span')?.textContent).toBe('1 pick')
+    expect(shadow.querySelector('.pulse-picks__list')).toBeNull()
+
+    panel.setPicks([pick('a', 'button "Save"', ''), pick('b', 'nav', '')])
+    expect(shadow.querySelector('.pulse-chip__open--picks span')?.textContent).toBe('2 picks')
+
+    openPicks()
+    expect(shadow.querySelectorAll('.pulse-picks__row')).toHaveLength(2)
+  })
+
+  // A single control dropping every pick at once would be destructive with no
+  // undo, so the chip only opens — removal stays per pick, inside the list.
+  it('offers no bulk remove on the picks chip', () => {
+    const panel = makePanel()
+    panel.setState('open')
+    panel.setPicks([pick('a', 'button "Save"', ''), pick('b', 'nav', '')])
+    expect(shadow.querySelector('.pulse-chip__open--picks')!.closest('.pulse-chip')!.querySelector('.pulse-chip__remove')).toBeNull()
+  })
+
   it('renders a row per pick with name, intent badge, truncated comment and edit/delete', () => {
     const panel = makePanel()
     panel.setState('open')
     const long = 'x'.repeat(120)
     panel.setPicks([pick('a', 'button "Save"', long), pick('b', '3 elements: a, b+1 more', 'short', 'question')])
+    openPicks()
 
     const rows = shadow.querySelectorAll('.pulse-picks__row')
     expect(rows).toHaveLength(2)
@@ -89,6 +124,7 @@ describe('picks list', () => {
     const panel = makePanel()
     panel.setState('open')
     panel.setPicks([pick('a', 'button "Save"', 'c')])
+    openPicks()
 
     const row = shadow.querySelector('.pulse-picks__row')!
     ;(row.querySelector('.pulse-picks__action--edit') as HTMLButtonElement).click()
@@ -97,12 +133,14 @@ describe('picks list', () => {
     expect(config.onDeletePick).toHaveBeenCalledWith('a')
   })
 
-  it('labels the pick button "Pick another element" once picks exist', () => {
+  // PULSE-402: the pick control is a fixed cell in the attach row now, so its
+  // label no longer counts picks — it is a mode, and the row must not reflow.
+  it('keeps one steady Element control in the attach row whether or not picks exist', () => {
     const panel = makePanel()
     panel.setState('open')
-    expect(shadow.querySelector('.pulse-pick-btn span')?.textContent).toBe('Pick element')
+    expect(shadow.querySelector('.pulse-pick-btn span')?.textContent).toBe('Element')
     panel.setPicks([pick('a', 'button "Save"', '')])
-    expect(shadow.querySelector('.pulse-pick-btn span')?.textContent).toBe('Pick another element')
+    expect(shadow.querySelector('.pulse-pick-btn span')?.textContent).toBe('Element')
     ;(shadow.querySelector('.pulse-pick-btn') as HTMLButtonElement).click()
     expect(config.onPickElement).toHaveBeenCalled()
   })
@@ -112,6 +150,121 @@ describe('picks list', () => {
     panel.setState('open')
     panel.setPicks([pick('a', 'button "Save"', '')])
     expect(shadow.querySelector('.pulse-picks')).toBeNull()
+    expect(shadow.querySelector('.pulse-pick-btn')).toBeNull()
+  })
+})
+
+// PULSE-402/399: the row's composition follows the site's capture gates and
+// nothing else, so evidence arriving can never make Record slide under a
+// pointer that was aiming at Screenshot.
+describe('attachment chips (PULSE-402)', () => {
+  const chipLabels = () =>
+    Array.from(shadow.querySelectorAll('.pulse-attached__row .pulse-chip__open span')).map((e) => e.textContent)
+
+  beforeEach(() => {
+    URL.createObjectURL = vi.fn(() => 'blob:pulse/0')
+    URL.revokeObjectURL = vi.fn()
+  })
+
+  it('shows nothing at all until something is attached', () => {
+    const panel = makePanel(true, { allowScreenshot: true, allowVideo: true })
+    panel.setState('open')
+    expect(shadow.querySelector('.pulse-attached')).toBeNull()
+  })
+
+  it('names each attachment in one row, the recording by its length and weight', () => {
+    const panel = makePanel(true, { allowScreenshot: true, allowVideo: true })
+    panel.setState('open')
+    panel.setScreenshot(new Blob(['png'], { type: 'image/png' }))
+    panel.setVideo(new Blob(['x'.repeat(2048)], { type: 'video/webm' }), 12_000)
+    panel.setPicks([pick('a', 'button "Save"', ''), pick('b', 'nav', '')])
+
+    expect(chipLabels()).toEqual(['Screenshot', '0:12 · 2 KB', '2 picks'])
+  })
+
+  it('stays collapsed by default, so evidence never pushes Submit off screen', () => {
+    const panel = makePanel(true, { allowScreenshot: true, allowVideo: true })
+    panel.setState('open')
+    panel.setScreenshot(new Blob(['png'], { type: 'image/png' }))
+    panel.setVideo(new Blob(['x'], { type: 'video/webm' }), 12_000)
+
+    expect(shadow.querySelector('.pulse-screenshot__img')).toBeNull()
+    expect(shadow.querySelector('.pulse-video__player')).toBeNull()
+  })
+
+  it('opens one preview at a time — a second chip closes the first', () => {
+    const panel = makePanel(true, { allowScreenshot: true, allowVideo: true })
+    panel.setState('open')
+    panel.setScreenshot(new Blob(['png'], { type: 'image/png' }))
+    panel.setVideo(new Blob(['x'], { type: 'video/webm' }), 12_000)
+
+    ;(shadow.querySelector('.pulse-chip__open--shot') as HTMLButtonElement).click()
+    expect(shadow.querySelector('.pulse-screenshot__img')).not.toBeNull()
+    expect(shadow.querySelector('.pulse-chip__open--shot')!.getAttribute('aria-expanded')).toBe('true')
+
+    openVideo()
+    expect(shadow.querySelector('.pulse-screenshot__img')).toBeNull()
+    expect(shadow.querySelector('.pulse-video__player')).not.toBeNull()
+    expect(shadow.querySelector('.pulse-chip__open--shot')!.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('closes again on a second click of the same chip', () => {
+    const panel = makePanel(true, { allowScreenshot: true })
+    panel.setState('open')
+    panel.setScreenshot(new Blob(['png'], { type: 'image/png' }))
+
+    ;(shadow.querySelector('.pulse-chip__open--shot') as HTMLButtonElement).click()
+    ;(shadow.querySelector('.pulse-chip__open--shot') as HTMLButtonElement).click()
+    expect(shadow.querySelector('.pulse-screenshot__img')).toBeNull()
+  })
+
+  it('the screenshot chip removes it and frees the blob URL behind it', () => {
+    const panel = makePanel(true, { allowScreenshot: true })
+    panel.setState('open')
+    panel.setScreenshot(new Blob(['png'], { type: 'image/png' }))
+    ;(shadow.querySelector('.pulse-chip__open--shot') as HTMLButtonElement).click()
+
+    ;(shadow.querySelector('.pulse-chip__remove[aria-label="Remove screenshot"]') as HTMLButtonElement).click()
+
+    expect(panel.getScreenshot()).toBeNull()
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:pulse/0')
+    expect(shadow.querySelector('.pulse-attached')).toBeNull()
+    expect(shadow.querySelector('.pulse-screenshot__img')).toBeNull()
+  })
+})
+
+describe('attach row layout', () => {
+  const rowShape = () =>
+    Array.from(shadow.querySelectorAll('.pulse-attach__row > *'))
+      .map((el) => el.className)
+      .join('|')
+
+  it('is identical before and after a screenshot, a video and picks arrive', () => {
+    URL.createObjectURL = vi.fn(() => 'blob:pulse/0')
+    URL.revokeObjectURL = vi.fn()
+    const panel = makePanel(true, { allowScreenshot: true, allowCaptureTab: true, allowVideo: true })
+    panel.setState('open')
+    const before = rowShape()
+
+    panel.setScreenshot(new Blob(['png'], { type: 'image/png' }))
+    panel.setVideo(new Blob(['x'.repeat(2048)], { type: 'video/webm' }), 12_000)
+    panel.setPicks([pick('a', 'button "Save"', ''), pick('b', 'nav', '')])
+
+    expect(shadow.querySelectorAll('.pulse-attached__row .pulse-chip')).toHaveLength(3)
+    expect(rowShape()).toBe(before)
+  })
+
+  it('survives an error and a voice-over note without reshuffling', () => {
+    const panel = makePanel(true, { allowScreenshot: true, allowVideo: true, allowVoiceOver: true })
+    panel.setState('open')
+    const before = rowShape()
+
+    panel.setCaptureError('Screenshot capture timed out')
+    panel.setVideoError('Recording failed')
+    panel.setVoiceOverNote('No microphone was available')
+
+    expect(shadow.querySelectorAll('.pulse-attach .pulse-capture-note').length).toBe(3)
+    expect(rowShape()).toBe(before)
   })
 })
 
@@ -142,39 +295,75 @@ describe('pause toggle', () => {
 })
 
 describe('capture controls', () => {
-  const labels = () =>
-    Array.from(shadow.querySelectorAll('.pulse-add-screenshot span')).map((el) => el.textContent)
+  /** Opens a split button's popover the way a pointer or Enter would. */
+  const openOptions = (label: string) => {
+    const caret = shadow.querySelector(`.pulse-caret[aria-label="${label}"]`) as HTMLButtonElement
+    caret.click()
+    return caret
+  }
+  const optionLabels = () =>
+    Array.from(shadow.querySelectorAll('.pulse-pop__name')).map((el) => el.textContent)
+  const attachLabels = () =>
+    Array.from(shadow.querySelectorAll('.pulse-attach__btn span')).map((el) => el.textContent)
 
-  it('shows Capture tab beside the screenshot button only when allowed', () => {
+  it('offers one Screenshot action in the row and its modes under the caret', () => {
     const panel = makePanel(false, { allowScreenshot: true, allowCaptureTab: true })
     panel.setState('open')
-    expect(labels()).toEqual(['Add screenshot', 'Capture tab'])
+    expect(attachLabels()).toEqual(['Screenshot'])
+    expect(optionLabels()).toEqual([])
+    openOptions('Screenshot options')
+    expect(optionLabels()).toEqual(['This viewport', 'Capture tab'])
   })
 
   it('hides Capture tab where the browser or the site does not allow it', () => {
     const panel = makePanel(false, { allowScreenshot: true, allowCaptureTab: false })
     panel.setState('open')
-    expect(labels()).toEqual(['Add screenshot'])
+    openOptions('Screenshot options')
+    // Absent, never a disabled control advertising a feature the site turned off.
+    expect(optionLabels()).toEqual(['This viewport'])
+    expect(shadow.querySelector('.pulse-pop__item[disabled]')).toBeNull()
   })
 
   it('routes the Capture tab click straight through, with nothing awaited first', () => {
     const panel = makePanel(false, { allowScreenshot: true, allowCaptureTab: true })
     panel.setState('open')
-    const tabBtn = Array.from(shadow.querySelectorAll('.pulse-add-screenshot')).find(
-      (b) => b.querySelector('span')?.textContent === 'Capture tab'
+    openOptions('Screenshot options')
+    const tabItem = Array.from(shadow.querySelectorAll('.pulse-pop__item')).find(
+      (b) => b.querySelector('.pulse-pop__name')?.textContent === 'Capture tab'
     ) as HTMLButtonElement
-    tabBtn.click()
+    tabItem.click()
     expect(config.onCaptureTab).toHaveBeenCalledTimes(1)
   })
 
-  it('shows a capture error and always shows the cross-origin notice', () => {
+  it('takes a viewport screenshot from the row untouched, and from the popover', () => {
+    const panel = makePanel(false, { allowScreenshot: true, allowCaptureTab: true })
+    panel.setState('open')
+    ;(shadow.querySelector('.pulse-attach__btn--shot') as HTMLButtonElement).click()
+    expect(config.onCaptureScreenshot).toHaveBeenCalledTimes(1)
+
+    openOptions('Screenshot options')
+    ;(shadow.querySelector('.pulse-pop__item') as HTMLButtonElement).click()
+    expect(config.onCaptureScreenshot).toHaveBeenCalledTimes(2)
+  })
+
+  it('carries the cross-origin notice inside the popover, where it is relevant', () => {
+    const panel = makePanel(false, { allowScreenshot: true })
+    panel.setState('open')
+    expect(shadow.textContent).not.toContain(CROSS_ORIGIN_NOTICE)
+    openOptions('Screenshot options')
+    expect(
+      Array.from(shadow.querySelectorAll('.pulse-pop__note')).map((n) => n.textContent)
+    ).toContain(CROSS_ORIGIN_NOTICE)
+  })
+
+  it('keeps a capture error in the panel, never behind a caret', () => {
     const panel = makePanel(false, { allowScreenshot: true })
     panel.setState('open')
     expect(shadow.querySelector('.pulse-capture-note--error')).toBeNull()
     panel.setCaptureError('Screenshot capture timed out')
-    const error = shadow.querySelector('.pulse-capture-note--error')
+    const error = shadow.querySelector('.pulse-attach .pulse-capture-note--error')
     expect(error?.textContent).toBe('Screenshot capture timed out')
-    expect(shadow.querySelectorAll('.pulse-capture-note').length).toBe(2)
+    expect(error?.getAttribute('role')).toBe('alert')
     panel.setCaptureError(null)
     expect(shadow.querySelector('.pulse-capture-note--error')).toBeNull()
   })
@@ -187,7 +376,15 @@ describe('capture controls', () => {
     expect(shadow.querySelector('.pulse-capture-note--error')?.textContent).toBe(ENGINE_LOAD_ERROR)
     // The panel is back in its resting state, not spinning, and the fallback
     // that needs no engine is still one click away.
-    expect(labels()).toContain('Capture tab')
+    openOptions('Screenshot options')
+    expect(optionLabels()).toContain('Capture tab')
+  })
+
+  it('hides the screenshot control and its caret when the site turns screenshots off', () => {
+    const panel = makePanel(false, { allowScreenshot: false })
+    panel.setState('open')
+    expect(shadow.querySelector('.pulse-attach__btn--shot')).toBeNull()
+    expect(shadow.querySelector('.pulse-caret[aria-label="Screenshot options"]')).toBeNull()
   })
 })
 
@@ -220,7 +417,7 @@ describe('video recording controls (PULSE-338)', () => {
     shadow = document.getElementById('host2')!.attachShadow({ mode: 'open' })
     const on = makePanel(false, { allowVideo: true })
     on.setState('open')
-    expect(recordBtn()?.querySelector('span')?.textContent).toBe('Record video')
+    expect(recordBtn()?.querySelector('span')?.textContent).toBe('Record')
   })
 
   it('routes the record click straight through, with nothing awaited first', () => {
@@ -233,7 +430,9 @@ describe('video recording controls (PULSE-338)', () => {
   it('points at the in-page control bar and says only Discard drops a recording', () => {
     const panel = makePanel(false, { allowVideo: true })
     panel.setState('open')
-    const notes = Array.from(shadow.querySelectorAll('.pulse-capture-note')).map((n) => n.textContent)
+    // PULSE-402: the copy moved under the caret it describes.
+    ;(shadow.querySelector('.pulse-caret[aria-label="Recording options"]') as HTMLButtonElement).click()
+    const notes = Array.from(shadow.querySelectorAll('.pulse-pop__note')).map((n) => n.textContent)
     expect(notes.some((n) => n?.includes('control bar stays on the page'))).toBe(true)
     // Esc stops and KEEPS now (PULSE-399); the copy must not send anyone to
     // the browser's Stop sharing bar as if it were the only way out.
@@ -251,25 +450,29 @@ describe('video recording controls (PULSE-338)', () => {
     expect(shadow.textContent).not.toContain(BAR_IN_RECORDING_NOTICE)
 
     panel.setVideo(clip(2048), 5_000)
+    openVideo()
     expect(shadow.textContent).toContain(BAR_IN_RECORDING_NOTICE)
 
     panel.setVideo(null)
     expect(shadow.textContent).not.toContain(BAR_IN_RECORDING_NOTICE)
   })
 
-  it('swaps the button for a <video controls> preview with duration and size', () => {
+  it('adds a <video controls> preview with duration and size, leaving the row alone', () => {
     stubObjectUrls()
     const panel = makePanel(false, { allowVideo: true })
     panel.setState('open')
 
     panel.setVideo(clip(2048), 83_000)
+    // The readout rides on the chip; the player is one click in.
+    expect(shadow.querySelector('.pulse-video__meta')?.textContent).toBe('1:23 · 2 KB')
+    openVideo()
 
     const video = shadow.querySelector('.pulse-video__player') as HTMLVideoElement
     expect(video).not.toBeNull()
     expect(video.controls).toBe(true)
     expect(video.src).toBe('blob:pulse/0')
-    expect(shadow.querySelector('.pulse-video__meta')?.textContent).toBe('1:23 · 2 KB')
-    expect(recordBtn()).toBeNull()
+    // PULSE-402/399: attaching evidence must not move the attach row.
+    expect(recordBtn()).not.toBeNull()
     expect(panel.getVideo()?.size).toBe(2048)
   })
 
@@ -278,6 +481,7 @@ describe('video recording controls (PULSE-338)', () => {
     const panel = makePanel(false, { allowVideo: true })
     panel.setState('open')
     panel.setVideo(clip(1024), 5_000)
+    openVideo()
 
     const rerecord = Array.from(shadow.querySelectorAll('.pulse-screenshot__btn')).find(
       (b) => b.textContent === 'Re-record'
@@ -291,18 +495,19 @@ describe('video recording controls (PULSE-338)', () => {
     expect(shadow.querySelector('.pulse-video__meta')?.textContent).toBe('0:09 · 4 KB')
   })
 
-  it('remove clears the recording and brings the record button back', () => {
+  it('the chip removes the recording and frees the blob behind it', () => {
     const urls = stubObjectUrls()
     const panel = makePanel(false, { allowVideo: true })
     panel.setState('open')
     panel.setVideo(clip(), 3_000)
 
-    const remove = shadow.querySelector('.pulse-screenshot__btn--danger') as HTMLButtonElement
+    const remove = shadow.querySelector('.pulse-chip__remove[aria-label="Remove recording"]') as HTMLButtonElement
     remove.click()
     expect(config.onRemoveVideo).toHaveBeenCalledTimes(1)
 
     // The widget owns the blob, so the panel only clears on setVideo(null).
     panel.setVideo(null)
+    expect(shadow.querySelector('.pulse-chip__open--video')).toBeNull()
     expect(shadow.querySelector('.pulse-video__player')).toBeNull()
     expect(recordBtn()).not.toBeNull()
     expect(panel.getVideo()).toBeNull()
@@ -314,6 +519,7 @@ describe('video recording controls (PULSE-338)', () => {
     const panel = makePanel(false, { allowVideo: false })
     panel.setState('open')
     panel.setVideo(clip(), 1_000)
+    openVideo()
     expect(shadow.querySelector('.pulse-video__player')).not.toBeNull()
   })
 
@@ -359,14 +565,18 @@ describe('video recording controls (PULSE-338)', () => {
 })
 
 describe('voice-over opt-in (PULSE-400)', () => {
-  const toggle = () =>
-    shadow.querySelector('.pulse-voiceover__toggle') as HTMLButtonElement | null
+  // PULSE-402: voice-over is a setting on Record, not a peer of it, so the
+  // toggle now lives under Record's caret rather than in its own panel block.
+  const openRecordOptions = () =>
+    (shadow.querySelector('.pulse-caret[aria-label="Recording options"]') as HTMLButtonElement).click()
+  const toggle = () => shadow.querySelector('.pulse-voiceover__toggle') as HTMLButtonElement | null
   const noteTexts = () =>
-    Array.from(shadow.querySelectorAll('.pulse-capture-note')).map((n) => n.textContent ?? '')
+    Array.from(shadow.querySelectorAll('.pulse-capture-note, .pulse-pop__note')).map((n) => n.textContent ?? '')
 
   it('renders nothing when the site does not allow a microphone', () => {
     const panel = makePanel(false, { allowVideo: true, allowVoiceOver: false })
     panel.setState('open')
+    openRecordOptions()
 
     expect(toggle()).toBeNull()
     expect(noteTexts()).not.toContain(VOICE_OVER_NOTICE)
@@ -377,26 +587,28 @@ describe('voice-over opt-in (PULSE-400)', () => {
   it('states that audio is captured before the toggle is ever clicked', () => {
     const panel = makePanel(false, { allowVideo: true, allowVoiceOver: true })
     panel.setState('open')
+    openRecordOptions()
 
     expect(noteTexts()).toContain(VOICE_OVER_NOTICE)
     expect(config.onToggleVoiceOver).not.toHaveBeenCalled()
   })
 
-  it('sits above the record control, so the choice comes before the picker', () => {
+  it('sits under Record, above the notice, so the choice comes before the picker', () => {
     const panel = makePanel(false, { allowVideo: true, allowVoiceOver: true })
     panel.setState('open')
+    // Nothing about the microphone is in the panel body any more.
+    expect(shadow.querySelector('.pulse-body .pulse-voiceover__toggle')).toBeNull()
 
-    const body = shadow.querySelector('.pulse-body')!
-    const order = Array.from(body.children).map((c) => c.className)
-    const voiceOver = order.findIndex((c) => c.includes('pulse-voiceover'))
-    const record = order.findIndex((c) => c.includes('pulse-screenshot-options'))
-    expect(voiceOver).toBeGreaterThanOrEqual(0)
-    expect(voiceOver).toBeLessThan(record)
+    openRecordOptions()
+    const rows = Array.from(shadow.querySelectorAll('.pulse-pop__list > *')).map((c) => c.className)
+    expect(rows[0]).toContain('pulse-voiceover__toggle')
+    expect(shadow.querySelectorAll('.pulse-pop__note')[0]?.textContent).toBe(VOICE_OVER_NOTICE)
   })
 
   it('routes the click straight through — getUserMedia needs that activation', () => {
     const panel = makePanel(false, { allowVideo: true, allowVoiceOver: true })
     panel.setState('open')
+    openRecordOptions()
 
     toggle()!.click()
 
@@ -406,29 +618,33 @@ describe('voice-over opt-in (PULSE-400)', () => {
   it('reflects state in aria-pressed and in a word, never in colour alone', () => {
     const panel = makePanel(false, { allowVideo: true, allowVoiceOver: true })
     panel.setState('open')
+    openRecordOptions()
     expect(toggle()!.getAttribute('aria-pressed')).toBe('false')
     expect(shadow.querySelector('.pulse-voiceover__state')!.textContent).toBe('Off')
 
     panel.setVoiceOver(true)
 
+    // The popover survived the re-render the toggle caused, and focus with it.
     expect(toggle()!.getAttribute('aria-pressed')).toBe('true')
     expect(shadow.querySelector('.pulse-voiceover__state')!.textContent).toBe('On')
+    expect(shadow.activeElement).toBe(toggle())
     expect(panel.isVoiceOverOn()).toBe(true)
   })
 
-  it('shows a microphone problem as a status, not as a form error', () => {
+  it('shows a microphone problem as a status in the panel, not behind the caret', () => {
     const panel = makePanel(false, { allowVideo: true, allowVoiceOver: true })
     panel.setState('open')
 
     panel.setVoiceOverNote('No microphone was found — the recording continues without voice-over.')
 
-    const note = shadow.querySelector('.pulse-voiceover .pulse-capture-note--error')!
+    // A mic that dies mid-recording has to be readable with every popover shut.
+    const note = shadow.querySelector('.pulse-attach .pulse-capture-note--status')!
     expect(note.textContent).toContain('No microphone was found')
     // status, not alert: nothing failed, the recording just has no narration.
     expect(note.getAttribute('role')).toBe('status')
   })
 
-  it('keeps the option visible next to a finished recording, so Re-record obeys it', () => {
+  it('keeps the option available next to a finished recording, so Re-record obeys it', () => {
     URL.createObjectURL = vi.fn(() => 'blob:pulse/0')
     URL.revokeObjectURL = vi.fn()
     const panel = makePanel(false, { allowVideo: true, allowVoiceOver: true })
@@ -436,6 +652,8 @@ describe('voice-over opt-in (PULSE-400)', () => {
     panel.setVoiceOver(true)
     panel.setVideo(new Blob(['x'], { type: 'video/webm;codecs=vp9,opus' }), 1_000)
 
+    openVideo()
+    openRecordOptions()
     expect(toggle()!.getAttribute('aria-pressed')).toBe('true')
     expect(shadow.querySelector('.pulse-video__player')).not.toBeNull()
   })

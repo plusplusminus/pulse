@@ -1,6 +1,8 @@
 import type { WidgetState, SubmitResult, WidgetPick } from '../types'
 import { CROSS_ORIGIN_NOTICE } from '../screenshot'
 import { micIcon } from './mic-icon'
+import { icon, ICONS } from './icon'
+import { Popover, type PopoverConfig } from './popover'
 
 /**
  * The panel and trigger hide for the recording, but a compact control bar
@@ -49,10 +51,17 @@ export class FeedbackPanel {
   private voiceOverNote: string | null = null
   private uploadPercent: number | null = null
   private picks: WidgetPick[] = []
+  /** Which attachment chip is showing its preview; one at a time, or none. */
+  private expanded: 'shot' | 'video' | 'picks' | null = null
   private paused = false
   private captureError: string | null = null
   private pauseBtn: HTMLButtonElement | null = null
   private user: { email?: string; name?: string }
+  /** Rebuilt with the form; only ever one of them is open. */
+  private popovers: Popover[] = []
+  private openPopoverId: string | null = null
+  /** Selector re-focused inside a popover that survived a re-render. */
+  private reopenFocus: string | null = null
 
   private bodyEl!: HTMLElement
   private panelEl!: HTMLElement
@@ -131,16 +140,7 @@ export class FeedbackPanel {
     closeBtn.setAttribute('aria-label', 'Close')
     closeBtn.addEventListener('click', () => this.config.onClose())
 
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-    svg.setAttribute('viewBox', '0 0 16 16')
-    svg.setAttribute('fill', 'none')
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-    path.setAttribute('d', 'M4 4l8 8M12 4l-8 8')
-    path.setAttribute('stroke', 'currentColor')
-    path.setAttribute('stroke-width', '1.5')
-    path.setAttribute('stroke-linecap', 'round')
-    svg.appendChild(path)
-    closeBtn.appendChild(svg)
+    closeBtn.appendChild(icon('M4 4l8 8M12 4l-8 8', { width: '1.5' }))
     header.appendChild(closeBtn)
 
     return header
@@ -155,16 +155,8 @@ export class FeedbackPanel {
     const btn = document.createElement('button')
     btn.className = 'pulse-header__pause'
     btn.type = 'button'
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-    svg.setAttribute('viewBox', '0 0 16 16')
-    svg.setAttribute('fill', 'none')
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-    path.setAttribute('stroke', 'currentColor')
-    path.setAttribute('stroke-width', '1.5')
-    path.setAttribute('stroke-linecap', 'round')
-    path.setAttribute('stroke-linejoin', 'round')
-    svg.appendChild(path)
-    btn.appendChild(svg)
+    // The `d` is filled in by applyPauseState, which owns the play/pause swap.
+    btn.appendChild(icon('', { width: '1.5' }))
     btn.addEventListener('click', () => this.config.onTogglePause())
     this.pauseBtn = btn
     this.applyPauseState()
@@ -204,23 +196,7 @@ export class FeedbackPanel {
     const info = document.createElement('div')
     info.className = 'pulse-footer__info'
 
-    const infoSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-    infoSvg.setAttribute('viewBox', '0 0 16 16')
-    infoSvg.setAttribute('fill', 'none')
-    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
-    circle.setAttribute('cx', '8')
-    circle.setAttribute('cy', '8')
-    circle.setAttribute('r', '6.5')
-    circle.setAttribute('stroke', 'currentColor')
-    circle.setAttribute('stroke-width', '1.5')
-    infoSvg.appendChild(circle)
-    const infoLine = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-    infoLine.setAttribute('d', 'M8 7v4M8 5.5v0')
-    infoLine.setAttribute('stroke', 'currentColor')
-    infoLine.setAttribute('stroke-width', '1.5')
-    infoLine.setAttribute('stroke-linecap', 'round')
-    infoSvg.appendChild(infoLine)
-    info.appendChild(infoSvg)
+    info.appendChild(icon(['M8 1.5a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13Z', 'M8 7v4M8 5.5v0'], { width: '1.5' }))
 
     const infoText = document.createElement('span')
     infoText.textContent = 'Page info collected automatically'
@@ -231,6 +207,13 @@ export class FeedbackPanel {
   }
 
   private renderForm(): void {
+    // An open popover has to survive the state change that caused this render —
+    // toggling voice-over must not yank the surface it lives in out from under
+    // the pointer. Remember it, rebuild, put it back.
+    const reopen = this.openPopoverId
+    const refocus = this.reopenFocus
+    this.reopenFocus = null
+    this.disposePopovers()
     this.bodyEl.textContent = ''
 
     const typeSelector = this.renderTypeSelector()
@@ -239,23 +222,10 @@ export class FeedbackPanel {
     this.bodyEl.appendChild(this.createField('Title', 'title', 'input', true, 'Brief summary of your feedback'))
     this.bodyEl.appendChild(this.createField('Description', 'description', 'textarea', false, 'Additional details...'))
 
-    if (this.config.allowElementPick) {
-      this.bodyEl.appendChild(this.renderPicksSection())
-    }
+    this.bodyEl.appendChild(this.renderAttachRow())
 
-    if (this.screenshotBlob) {
-      this.bodyEl.appendChild(this.renderScreenshotPreview())
-    } else if (this.config.allowScreenshot !== false) {
-      this.bodyEl.appendChild(this.renderAddScreenshotButtons())
-    }
-
-    if (this.config.allowVoiceOver) {
-      this.bodyEl.appendChild(this.renderVoiceOverOption())
-    }
-
-    if (this.config.allowVideo || this.videoBlob) {
-      this.bodyEl.appendChild(this.renderVideoSection())
-    }
+    const attachments = this.renderAttachments()
+    if (attachments) this.bodyEl.appendChild(attachments)
 
     this.bodyEl.appendChild(this.createField('Email', 'email', 'input', true, 'your@email.com'))
 
@@ -265,6 +235,371 @@ export class FeedbackPanel {
     submitBtn.textContent = 'Submit Feedback'
     submitBtn.addEventListener('click', () => this.handleSubmit())
     this.bodyEl.appendChild(submitBtn)
+
+    if (reopen) {
+      const popover = this.popovers.find((p) => p.id === reopen)
+      popover?.open({ focus: false })
+      if (refocus) popover?.query<HTMLElement>(refocus)?.focus()
+    }
+  }
+
+  // -- attach row (PULSE-402) --------------------------------------------------
+
+  /**
+   * One row: the three things a reporter can attach, each owning its own
+   * options. The row's composition depends only on the site's `capture.*`
+   * gates — never on what is already attached — so it cannot reshuffle under
+   * the pointer while a capture is in flight (PULSE-399's rule).
+   */
+  private renderAttachRow(): HTMLElement {
+    const section = document.createElement('div')
+    section.className = 'pulse-attach'
+
+    // Above the row, like every other label in this panel — inline it would
+    // eat the width the three controls need to stay on one line.
+    const caption = document.createElement('div')
+    caption.className = 'pulse-attach__caption'
+    caption.textContent = 'Attach'
+    section.appendChild(caption)
+
+    const row = document.createElement('div')
+    row.className = 'pulse-attach__row'
+    row.setAttribute('role', 'group')
+    row.setAttribute('aria-label', 'Attach')
+
+    if (this.config.allowElementPick) {
+      row.appendChild(
+        this.attachButton('Element', icon(ICONS.element), () => this.config.onPickElement(), 'element', 'pulse-pick-btn')
+      )
+    }
+
+    if (this.config.allowScreenshot !== false) {
+      row.appendChild(
+        this.attachSplit(
+          'Screenshot',
+          icon(ICONS.screenshot),
+          () => this.config.onCaptureScreenshot(),
+          'shot',
+          { id: 'shot', label: 'Screenshot options', build: (close) => this.buildScreenshotOptions(close) }
+        )
+      )
+    }
+
+    if (this.config.allowVideo) {
+      row.appendChild(
+        this.attachSplit(
+          'Record',
+          icon(ICONS.record, { filled: [1] }),
+          () => this.config.onRecordVideo(),
+          'record',
+          { id: 'record', label: 'Recording options', build: () => this.buildRecordOptions() },
+          'pulse-record-btn'
+        )
+      )
+    }
+
+    section.appendChild(row)
+
+    // Alerts stay in the panel, never behind a caret: a capture that failed
+    // has to be readable without first reopening the popover that started it.
+    for (const [message, role] of [
+      [this.captureError, 'alert'],
+      [this.videoError, 'alert'],
+      [this.voiceOverNote, 'status'],
+    ] as const) {
+      if (!message) continue
+      const note = document.createElement('div')
+      note.className = `pulse-capture-note pulse-capture-note--${role === 'alert' ? 'error' : 'status'}`
+      note.setAttribute('role', role)
+      note.textContent = message
+      section.appendChild(note)
+    }
+
+    return section
+  }
+
+  // -- attachments as chips (PULSE-402) ----------------------------------------
+
+  /**
+   * Evidence collapses to one row of chips. Each opens its own preview and
+   * nothing else's, so attaching a video no longer pushes Submit off screen
+   * at exactly the moment the reporter wants it.
+   */
+  private renderAttachments(): HTMLElement | null {
+    const hasPicks = this.config.allowElementPick && this.picks.length > 0
+    if (!this.screenshotBlob && !this.videoBlob && !hasPicks) return null
+
+    const section = document.createElement('div')
+    section.className = 'pulse-attached'
+
+    const row = document.createElement('div')
+    row.className = 'pulse-attached__row'
+    row.setAttribute('role', 'group')
+    row.setAttribute('aria-label', 'Attached')
+
+    if (this.screenshotBlob) {
+      row.appendChild(
+        this.chip('shot', 'Screenshot', icon(ICONS.screenshot), 'Remove screenshot', () => this.setScreenshot(null))
+      )
+    }
+
+    if (this.videoBlob) {
+      const meta = `${FeedbackPanel.formatDuration(this.videoDurationMs)} · ${FeedbackPanel.formatBytes(
+        this.videoBlob.size
+      )}`
+      row.appendChild(
+        this.chip(
+          'video',
+          meta,
+          icon(ICONS.play, { filled: [0] }),
+          'Remove recording',
+          () => this.config.onRemoveVideo(),
+          'pulse-video__meta'
+        )
+      )
+    }
+
+    if (hasPicks) {
+      // No cross on this one: a single control that dropped every pick at once
+      // would be a destructive aggregate with no undo. Removal stays per pick,
+      // inside the list the chip opens.
+      row.appendChild(
+        this.chip('picks', `${this.picks.length} pick${this.picks.length === 1 ? '' : 's'}`, icon(ICONS.element))
+      )
+    }
+
+    section.appendChild(row)
+
+    if (this.expanded === 'shot' && this.screenshotBlob) section.appendChild(this.renderScreenshotPreview())
+    if (this.expanded === 'video' && this.videoBlob) section.appendChild(this.renderVideoPreview())
+    if (this.expanded === 'picks' && hasPicks) section.appendChild(this.renderPicksSection())
+
+    return section
+  }
+
+  private chip(
+    key: 'shot' | 'video' | 'picks',
+    label: string,
+    glyph: SVGSVGElement,
+    removeLabel?: string,
+    onRemove?: () => void,
+    labelClass?: string
+  ): HTMLElement {
+    const wrap = document.createElement('div')
+    wrap.className = `pulse-chip${this.expanded === key ? ' pulse-chip--open' : ''}`
+
+    const open = document.createElement('button')
+    open.type = 'button'
+    open.className = `pulse-chip__open pulse-chip__open--${key}`
+    open.setAttribute('aria-expanded', String(this.expanded === key))
+    open.appendChild(glyph)
+    const text = document.createElement('span')
+    if (labelClass) text.className = labelClass
+    text.textContent = label
+    open.appendChild(text)
+    open.addEventListener('click', () => {
+      this.expanded = this.expanded === key ? null : key
+      this.renderForm()
+    })
+    wrap.appendChild(open)
+
+    if (onRemove && removeLabel) {
+      const remove = document.createElement('button')
+      remove.type = 'button'
+      remove.className = 'pulse-chip__remove'
+      remove.setAttribute('aria-label', removeLabel)
+      remove.title = removeLabel
+      remove.appendChild(icon(ICONS.close))
+      remove.addEventListener('click', () => {
+        // Collapsing first keeps a stale preview from flashing between the
+        // removal and the re-render that drops the chip.
+        if (this.expanded === key) this.expanded = null
+        onRemove()
+      })
+      wrap.appendChild(remove)
+    }
+
+    return wrap
+  }
+
+  private attachButton(
+    label: string,
+    glyph: SVGSVGElement,
+    onClick: () => void,
+    variant: string,
+    /** Kept from the stacked layout so the behaviour hooks stay stable. */
+    alias?: string
+  ): HTMLButtonElement {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = `pulse-attach__btn pulse-attach__btn--${variant}${alias ? ` ${alias}` : ''}`
+    btn.appendChild(glyph)
+    const text = document.createElement('span')
+    text.textContent = label
+    btn.appendChild(text)
+    // Screenshot and Record must reach getDisplayMedia with the user
+    // activation intact, so nothing may be awaited before the callback.
+    btn.addEventListener('click', () => onClick())
+    return btn
+  }
+
+  /**
+   * Action plus caret. The main half does the sensible default so the row
+   * works untouched; the caret is always drawn, never hover-revealed, because
+   * a first-time reporter has to see that options exist at all.
+   */
+  private attachSplit(
+    label: string,
+    glyph: SVGSVGElement,
+    onClick: () => void,
+    variant: string,
+    config: PopoverConfig,
+    alias?: string
+  ): HTMLElement {
+    const wrap = document.createElement('div')
+    wrap.className = 'pulse-attach__split'
+    wrap.appendChild(this.attachButton(label, glyph, onClick, variant, alias))
+
+    const popover = new Popover(this.shadowRoot, {
+      ...config,
+      onOpen: () => {
+        this.closePopovers()
+        this.openPopoverId = config.id
+      },
+      onClose: () => {
+        if (this.openPopoverId === config.id) this.openPopoverId = null
+      },
+    })
+    this.popovers.push(popover)
+    wrap.appendChild(popover.caret)
+    return wrap
+  }
+
+  private buildScreenshotOptions(close: () => void): HTMLElement {
+    const list = document.createElement('div')
+    list.className = 'pulse-pop__list'
+
+    list.appendChild(
+      this.popItem('This viewport', 'The page as you see it now', icon(ICONS.screenshot), () => {
+        close()
+        this.config.onCaptureScreenshot()
+      })
+    )
+
+    // Gated off means gone: never a disabled control advertising a feature the
+    // site turned off, and never one the browser cannot honour (PULSE-339).
+    if (this.config.allowCaptureTab) {
+      list.appendChild(
+        this.popItem('Capture tab', 'Pixel-exact; asks permission', icon(ICONS.tab), () => {
+          close()
+          this.config.onCaptureTab()
+        })
+      )
+    }
+
+    list.appendChild(this.popNote(CROSS_ORIGIN_NOTICE))
+    return list
+  }
+
+  /**
+   * Voice-over is not a second recording feature — it is how you record, so
+   * it lives under Record rather than beside it (PULSE-402). The consent copy
+   * comes with it: the microphone prompt must never be the first time a
+   * reporter learns their voice is part of the attachment (PULSE-400).
+   */
+  private buildRecordOptions(): HTMLElement {
+    const list = document.createElement('div')
+    list.className = 'pulse-pop__list'
+
+    if (this.config.allowVoiceOver) {
+      list.appendChild(this.renderVoiceOverToggle())
+      list.appendChild(this.popNote(VOICE_OVER_NOTICE))
+    }
+
+    list.appendChild(this.popNote(RECORDING_NOTICE))
+    return list
+  }
+
+  private renderVoiceOverToggle(): HTMLButtonElement {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'pulse-pop__item pulse-pop__toggle pulse-voiceover__toggle'
+    btn.setAttribute('aria-pressed', this.voiceOver ? 'true' : 'false')
+
+    const { svg } = micIcon()
+    btn.appendChild(svg)
+
+    const text = document.createElement('span')
+    text.className = 'pulse-pop__text'
+    const name = document.createElement('span')
+    name.className = 'pulse-pop__name pulse-voiceover__label'
+    name.textContent = 'Voice-over'
+    text.appendChild(name)
+    const hint = document.createElement('span')
+    hint.className = 'pulse-pop__hint'
+    hint.textContent = 'Narrate the recording as you go'
+    text.appendChild(hint)
+    btn.appendChild(text)
+
+    // The word, not just the border: "On" / "Off" is the state, colour a hint.
+    const state = document.createElement('span')
+    state.className = 'pulse-voiceover__state'
+    state.textContent = this.voiceOver ? 'On' : 'Off'
+    btn.appendChild(state)
+
+    // getUserMedia wants the activation from this click: nothing awaited
+    // first, and the popover deliberately stays open so the answer lands in
+    // view rather than behind a caret the reporter has to reopen.
+    btn.addEventListener('click', () => this.config.onToggleVoiceOver?.())
+    return btn
+  }
+
+  private popItem(label: string, hint: string, glyph: SVGSVGElement, onClick: () => void): HTMLButtonElement {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'pulse-pop__item'
+    btn.appendChild(glyph)
+
+    const text = document.createElement('span')
+    text.className = 'pulse-pop__text'
+    const name = document.createElement('span')
+    name.className = 'pulse-pop__name'
+    name.textContent = label
+    text.appendChild(name)
+    const sub = document.createElement('span')
+    sub.className = 'pulse-pop__hint'
+    sub.textContent = hint
+    text.appendChild(sub)
+    btn.appendChild(text)
+
+    btn.addEventListener('click', () => onClick())
+    return btn
+  }
+
+  private popNote(text: string): HTMLElement {
+    const note = document.createElement('div')
+    note.className = 'pulse-pop__note'
+    note.textContent = text
+    return note
+  }
+
+  /**
+   * True when it actually closed one. Escape consults this first and stops
+   * there, so backing out of the options never also closes the panel.
+   */
+  closePopovers(restoreFocus = false): boolean {
+    let closed = false
+    for (const popover of this.popovers) {
+      if (!popover.isOpen) continue
+      popover.close(restoreFocus)
+      closed = true
+    }
+    return closed
+  }
+
+  private disposePopovers(): void {
+    this.closePopovers()
+    this.popovers = []
   }
 
   private renderTypeSelector(): HTMLElement {
@@ -283,17 +618,7 @@ export class FeedbackPanel {
       btn.type = 'button'
       btn.setAttribute('aria-pressed', String(this.formData.type === t.value))
 
-      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-      svg.setAttribute('viewBox', '0 0 16 16')
-      svg.setAttribute('fill', 'none')
-      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-      path.setAttribute('d', t.icon)
-      path.setAttribute('stroke', 'currentColor')
-      path.setAttribute('stroke-width', '1.5')
-      path.setAttribute('stroke-linecap', 'round')
-      path.setAttribute('stroke-linejoin', 'round')
-      svg.appendChild(path)
-      btn.appendChild(svg)
+      btn.appendChild(icon(t.icon, { width: '1.5' }))
 
       const label = document.createElement('span')
       label.textContent = t.label
@@ -394,31 +719,10 @@ export class FeedbackPanel {
     const section = document.createElement('div')
     section.className = 'pulse-picks'
 
-    if (this.picks.length > 0) {
-      const list = document.createElement('ol')
-      list.className = 'pulse-picks__list'
-      this.picks.forEach((pick) => list.appendChild(this.renderPickRow(pick)))
-      section.appendChild(list)
-    }
-
-    const btn = document.createElement('button')
-    btn.className = 'pulse-add-screenshot pulse-pick-btn'
-    btn.type = 'button'
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-    svg.setAttribute('viewBox', '0 0 16 16')
-    svg.setAttribute('fill', 'none')
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-    path.setAttribute('d', 'M3 3l10 4.5-4.5 1.5L7 13.5 3 3Z')
-    path.setAttribute('stroke', 'currentColor')
-    path.setAttribute('stroke-width', '1.25')
-    path.setAttribute('stroke-linejoin', 'round')
-    svg.appendChild(path)
-    btn.appendChild(svg)
-    const label = document.createElement('span')
-    label.textContent = this.picks.length > 0 ? 'Pick another element' : 'Pick element'
-    btn.appendChild(label)
-    btn.addEventListener('click', () => this.config.onPickElement())
-    section.appendChild(btn)
+    const list = document.createElement('ol')
+    list.className = 'pulse-picks__list'
+    this.picks.forEach((pick) => list.appendChild(this.renderPickRow(pick)))
+    section.appendChild(list)
 
     return section
   }
@@ -439,14 +743,10 @@ export class FeedbackPanel {
     intent.textContent = pick.intent
     main.appendChild(intent)
     main.appendChild(
-      this.renderPickAction('Edit', `Edit ${pick.name}`, 'M11.5 2.5a1.5 1.5 0 0 1 2 2L6 12l-3 1 1-3 7.5-7.5Z', () =>
-        this.config.onEditPick(pick.id)
-      )
+      this.renderPickAction('Edit', `Edit ${pick.name}`, ICONS.edit, () => this.config.onEditPick(pick.id))
     )
     main.appendChild(
-      this.renderPickAction('Delete', `Remove ${pick.name}`, 'M3 4.5h10M6.5 4.5V3h3v1.5M5 4.5l.5 8h5l.5-8', () =>
-        this.config.onDeletePick(pick.id)
-      )
+      this.renderPickAction('Delete', `Remove ${pick.name}`, ICONS.trash, () => this.config.onDeletePick(pick.id))
     )
     row.appendChild(main)
 
@@ -460,96 +760,15 @@ export class FeedbackPanel {
     return row
   }
 
-  private renderPickAction(label: string, ariaLabel: string, icon: string, onClick: () => void): HTMLElement {
+  private renderPickAction(label: string, ariaLabel: string, glyph: string, onClick: () => void): HTMLElement {
     const btn = document.createElement('button')
     btn.type = 'button'
     btn.className = `pulse-picks__action pulse-picks__action--${label.toLowerCase()}`
     btn.setAttribute('aria-label', ariaLabel)
     btn.title = label
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-    svg.setAttribute('viewBox', '0 0 16 16')
-    svg.setAttribute('fill', 'none')
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-    path.setAttribute('d', icon)
-    path.setAttribute('stroke', 'currentColor')
-    path.setAttribute('stroke-width', '1.25')
-    path.setAttribute('stroke-linecap', 'round')
-    path.setAttribute('stroke-linejoin', 'round')
-    svg.appendChild(path)
-    btn.appendChild(svg)
+    btn.appendChild(icon(glyph))
     btn.addEventListener('click', () => onClick())
     return btn
-  }
-
-  private renderAddScreenshotButtons(): HTMLElement {
-    const container = document.createElement('div')
-    container.className = 'pulse-screenshot-options'
-    container.style.flexDirection = 'column'
-
-    const btn = document.createElement('button')
-    btn.className = 'pulse-add-screenshot'
-    btn.type = 'button'
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-    svg.setAttribute('viewBox', '0 0 16 16')
-    svg.setAttribute('fill', 'none')
-    const frame = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-    frame.setAttribute('d', 'M2 3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3Z')
-    frame.setAttribute('stroke', 'currentColor')
-    frame.setAttribute('stroke-width', '1.25')
-    svg.appendChild(frame)
-    const bar = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-    bar.setAttribute('d', 'M2 5h12')
-    bar.setAttribute('stroke', 'currentColor')
-    bar.setAttribute('stroke-width', '1.25')
-    svg.appendChild(bar)
-    btn.appendChild(svg)
-    const label = document.createElement('span')
-    label.textContent = 'Add screenshot'
-    btn.appendChild(label)
-    btn.addEventListener('click', () => this.config.onCaptureScreenshot())
-
-    const row = document.createElement('div')
-    row.className = 'pulse-screenshot-row'
-    row.appendChild(btn)
-
-    if (this.config.allowCaptureTab) {
-      const tabBtn = document.createElement('button')
-      tabBtn.className = 'pulse-add-screenshot'
-      tabBtn.type = 'button'
-      const tabSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-      tabSvg.setAttribute('viewBox', '0 0 16 16')
-      tabSvg.setAttribute('fill', 'none')
-      const tabPath = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-      tabPath.setAttribute('d', 'M2 4a1 1 0 0 1 1-1h4l1.5 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4Z')
-      tabPath.setAttribute('stroke', 'currentColor')
-      tabPath.setAttribute('stroke-width', '1.25')
-      tabPath.setAttribute('stroke-linejoin', 'round')
-      tabSvg.appendChild(tabPath)
-      tabBtn.appendChild(tabSvg)
-      const tabLabel = document.createElement('span')
-      tabLabel.textContent = 'Capture tab'
-      tabBtn.appendChild(tabLabel)
-      // Must reach getDisplayMedia with the user activation intact: no await here.
-      tabBtn.addEventListener('click', () => this.config.onCaptureTab())
-      row.appendChild(tabBtn)
-    }
-
-    container.appendChild(row)
-
-    if (this.captureError) {
-      const error = document.createElement('div')
-      error.className = 'pulse-capture-note pulse-capture-note--error'
-      error.setAttribute('role', 'alert')
-      error.textContent = this.captureError
-      container.appendChild(error)
-    }
-
-    const note = document.createElement('div')
-    note.className = 'pulse-capture-note'
-    note.textContent = CROSS_ORIGIN_NOTICE
-    container.appendChild(note)
-
-    return container
   }
 
   // -- video (PULSE-338) -------------------------------------------------------
@@ -567,58 +786,6 @@ export class FeedbackPanel {
     return `${(kb / 1024).toFixed(1)} MB`
   }
 
-  private renderVideoSection(): HTMLElement {
-    return this.videoBlob ? this.renderVideoPreview() : this.renderRecordButton()
-  }
-
-  /**
-   * Sits ABOVE the record control, and stays there while a recording is
-   * attached so Re-record is governed by the same choice. Its copy is what
-   * makes the microphone prompt expected rather than a surprise.
-   */
-  private renderVoiceOverOption(): HTMLElement {
-    const container = document.createElement('div')
-    container.className = 'pulse-voiceover'
-
-    const btn = document.createElement('button')
-    // Shares the "add a capture" chrome; the voiceover rule only adds what differs.
-    btn.className = 'pulse-add-screenshot pulse-voiceover__toggle'
-    btn.type = 'button'
-    btn.setAttribute('aria-pressed', this.voiceOver ? 'true' : 'false')
-
-    const { svg } = micIcon()
-    btn.appendChild(svg)
-
-    const label = document.createElement('span')
-    label.className = 'pulse-voiceover__label'
-    label.textContent = 'Record with voice-over'
-    btn.appendChild(label)
-
-    const state = document.createElement('span')
-    state.className = 'pulse-voiceover__state'
-    state.textContent = this.voiceOver ? 'On' : 'Off'
-    btn.appendChild(state)
-
-    // getUserMedia wants the activation from this click: nothing awaited first.
-    btn.addEventListener('click', () => this.config.onToggleVoiceOver?.())
-    container.appendChild(btn)
-
-    const note = document.createElement('div')
-    note.className = 'pulse-capture-note'
-    note.textContent = VOICE_OVER_NOTICE
-    container.appendChild(note)
-
-    if (this.voiceOverNote) {
-      const problem = document.createElement('div')
-      problem.className = 'pulse-capture-note pulse-capture-note--error'
-      problem.setAttribute('role', 'status')
-      problem.textContent = this.voiceOverNote
-      container.appendChild(problem)
-    }
-
-    return container
-  }
-
   private renderVideoPreview(): HTMLElement {
     const container = document.createElement('div')
     container.className = 'pulse-screenshot pulse-video'
@@ -632,15 +799,6 @@ export class FeedbackPanel {
       video.preload = 'metadata'
       container.appendChild(video)
     }
-
-    // The live readout is impossible while the widget is hidden, so the numbers
-    // land here the moment the panel comes back (PULSE-338).
-    const meta = document.createElement('div')
-    meta.className = 'pulse-video__meta'
-    meta.textContent = `${FeedbackPanel.formatDuration(this.videoDurationMs)} · ${FeedbackPanel.formatBytes(
-      this.videoBlob?.size ?? 0
-    )}`
-    container.appendChild(meta)
 
     const actions = document.createElement('div')
     actions.className = 'pulse-screenshot__actions'
@@ -672,62 +830,9 @@ export class FeedbackPanel {
     return container
   }
 
-  private renderRecordButton(): HTMLElement {
-    const container = document.createElement('div')
-    container.className = 'pulse-screenshot-options'
-    container.style.flexDirection = 'column'
-
-    const btn = document.createElement('button')
-    btn.className = 'pulse-add-screenshot pulse-record-btn'
-    btn.type = 'button'
-
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-    svg.setAttribute('viewBox', '0 0 16 16')
-    svg.setAttribute('fill', 'none')
-    const ring = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
-    ring.setAttribute('cx', '8')
-    ring.setAttribute('cy', '8')
-    ring.setAttribute('r', '6.25')
-    ring.setAttribute('stroke', 'currentColor')
-    ring.setAttribute('stroke-width', '1.25')
-    svg.appendChild(ring)
-    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
-    dot.setAttribute('cx', '8')
-    dot.setAttribute('cy', '8')
-    dot.setAttribute('r', '3')
-    dot.setAttribute('fill', 'currentColor')
-    svg.appendChild(dot)
-    btn.appendChild(svg)
-
-    const label = document.createElement('span')
-    label.textContent = 'Record video'
-    btn.appendChild(label)
-    // Must reach getDisplayMedia with the user activation intact: no await here.
-    btn.addEventListener('click', () => this.config.onRecordVideo())
-
-    const row = document.createElement('div')
-    row.className = 'pulse-screenshot-row'
-    row.appendChild(btn)
-    container.appendChild(row)
-
-    if (this.videoError) {
-      const error = document.createElement('div')
-      error.className = 'pulse-capture-note pulse-capture-note--error'
-      error.setAttribute('role', 'alert')
-      error.textContent = this.videoError
-      container.appendChild(error)
-    }
-
-    const note = document.createElement('div')
-    note.className = 'pulse-capture-note'
-    note.textContent = RECORDING_NOTICE
-    container.appendChild(note)
-
-    return container
-  }
-
   /** Blob and its measured duration move together; null clears both. */
   setVideo(blob: Blob | null, durationMs = 0): void {
+    if (!blob && this.expanded === 'video') this.expanded = null
     if (this.videoUrl) {
       URL.revokeObjectURL(this.videoUrl)
       this.videoUrl = null
@@ -761,6 +866,7 @@ export class FeedbackPanel {
    */
   setVoiceOver(on: boolean): void {
     this.voiceOver = on
+    this.reopenFocus = '.pulse-voiceover__toggle'
     if (this.state === 'open') this.renderForm()
   }
 
@@ -771,6 +877,7 @@ export class FeedbackPanel {
   /** Denied, missing or broken microphone. Never an error state — a note. */
   setVoiceOverNote(message: string | null): void {
     this.voiceOverNote = message
+    this.reopenFocus = '.pulse-voiceover__toggle'
     if (this.state === 'open') this.renderForm()
   }
 
@@ -838,17 +945,7 @@ export class FeedbackPanel {
 
     const iconWrap = document.createElement('div')
     iconWrap.className = 'pulse-status__icon pulse-status__icon--success'
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-    svg.setAttribute('viewBox', '0 0 24 24')
-    svg.setAttribute('fill', 'none')
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-    path.setAttribute('d', 'M5 13l4 4L19 7')
-    path.setAttribute('stroke', 'currentColor')
-    path.setAttribute('stroke-width', '2')
-    path.setAttribute('stroke-linecap', 'round')
-    path.setAttribute('stroke-linejoin', 'round')
-    svg.appendChild(path)
-    iconWrap.appendChild(svg)
+    iconWrap.appendChild(icon('M3.3 8.7l2.7 2.6L12.7 4.7', { width: '1.35' }))
     status.appendChild(iconWrap)
 
     const title = document.createElement('div')
@@ -891,16 +988,7 @@ export class FeedbackPanel {
 
     const iconWrap = document.createElement('div')
     iconWrap.className = 'pulse-status__icon pulse-status__icon--error'
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-    svg.setAttribute('viewBox', '0 0 24 24')
-    svg.setAttribute('fill', 'none')
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-    path.setAttribute('d', 'M6 6l12 12M18 6L6 18')
-    path.setAttribute('stroke', 'currentColor')
-    path.setAttribute('stroke-width', '2')
-    path.setAttribute('stroke-linecap', 'round')
-    svg.appendChild(path)
-    iconWrap.appendChild(svg)
+    iconWrap.appendChild(icon('M4 4l8 8M12 4l-8 8', { width: '1.35' }))
     status.appendChild(iconWrap)
 
     const title = document.createElement('div')
@@ -928,6 +1016,7 @@ export class FeedbackPanel {
   private resetForm(): void {
     this.formData = { title: '', type: 'bug', email: this.user.email ?? '' }
     this.picks = []
+    this.expanded = null
     this.screenshotBlob = null
     if (this.screenshotUrl) {
       URL.revokeObjectURL(this.screenshotUrl)
@@ -992,10 +1081,14 @@ export class FeedbackPanel {
   }
 
   hide(): void {
+    // Popover surfaces float in the shadow root, not inside the panel, so
+    // hiding the panel would otherwise leave one stranded on the page.
+    this.closePopovers()
     this.panelEl.classList.remove('pulse-panel--visible')
   }
 
   destroy(): void {
+    this.disposePopovers()
     if (this.screenshotUrl) {
       URL.revokeObjectURL(this.screenshotUrl)
     }
@@ -1038,11 +1131,13 @@ export class FeedbackPanel {
   }
 
   setPicks(picks: WidgetPick[]): void {
+    if (picks.length === 0 && this.expanded === 'picks') this.expanded = null
     this.picks = [...picks]
     if (this.state === 'open') this.renderForm()
   }
 
   setScreenshot(blob: Blob | null): void {
+    if (!blob && this.expanded === 'shot') this.expanded = null
     if (this.screenshotUrl) {
       URL.revokeObjectURL(this.screenshotUrl)
       this.screenshotUrl = null

@@ -177,14 +177,26 @@ function click(selector: string): void {
 }
 
 function notes(): string[] {
-  return Array.from(shadow.querySelectorAll('.pulse-capture-note')).map(
+  // PULSE-402: consent copy moved under the Record caret it belongs to.
+  return Array.from(shadow.querySelectorAll('.pulse-capture-note, .pulse-pop__note')).map(
     (n) => n.textContent ?? ''
   )
+}
+
+/** Voice-over is a setting on Record, so it is reached through Record's caret. */
+/** PULSE-402: a finished recording is a chip; its preview is one click in. */
+function openVideo(): void {
+  click('.pulse-chip__open--video')
+}
+
+function openRecordOptions(): void {
+  click('.pulse-caret[aria-label="Recording options"]')
 }
 
 /** Open the panel and turn the voice-over option on, the way a reporter does. */
 async function optIn(): Promise<void> {
   click('.pulse-trigger')
+  openRecordOptions()
   click('.pulse-voiceover__toggle')
   await flush()
 }
@@ -233,7 +245,8 @@ describe('capture.voiceOver false', () => {
 
   it('renders no voice-over option at all', () => {
     click('.pulse-trigger')
-    expect(q('.pulse-voiceover')).toBeNull()
+    openRecordOptions()
+    expect(q('.pulse-voiceover__toggle')).toBeNull()
     expect(q('.pulse-record-btn')).not.toBeNull()
   })
 
@@ -270,6 +283,7 @@ describe('the opt-in', () => {
 
   it('says audio is captured BEFORE the prompt can appear', () => {
     click('.pulse-trigger')
+    openRecordOptions()
 
     expect(notes()).toContain(VOICE_OVER_NOTICE)
     expect(VOICE_OVER_NOTICE).toMatch(/microphone is recorded/i)
@@ -279,6 +293,7 @@ describe('the opt-in', () => {
 
   it('is off until the reporter turns it on', () => {
     click('.pulse-trigger')
+    openRecordOptions()
     expect(q('.pulse-voiceover__toggle')!.getAttribute('aria-pressed')).toBe('false')
     expect(q('.pulse-voiceover__state')!.textContent).toBe('Off')
   })
@@ -302,6 +317,7 @@ describe('the opt-in', () => {
     click('.pulse-voiceover__toggle')
     await flush()
 
+    // The popover stayed open across the state change, so the answer is in view.
     expect(q('.pulse-voiceover__toggle')!.getAttribute('aria-pressed')).toBe('false')
     expect(getUserMedia).toHaveBeenCalledTimes(1)
   })
@@ -333,6 +349,7 @@ describe('a microphone that will not open', () => {
     expect(q('.pulse-recbar')).not.toBeNull()
     click('.pulse-recbar__btn--stop')
     await flush()
+    openVideo()
     expect(q('.pulse-video__player')).not.toBeNull()
   })
 
@@ -459,6 +476,7 @@ describe('recording with a voice-over', () => {
 
     expect(micTrack.stop).toHaveBeenCalledTimes(1)
     expect(videoTrack.stop).toHaveBeenCalledTimes(1)
+    openVideo()
     expect(q('.pulse-video__player')).not.toBeNull()
   })
 
@@ -475,6 +493,7 @@ describe('recording with a voice-over', () => {
     await flush()
 
     expect(micTrack.stop).toHaveBeenCalledTimes(1)
+    openVideo()
     expect(q('.pulse-video__player')).not.toBeNull()
   })
 
@@ -489,6 +508,7 @@ describe('recording with a voice-over', () => {
     await flush()
     const calls = getUserMedia.mock.calls.length
 
+    openRecordOptions()
     click('.pulse-voiceover__toggle')
     expect(q('.pulse-voiceover__toggle')!.getAttribute('aria-pressed')).toBe('false')
     // Turning it off is free; turning it back on re-uses the granted permission.

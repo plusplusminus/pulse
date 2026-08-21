@@ -136,7 +136,7 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 14px 16px;
+      padding: 11px 14px;
       border-bottom: 1px solid ${c.border};
     }
 
@@ -177,7 +177,7 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
 
     /* Body */
     .pulse-body {
-      padding: 16px;
+      padding: 14px;
       overflow-y: auto;
       flex: 1;
     }
@@ -186,7 +186,7 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
     .pulse-types {
       display: flex;
       gap: 6px;
-      margin-bottom: 14px;
+      margin-bottom: 10px;
     }
 
     .pulse-type-btn {
@@ -369,16 +369,349 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
       color: ${c.primary};
     }
 
-    /* Screenshot option buttons */
-    .pulse-screenshot-options {
+    /* Attach row (PULSE-402) — one row, options under their own action. */
+    .pulse-attach {
       display: flex;
+      flex-direction: column;
+      gap: 5px;
+      margin-bottom: 12px;
+    }
+
+    /* nowrap is the guarantee, not the hope: the labels ellipsis before the
+       row is ever allowed to become two rows (PULSE-402). */
+    .pulse-attach__row {
+      display: flex;
+      align-items: center;
+      flex-wrap: nowrap;
+      gap: 5px;
+    }
+
+    .pulse-attach__caption {
+      font-size: 12px;
+      font-weight: 500;
+      color: ${c.text};
+    }
+
+    /* Action and caret read as one control; the caret is always drawn. */
+    .pulse-attach__split {
+      display: flex;
+      align-items: stretch;
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
+    .pulse-attach__btn {
+      flex: 1 1 auto;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      height: 30px;
+      padding: 0 6px;
+      border: 1px solid ${c.border};
+      border-radius: 7px;
+      background: transparent;
+      color: ${c.text};
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      white-space: nowrap;
+      cursor: pointer;
+      outline: none;
+      transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+    }
+
+    .pulse-attach__split .pulse-attach__btn {
+      border-top-right-radius: 0;
+      border-bottom-right-radius: 0;
+      border-right: none;
+    }
+
+    .pulse-attach__btn span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .pulse-attach__btn svg {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+      color: ${c.muted};
+    }
+
+    .pulse-attach__btn:hover {
+      background: ${c.inputBg};
+      border-color: ${c.muted}59;
+    }
+
+    .pulse-attach__btn:hover svg,
+    .pulse-attach__btn--record:hover svg {
+      color: inherit;
+    }
+
+    .pulse-attach__btn--record:hover {
+      color: ${c.error};
+      border-color: ${c.error};
+    }
+
+    .pulse-attach__btn:focus-visible,
+    .pulse-caret:focus-visible {
+      border-color: ${c.primary};
+      box-shadow: 0 0 0 2px ${c.primary}33;
+      z-index: 1;
+    }
+
+    .pulse-caret {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      flex-shrink: 0;
+      padding: 0;
+      border: 1px solid ${c.border};
+      border-top-left-radius: 0;
+      border-bottom-left-radius: 0;
+      border-top-right-radius: 7px;
+      border-bottom-right-radius: 7px;
+      background: transparent;
+      color: ${c.muted};
+      cursor: pointer;
+      outline: none;
+      transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+    }
+
+    .pulse-caret svg {
+      width: 12px;
+      height: 12px;
+    }
+
+    .pulse-caret:hover,
+    .pulse-caret[aria-expanded='true'] {
+      background: ${c.inputBg};
+      color: ${c.text};
+      border-color: ${c.muted}59;
+    }
+
+    /* Attachments (PULSE-402) — chips that open one preview, not stacked blocks. */
+    .pulse-attached {
+      display: flex;
+      flex-direction: column;
       gap: 8px;
       margin-bottom: 12px;
     }
 
-    .pulse-screenshot-row {
+    .pulse-attached__row {
       display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .pulse-chip {
+      display: flex;
+      align-items: stretch;
+      max-width: 100%;
+      border: 1px solid ${c.border};
+      border-radius: 6px;
+      background: ${c.inputBg};
+      overflow: hidden;
+    }
+
+    .pulse-chip--open {
+      border-color: ${c.primary};
+    }
+
+    .pulse-chip__open {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      min-width: 0;
+      height: 24px;
+      padding: 0 6px;
+      border: none;
+      background: transparent;
+      color: ${c.text};
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 500;
+      white-space: nowrap;
+      cursor: pointer;
+      outline: none;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .pulse-chip__open span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .pulse-chip__open svg {
+      width: 12px;
+      height: 12px;
+      flex-shrink: 0;
+      color: ${c.muted};
+    }
+
+    .pulse-chip--open .pulse-chip__open svg {
+      color: ${c.primary};
+    }
+
+    .pulse-chip__open:hover,
+    .pulse-chip__remove:hover {
+      background: ${c.border};
+    }
+
+    .pulse-chip__open:focus-visible,
+    .pulse-chip__remove:focus-visible {
+      box-shadow: inset 0 0 0 2px ${c.primary};
+    }
+
+    .pulse-chip__remove {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      flex-shrink: 0;
+      padding: 0;
+      border: none;
+      border-left: 1px solid ${c.border};
+      background: transparent;
+      color: ${c.muted};
+      cursor: pointer;
+      outline: none;
+    }
+
+    .pulse-chip__remove svg {
+      width: 10px;
+      height: 10px;
+    }
+
+    .pulse-chip__remove:hover {
+      color: ${c.error};
+    }
+
+    /* Previews sit inside the attachments block now, so they carry no margin. */
+    .pulse-attached .pulse-screenshot,
+    .pulse-attached .pulse-picks {
+      margin-bottom: 0;
+    }
+
+    /* Popover surface — floats in the shadow root so the panel never reflows. */
+    .pulse-pop {
+      position: fixed;
+      z-index: 2147483647;
+      width: 244px;
+      padding: 4px;
+      background: ${c.bg};
+      border: 1px solid ${c.border};
+      border-radius: 10px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.06), 0 8px 24px -6px rgba(0,0,0,0.18);
+      font-family: inherit;
+    }
+
+    .pulse-pop__list {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .pulse-pop__item {
+      display: flex;
+      align-items: flex-start;
       gap: 8px;
+      width: 100%;
+      padding: 7px 8px;
+      border: none;
+      border-radius: 6px;
+      background: transparent;
+      color: ${c.text};
+      font-family: inherit;
+      text-align: left;
+      cursor: pointer;
+      outline: none;
+      transition: background 0.1s ease;
+    }
+
+    .pulse-pop__item svg {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+      margin-top: 1px;
+      color: ${c.muted};
+    }
+
+    .pulse-pop__item:hover,
+    .pulse-pop__item:focus-visible {
+      background: ${c.inputBg};
+    }
+
+    .pulse-pop__item:focus-visible {
+      box-shadow: inset 0 0 0 1px ${c.primary};
+    }
+
+    .pulse-pop__text {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      min-width: 0;
+    }
+
+    .pulse-pop__name {
+      font-size: 12.5px;
+      font-weight: 500;
+      line-height: 1.3;
+    }
+
+    /* Voice-over lives here now (PULSE-402): a setting on Record, not a peer. */
+    .pulse-pop__toggle {
+      align-items: center;
+    }
+
+    .pulse-pop__toggle svg {
+      margin-top: 0;
+    }
+
+    .pulse-pop__toggle .pulse-pop__text {
+      flex: 1;
+    }
+
+    .pulse-pop__toggle[aria-pressed='true'] svg {
+      color: ${c.primary};
+    }
+
+    .pulse-voiceover__state {
+      flex-shrink: 0;
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: ${c.muted};
+      padding: 2px 6px;
+      border: 1px solid ${c.border};
+      border-radius: 5px;
+    }
+
+    .pulse-pop__toggle[aria-pressed='true'] .pulse-voiceover__state {
+      color: ${c.primary};
+      border-color: ${c.primary};
+    }
+
+    .pulse-pop__hint,
+    .pulse-pop__note {
+      font-size: 11px;
+      line-height: 1.4;
+      color: ${c.muted};
+    }
+
+    .pulse-pop__note {
+      padding: 6px 8px 4px;
+    }
+
+    .pulse-pop__list .pulse-pop__item + .pulse-pop__note {
+      margin-top: 2px;
+      border-top: 1px solid ${c.border};
+      padding-top: 7px;
     }
 
     .pulse-capture-note {
@@ -391,66 +724,8 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
       color: ${c.error};
     }
 
-    /* Voice-over opt-in (PULSE-400). Inherits .pulse-add-screenshot chrome. */
-    .pulse-voiceover {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      margin-bottom: 12px;
-    }
-
-    .pulse-voiceover__toggle {
-      width: 100%;
-      border-style: solid;
-      font-size: 13px;
-    }
-
-    .pulse-voiceover__label {
-      flex: 1;
-      text-align: left;
-    }
-
-    /* The word, not just the border: "On" / "Off" is the state, colour a hint. */
-    .pulse-voiceover__state {
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.03em;
-      text-transform: uppercase;
-    }
-
-    .pulse-voiceover__toggle[aria-pressed='true'] {
-      border-color: ${c.primary};
-      color: ${c.text};
-    }
-
-    .pulse-add-screenshot {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      padding: 10px 8px;
-      border: 1px dashed ${c.border};
-      border-radius: 8px;
-      background: transparent;
+    .pulse-capture-note--status {
       color: ${c.muted};
-      font-family: inherit;
-      font-size: 12px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
-    }
-
-    .pulse-add-screenshot:hover {
-      border-color: ${c.primary};
-      color: ${c.primary};
-      background: ${c.inputBg};
-    }
-
-    .pulse-add-screenshot svg {
-      width: 14px;
-      height: 14px;
-      flex-shrink: 0;
     }
 
     /* Video preview (PULSE-338) */
@@ -461,25 +736,11 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
       background: #000000;
     }
 
-    .pulse-video__meta {
-      padding: 6px 8px;
-      border-top: 1px solid ${c.border};
-      font-size: 11px;
-      font-weight: 500;
-      color: ${c.muted};
-      font-variant-numeric: tabular-nums;
-    }
-
     /* Sits inside the preview card, so it needs the card's padding and a rule
        to separate it from the action row above (PULSE-399). */
     .pulse-video__note {
       padding: 6px 8px;
       border-top: 1px solid ${c.border};
-    }
-
-    .pulse-record-btn:hover {
-      border-color: ${c.error};
-      color: ${c.error};
     }
 
     /* Submit button */
@@ -535,25 +796,30 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
     }
 
     /* Footer */
+    /* One row (PULSE-402): the same two facts, 25px less of the viewport. */
     .pulse-footer {
-      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 7px 14px;
       border-top: 1px solid ${c.border};
-      text-align: center;
     }
 
     .pulse-footer__text {
-      font-size: 11px;
+      font-size: 10.5px;
       color: ${c.muted};
+      flex-shrink: 0;
     }
 
     .pulse-footer__info {
       font-size: 10px;
       color: ${c.muted};
-      margin-top: 4px;
       display: flex;
       align-items: center;
-      justify-content: center;
+      justify-content: flex-end;
       gap: 4px;
+      min-width: 0;
     }
 
     .pulse-footer__info svg {
@@ -1071,10 +1337,6 @@ export function getWidgetStyles(theme: 'light' | 'dark'): string {
       margin-top: 2px;
       color: ${c.muted};
       font-size: 11px;
-    }
-
-    .pulse-pick-btn {
-      width: 100%;
     }
 
     /* Recording bar (PULSE-399) — bottom-left, out of the usual content
