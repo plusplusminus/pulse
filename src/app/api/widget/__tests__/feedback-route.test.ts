@@ -389,3 +389,96 @@ describe("POST /api/widget/feedback (element picks, PULSE-329)", () => {
     expect(inserts).toEqual([]);
   });
 });
+
+// -- Metadata bounds (security) -------------------------------------------
+
+/**
+ * The endpoint is public: the site key ships in the page and Origin is
+ * spoofable outside a browser. url / userAgent / timestamp were bare
+ * z.string() and `custom` an uncapped record, so a caller could push megabytes
+ * into the widget_submissions.metadata JSONB — and on into the Linear issue —
+ * on every request. Oversized input must be rejected, never silently truncated.
+ */
+describe("POST /api/widget/feedback (metadata bounds)", () => {
+  function metaWith(over: Record<string, unknown>) {
+    return payload({ metadata: { ...payload().metadata, ...over } });
+  }
+
+  it("rejects a url over 2048 chars", async () => {
+    authOk(HUB_A, "wk_meta1");
+    const long = `https://customer.example/${"a".repeat(2100)}`;
+    const res = await post(metaWith({ url: long }));
+    expect(res.status).toBe(400);
+    expect(inserts).toHaveLength(0);
+  });
+
+  it("accepts a url exactly at 2048 chars", async () => {
+    authOk(HUB_A, "wk_meta2");
+    const prefix = "https://customer.example/";
+    const url = prefix + "a".repeat(2048 - prefix.length);
+    expect(url).toHaveLength(2048);
+    expect((await post(metaWith({ url }))).status).toBe(201);
+  });
+
+  it("rejects a userAgent over 500 chars", async () => {
+    authOk(HUB_A, "wk_meta3");
+    const res = await post(metaWith({ userAgent: "U".repeat(501) }));
+    expect(res.status).toBe(400);
+    expect(inserts).toHaveLength(0);
+  });
+
+  it("rejects a timestamp over 64 chars", async () => {
+    authOk(HUB_A, "wk_meta4");
+    const res = await post(metaWith({ timestamp: "2026-08-20T12:00:00.000Z".padEnd(65, "0") }));
+    expect(res.status).toBe(400);
+    expect(inserts).toHaveLength(0);
+  });
+
+  it("rejects more than 20 custom keys", async () => {
+    authOk(HUB_A, "wk_meta5");
+    const custom = Object.fromEntries(
+      Array.from({ length: 21 }, (_, i) => [`k${i}`, "v"])
+    );
+    const res = await post(metaWith({ custom }));
+    expect(res.status).toBe(400);
+    expect(inserts).toHaveLength(0);
+  });
+
+  it("accepts exactly 20 custom keys", async () => {
+    authOk(HUB_A, "wk_meta6");
+    const custom = Object.fromEntries(
+      Array.from({ length: 20 }, (_, i) => [`k${i}`, "v"])
+    );
+    expect((await post(metaWith({ custom }))).status).toBe(201);
+  });
+
+  it("rejects a custom value over 500 chars", async () => {
+    authOk(HUB_A, "wk_meta7");
+    const res = await post(metaWith({ custom: { big: "x".repeat(501) } }));
+    expect(res.status).toBe(400);
+    expect(inserts).toHaveLength(0);
+  });
+
+  it("rejects a custom key long enough to be a payload in its own right", async () => {
+    authOk(HUB_A, "wk_meta8");
+    const res = await post(metaWith({ custom: { ["k".repeat(101)]: "v" } }));
+    expect(res.status).toBe(400);
+    expect(inserts).toHaveLength(0);
+  });
+
+  it("rejects rather than truncates: nothing oversized reaches the row", async () => {
+    authOk(HUB_A, "wk_meta9");
+    const res = await post(
+      metaWith({
+        userAgent: "U".repeat(5000),
+        custom: { big: "x".repeat(5000) },
+      })
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "Validation failed"
+    );
+    expect(inserts).toHaveLength(0);
+    expect(mockedCreateIssue).not.toHaveBeenCalled();
+  });
+});
