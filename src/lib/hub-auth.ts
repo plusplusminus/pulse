@@ -101,6 +101,10 @@ export async function getHubMembership(
  * Find the hub a user belongs to, given their user_id or email.
  * Used for post-auth redirect to route clients directly to their hub.
  * Returns the hub slug or null if no active membership found.
+ *
+ * Fallback only — callers should first route by the session's WorkOS org
+ * (resolveHubByWorkosOrgId). A user in multiple hubs gets their most recent
+ * membership here, which may not be the org they authenticated to.
  */
 export async function getHubForUser(
   userId: string,
@@ -112,6 +116,7 @@ export async function getHubForUser(
     .select("hub_id, client_hubs!inner(slug, is_active)")
     .eq("user_id", userId)
     .eq("client_hubs.is_active", true)
+    .order("created_at", { ascending: false })
     .limit(1)
     .single();
 
@@ -128,6 +133,7 @@ export async function getHubForUser(
       .eq("email", email.toLowerCase())
       .is("user_id", null)
       .eq("client_hubs.is_active", true)
+      .order("created_at", { ascending: false })
       .limit(1)
       .single();
 

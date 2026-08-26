@@ -1,13 +1,13 @@
 import { signOut, withAuth } from '@workos-inc/authkit-nextjs'
 import { redirect } from 'next/navigation'
 import { isPPMAdmin } from '@/lib/ppm-admin'
-import { getHubForUser } from '@/lib/hub-auth'
+import { getHubForUser, resolveHubByWorkosOrgId } from '@/lib/hub-auth'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
 import Image from 'next/image'
 
 export default async function Home() {
-  const { user } = await withAuth()
+  const { user, organizationId } = await withAuth()
 
   if (user) {
     // PPM admins go to the admin portal
@@ -15,7 +15,18 @@ export default async function Home() {
       redirect('/admin')
     }
 
-    // Clients go to their hub
+    // Clients go to the hub matching the org their session is authenticated
+    // to. Users in multiple orgs pick one at sign-in; routing by membership
+    // alone can send them to the wrong hub, whose org-mismatch guard then
+    // bounces them to that hub's login (PULSE-406).
+    if (organizationId) {
+      const hub = await resolveHubByWorkosOrgId(organizationId)
+      if (hub) {
+        redirect(`/hub/${hub.slug}`)
+      }
+    }
+
+    // No org on the session (or org has no hub) — fall back to membership
     const hubSlug = await getHubForUser(user.id, user.email)
     if (hubSlug) {
       redirect(`/hub/${hubSlug}`)
