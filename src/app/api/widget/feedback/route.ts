@@ -80,6 +80,23 @@ const MAX_CUSTOM_KEYS = 20;
 const MAX_SUBMITTED_ASSETS = 64;
 
 /**
+ * `error.flatten()` collapses every nested path to its root key, so an
+ * oversized `picks[0].classes` reported only as `{ picks: ["Too big: ..."] }` —
+ * true, and useless for finding the field. Keep the flattened shape for
+ * existing callers and add `issues`, which names the exact path.
+ */
+function validationDetails(error: z.ZodError) {
+  return {
+    ...error.flatten(),
+    issues: error.issues.slice(0, 20).map((issue) => ({
+      path: issue.path.join("."),
+      code: issue.code,
+      message: issue.message,
+    })),
+  };
+}
+
+/**
  * One attachment (PULSE-403). Object keys are minted by POST /api/widget/upload
  * — bytes never come through here. Everything past the shape check (hub
  * ownership, folder-matches-kind, MIME allowlist, size cap, per-kind caps) is
@@ -187,7 +204,7 @@ export async function POST(request: Request) {
     const parsed = feedbackSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
-        { error: "Validation failed", details: parsed.error.flatten() },
+        { error: "Validation failed", details: validationDetails(parsed.error) },
         { status: 400, headers }
       );
     }

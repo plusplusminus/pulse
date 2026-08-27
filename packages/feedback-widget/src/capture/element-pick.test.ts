@@ -4,6 +4,7 @@ import {
   isMeaningfulClass,
   stripClassHash,
   getElementClasses,
+  CLASSES_MAX_CHARS,
   getElementPath,
   getFullElementPath,
   identifyElement,
@@ -65,6 +66,38 @@ describe('getElementClasses', () => {
   it('works on SVG elements (classList, not className string)', () => {
     mount('<svg class="icon large"><path class="stroke"/></svg>')
     expect(getElementClasses(q('svg'))).toBe('icon, large')
+  })
+})
+
+describe('getElementClasses length clamp', () => {
+  it('keeps a real utility-framework class list intact (610 chars, was rejected at 500)', () => {
+    const real = [
+      'inline-flex', 'items-center', 'justify-center', 'gap-[var(--space-8)]',
+      'rounded-pp-sm', 'font-pp-sans', 'font-pp-medium', 'whitespace-nowrap',
+      'transition-colors', 'text-[length:var(--font-size-body-sm)]',
+      'leading-[var(--font-line-height-body-sm)]',
+      'tracking-[var(--font-letter-spacing-body-sm)]',
+      'disabled:pointer-events-none', 'disabled:opacity-40',
+      'focus-visible:outline-[length:var(--focus-ring-width)]',
+      'focus-visible:outline-offset-[var(--focus-ring-offset)]',
+      'focus-visible:outline-pp-focus-default', 'bg-pp-action-contrast',
+      'text-pp-action-on-contrast', 'hover:bg-pp-action-contrast-hover',
+      'px-[var(--space-24)]', 'py-[var(--space-16)]',
+    ]
+    const el = document.createElement('a')
+    el.className = real.join(' ')
+    const out = getElementClasses(el)
+    expect(out.length).toBeGreaterThan(500)
+    expect(out.split(', ')).toHaveLength(real.length)
+  })
+
+  it('clamps a pathological list to the server cap without splitting a class', () => {
+    const el = document.createElement('div')
+    el.className = Array.from({ length: 400 }, (_, i) => `utility-class-name-${i}`).join(' ')
+    const out = getElementClasses(el)
+    expect(out.length).toBeLessThanOrEqual(CLASSES_MAX_CHARS)
+    // every emitted token is a whole class, never a truncated fragment
+    for (const c of out.split(', ')) expect(c).toMatch(/^utility-class-name-\d+$/)
   })
 })
 

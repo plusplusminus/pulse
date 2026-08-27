@@ -318,6 +318,10 @@ function renderPick(
   }
 
   if (detailed) {
+    // The most useful identifier in the pick and the one a developer can paste
+    // straight into devtools: built to prefer data-testid / name / aria-label
+    // over classes. Above Classes deliberately — that is the weakest field here.
+    if (pick.selector) lines.push(`**Selector:** ${code(pick.selector)}`);
     if (pick.classes) lines.push(`**Classes:** ${escapeInline(pick.classes)}`);
     lines.push(
       `**Position:** ${rect.x}px, ${rect.y}px (${rect.width}×${rect.height}px)`
@@ -325,6 +329,7 @@ function renderPick(
   }
 
   if (forensic) {
+    if (pick.xpath) lines.push(`**XPath:** ${code(pick.xpath)}`);
     if (pick.fullPath) lines.push(`**Full DOM Path:** ${code(pick.fullPath)}`);
     if (pick.computedStyles && Object.keys(pick.computedStyles).length > 0) {
       lines.push(

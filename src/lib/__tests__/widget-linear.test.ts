@@ -193,6 +193,36 @@ describe("renderSubmissionBody", () => {
     }
   });
 
+  it("renders the selector at detailed/forensic and the xpath at forensic only", () => {
+    // The real capture that motivated this: a stable, paste-into-devtools
+    // identifier that used to be captured and then dropped from the ticket.
+    const picks = [
+      basePick({
+        selector: '[aria-label="Search"] svg',
+        xpath: "/html/body/div[1]/header/nav/div/div[2]/button/span[2]/svg",
+      }),
+    ];
+    const at = (level: "compact" | "standard" | "detailed" | "forensic") =>
+      renderSubmissionBody({ submission, picks, config: { output_detail_level: level } });
+
+    expect(at("standard")).not.toContain('[aria-label="Search"] svg');
+    expect(at("detailed")).toContain('[aria-label="Search"] svg');
+    expect(at("forensic")).toContain('[aria-label="Search"] svg');
+
+    expect(at("detailed")).not.toContain("**XPath:**");
+    expect(at("forensic")).toContain("**XPath:**");
+  });
+
+  it("omits the selector line when no stable selector was found", () => {
+    const picks = [basePick({ selector: null })];
+    const body = renderSubmissionBody({
+      submission,
+      picks,
+      config: { output_detail_level: "forensic" },
+    });
+    expect(body).not.toContain("**Selector:**");
+  });
+
   it("renders only the header for an empty picks array", () => {
     const body = renderSubmissionBody({
       submission,
