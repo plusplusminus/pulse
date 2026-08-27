@@ -13,6 +13,15 @@ import {
 
 export const MAX_PICKS = 50;
 
+/**
+ * Utility-first frameworks put design tokens in the class attribute, so one
+ * element routinely carries 20+ classes of 50 chars each (a real capture:
+ * 610 chars over 22 classes). The old 500 cap rejected the whole submission —
+ * media already uploaded — over the least identifying field in the pick.
+ * The widget clamps to the same number, so this is the backstop, not the gate.
+ */
+export const MAX_PICK_CLASSES = 2000;
+
 const rectSchema = z.object({
   x: z.number(),
   y: z.number(),
@@ -25,7 +34,7 @@ export const widgetPickSchema = z.object({
 
   elementPath: z.string().max(500),
   name: z.string().max(200),
-  classes: z.string().max(500),
+  classes: z.string().max(MAX_PICK_CLASSES),
   boundingBox: rectSchema,
   nearbyText: z.string().max(300),
   comment: z.string().max(1000),

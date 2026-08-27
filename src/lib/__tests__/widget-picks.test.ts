@@ -9,6 +9,7 @@ import {
   MAX_ANNOTATION_TEXT,
   MAX_PEN_POINTS,
   MAX_PICKS,
+  MAX_PICK_CLASSES,
 } from "../widget-picks";
 import { ANNOTATION_COLORS, ANNOTATION_KINDS } from "../widget-types";
 import type { WidgetPick } from "../widget-types";
@@ -24,6 +25,39 @@ const basePick: WidgetPick = {
   intent: "fix",
   isFixed: false,
 };
+
+describe("widgetPickSchema classes cap", () => {
+  // Real capture from priority-pass-b2b-showcase: 22 design-token classes.
+  const realClasses = [
+    "inline-flex", "items-center", "justify-center", "gap-[var(--space-8)]",
+    "rounded-pp-sm", "font-pp-sans", "font-pp-medium", "whitespace-nowrap",
+    "transition-colors", "text-[length:var(--font-size-body-sm)]",
+    "leading-[var(--font-line-height-body-sm)]",
+    "tracking-[var(--font-letter-spacing-body-sm)]",
+    "disabled:pointer-events-none", "disabled:opacity-40",
+    "focus-visible:outline-[length:var(--focus-ring-width)]",
+    "focus-visible:outline-offset-[var(--focus-ring-offset)]",
+    "focus-visible:outline-pp-focus-default", "bg-pp-action-contrast",
+    "text-pp-action-on-contrast", "hover:bg-pp-action-contrast-hover",
+    "px-[var(--space-24)]", "py-[var(--space-16)]",
+  ].join(", ");
+
+  it("accepts the 610-char list that the old 500 cap rejected", () => {
+    expect(realClasses.length).toBeGreaterThan(500);
+    const parsed = widgetPickSchema.safeParse({ ...basePick, classes: realClasses });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("still rejects beyond the cap, and names the field in the issue path", () => {
+    const parsed = picksSchema.safeParse([
+      { ...basePick, classes: "x".repeat(MAX_PICK_CLASSES + 1) },
+    ]);
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues[0].path.join(".")).toBe("0.classes");
+    }
+  });
+});
 
 describe("widgetPickSchema", () => {
   it("accepts a minimal pick and a fully populated one", () => {

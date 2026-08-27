@@ -51,8 +51,24 @@ export function meaningfulClasses(el: Element): string[] {
   return out
 }
 
+/**
+ * Server cap (widgetPickSchema.classes). Clamped here so a utility-first page
+ * cannot push a pick past validation and take the whole submission — media
+ * included — down with it. Whole classes only; a half-truncated token is worse
+ * than a missing one.
+ */
+export const CLASSES_MAX_CHARS = 2000
+
 export function getElementClasses(el: Element): string {
-  return meaningfulClasses(el).join(', ')
+  const out: string[] = []
+  let length = 0
+  for (const c of meaningfulClasses(el)) {
+    const cost = out.length === 0 ? c.length : c.length + 2
+    if (length + cost > CLASSES_MAX_CHARS) break
+    out.push(c)
+    length += cost
+  }
+  return out.join(', ')
 }
 
 // -- text utilities --------------------------------------------------------

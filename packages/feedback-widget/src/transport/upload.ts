@@ -49,6 +49,11 @@ export async function uploadBlob(
     throw new UploadError(`Cannot upload ${kind}: blob has no content type`, 'ticket')
   }
 
+  // The ticket carries the recorder's own label ("video/webm;codecs=vp9,opus"),
+  // but Storage matches the bucket's mime allowlist exactly and rejects anything
+  // parameterised with 415 InvalidMimeType. Mirrors baseContentType() server-side.
+  const storageContentType = contentType.split(';')[0].trim().toLowerCase()
+
   const ticket = await requestTicket(apiUrl, siteKey, {
     kind,
     contentType,
@@ -56,9 +61,9 @@ export async function uploadBlob(
   })
 
   if (blob.size > CHUNK_BYTES) {
-    await uploadResumable(ticket, blob, contentType, options.onProgress)
+    await uploadResumable(ticket, blob, storageContentType, options.onProgress)
   } else {
-    await uploadSigned(ticket.uploadUrl, blob, contentType, options.onProgress)
+    await uploadSigned(ticket.uploadUrl, blob, storageContentType, options.onProgress)
   }
 
   return ticket.storagePath

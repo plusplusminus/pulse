@@ -153,6 +153,54 @@ describe("uploadBlob", () => {
     expect(progress.at(-1)).toEqual([2 * MB, 2 * MB]);
   });
 
+  it("strips codec parameters from the Content-Type sent to Storage, not the ticket", async () => {
+    const t = ticket("videos", "webm");
+    mockTicketResponse(t);
+    handler = () => ({ status: 200 });
+    const blob = new Blob([new Uint8Array(1 * MB)], {
+      type: "video/webm;codecs=vp9,opus",
+    });
+
+    await uploadBlob(API, KEY, "video", blob);
+
+    // The ticket keeps the recorder's own label...
+    const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string).contentType).toBe("video/webm;codecs=vp9,opus");
+    // ...but Storage matches its bucket allowlist exactly and 415s on parameters.
+    expect(requests[0].headers["content-type"]).toBe("video/webm");
+  });
+
+  it("strips codec parameters from the resumable TUS metadata too", async () => {
+    const t = ticket("videos", "webm");
+    mockTicketResponse(t);
+    handler = (req, i): Reply => {
+      if (i === 0) {
+        return {
+          status: 201,
+          headers: { Location: `${STORAGE}/upload/resumable/upload-1` },
+        };
+      }
+      const offset = Number(req.headers["upload-offset"]);
+      return {
+        status: 204,
+        headers: { "Upload-Offset": String(offset + (req.body?.size ?? 0)) },
+      };
+    };
+    const blob = new Blob([new Uint8Array(7 * MB)], {
+      type: "video/webm;codecs=vp8,opus",
+    });
+
+    await uploadBlob(API, KEY, "video", blob);
+
+    const metadata = Object.fromEntries(
+      requests[0].headers["upload-metadata"].split(",").map((pair) => {
+        const [k, v] = pair.split(" ");
+        return [k, Buffer.from(v, "base64").toString("utf8")];
+      })
+    );
+    expect(metadata.contentType).toBe("video/webm");
+  });
+
   it("uses the TUS endpoint with x-signature for blobs above 6 MB", async () => {
     const t = ticket("videos", "webm");
     mockTicketResponse(t);
