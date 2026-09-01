@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import { withHubAuthWrite, type HubAuthError } from "@/lib/hub-auth";
 import { supabaseAdmin } from "@/lib/supabase";
 import { pushCommentToLinear } from "@/lib/linear-push";
@@ -129,6 +130,11 @@ export async function POST(
         pushError instanceof Error ? pushError.message : "Unknown push error";
       console.error("Push to Linear failed:", errorMsg);
 
+      Sentry.captureException(pushError, {
+        tags: { surface: "comment-push" },
+        extra: { commentId: comment.id, issueLinearId, hubId, authorName },
+      });
+
       await supabaseAdmin
         .from("hub_comments")
         .update({
@@ -251,6 +257,15 @@ export async function PATCH(
     } catch (pushError) {
       const errorMsg =
         pushError instanceof Error ? pushError.message : "Unknown push error";
+
+      Sentry.captureException(pushError, {
+        tags: { surface: "comment-push-retry" },
+        extra: {
+          commentId,
+          issueLinearId: comment.issue_linear_id,
+          hubId,
+        },
+      });
 
       await supabaseAdmin
         .from("hub_comments")

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { withAdminAuth } from "@/lib/admin-auth";
 import { supabaseAdmin } from "@/lib/supabase";
 import { fetchFormWithFields } from "@/lib/form-read";
+import { fetchAllowedTeamLabelIds } from "@/lib/linear-label-validation";
 
 /**
  * GET: Get form with all fields.
@@ -116,8 +117,38 @@ export async function PATCH(
       updates.target_project_id = body.target_project_id || null;
     if (body.target_cycle_id !== undefined)
       updates.target_cycle_id = body.target_cycle_id || null;
-    if (body.target_label_ids !== undefined)
+    if (body.target_label_ids !== undefined) {
+      // Validate label IDs against Linear before persisting. Use the team from
+      // this same PATCH if provided, otherwise the form's existing team.
+      // Skip when the form is team-less (no team context to validate against).
+      if (body.target_label_ids.length > 0) {
+        let teamForValidation = body.target_team_id ?? null;
+        if (teamForValidation === null && body.target_team_id === undefined) {
+          const { data: existing } = await supabaseAdmin
+            .from("form_templates")
+            .select("target_team_id")
+            .eq("id", formId)
+            .maybeSingle();
+          teamForValidation = existing?.target_team_id ?? null;
+        }
+        if (teamForValidation) {
+          const allowed = await fetchAllowedTeamLabelIds(teamForValidation);
+          if (allowed) {
+            const invalid = body.target_label_ids.filter((id) => !allowed.has(id));
+            if (invalid.length > 0) {
+              return NextResponse.json(
+                {
+                  error: `These label IDs no longer exist in Linear for the selected team: ${invalid.join(", ")}`,
+                  invalidLabelIds: invalid,
+                },
+                { status: 400 }
+              );
+            }
+          }
+        }
+      }
       updates.target_label_ids = body.target_label_ids;
+    }
     if (body.target_priority !== undefined)
       updates.target_priority = body.target_priority;
     if (body.confirmation_message !== undefined)
