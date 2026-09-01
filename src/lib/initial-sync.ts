@@ -1,6 +1,7 @@
 import { supabaseAdmin, type HubTeamMapping } from "./supabase";
 import { getWorkspaceToken } from "./workspace";
 import { LinearRateLimiter } from "./linear-rate-limiter";
+import { fetchAllPages } from "./supabase-paginate";
 
 const LINEAR_API = "https://api.linear.app/graphql";
 const PAGE_SIZE = 20;
@@ -810,22 +811,25 @@ export async function diffEntities(
   remoteChecksums: EntityChecksum[],
   teamId?: string
 ): Promise<DiffResult> {
-  // Fetch local entities: id + updated_at (Linear's updatedAt) for direct comparison
-  let query = supabaseAdmin
-    .from(tableName)
-    .select("linear_id, updated_at")
-    .eq("user_id", "workspace");
+  // Fetch local entities: id + updated_at (Linear's updatedAt) for direct comparison.
+  // Paginated: PostgREST caps an unpaginated select at 1000 rows, which silently
+  // truncated localMap for teams holding more issues than that. Every entity past
+  // the cap then looked "missing" and was re-upserted on every reconcile.
+  const localRows = await fetchAllPages<{ linear_id: string; updated_at: string }>(
+    `diffEntities ${tableName}`,
+    (from, to) => {
+      let query = supabaseAdmin
+        .from(tableName)
+        .select("linear_id, updated_at")
+        .eq("user_id", "workspace");
 
-  if (teamId) {
-    query = query.eq("team_id", teamId);
-  }
+      if (teamId) {
+        query = query.eq("team_id", teamId);
+      }
 
-  const { data: localRows, error } = await query;
-
-  if (error) {
-    console.error(`diffEntities: failed to query ${tableName}:`, error);
-    throw error;
-  }
+      return query.order("linear_id", { ascending: true }).range(from, to);
+    }
+  );
 
   // Build a map of local entities: linear_id -> updated_at (Linear's updatedAt)
   const localMap = new Map<string, string>();

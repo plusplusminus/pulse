@@ -56,6 +56,30 @@ describe("Query shape guard", () => {
     expect(hubAuth).toContain("getHubMembershipCached");
   });
 
+  it("hub reads over synced_issues page past PostgREST's 1000-row cap", () => {
+    // An unpaginated .select() silently returns only the first 1000 rows.
+    for (const fn of [
+      "fetchHubIssues",
+      "fetchHubRoadmapIssues",
+      "fetchHubCycleIssues",
+      "fetchHubTeamStats",
+      "fetchHubMetadata",
+    ]) {
+      expect(functionBody(hubRead, fn), `${fn} must paginate`).toContain("fetchAllPages");
+    }
+  });
+
+  it("fetchHubCycleIssues filters by cycle in SQL rather than in JS", () => {
+    const body = functionBody(hubRead, "fetchHubCycleIssues");
+    expect(body).toContain('.eq("data->cycle->>id"');
+    expect(body).not.toMatch(/cycle\.id !== cycleLinearId/);
+  });
+
+  it("the incremental sync diff pages its local snapshot", () => {
+    const body = functionBody(read("src/lib/initial-sync.ts"), "diffEntities");
+    expect(body).toContain("fetchAllPages");
+  });
+
   it("top bar polls the merged /status endpoint at >= 60s and the bell does not poll on its own", () => {
     const hook = read("src/hooks/use-hub-status.ts");
     const pollMs = Number(hook.match(/HUB_STATUS_POLL_MS = ([\d_]+)/)?.[1].replace(/_/g, ""));

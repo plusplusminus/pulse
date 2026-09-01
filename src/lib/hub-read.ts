@@ -1,5 +1,6 @@
 import { cache } from "react";
 import { supabaseAdmin, type HubTeamMapping, type HubMemberRole } from "./supabase";
+import { fetchAllPages } from "./supabase-paginate";
 import { getWorkspaceToken } from "./workspace";
 import { isIssueProjectVisible } from "./hub-visibility-rules";
 import type { LinearIssue, RoadmapIssue } from "./linear";
@@ -608,29 +609,27 @@ export async function fetchHubIssues(
     return [];
   }
 
-  let query = supabaseAdmin
-    .from("synced_issues")
-    .select("linear_id, data, created_at, updated_at, team_id")
-    .eq("user_id", WORKSPACE_USER_ID)
-    .in("team_id", options?.teamId ? [options.teamId] : teamIds)
-    .order("updated_at", { ascending: false });
+  const data = await fetchAllPages("fetchHubIssues", (from, to) => {
+    let query = supabaseAdmin
+      .from("synced_issues")
+      .select("linear_id, data, created_at, updated_at, team_id")
+      .eq("user_id", WORKSPACE_USER_ID)
+      .in("team_id", options?.teamId ? [options.teamId] : teamIds)
+      .order("updated_at", { ascending: false })
+      .order("linear_id", { ascending: true });
 
-  if (options?.projectId) {
-    query = query.eq("project_id", options.projectId);
-  } else if (allowedProjectIds) {
-    query = query.in("project_id", allowedProjectIds);
-  }
+    if (options?.projectId) {
+      query = query.eq("project_id", options.projectId);
+    } else if (allowedProjectIds) {
+      query = query.in("project_id", allowedProjectIds);
+    }
 
-  if (options?.statuses && options.statuses.length > 0) {
-    query = query.in("state_name", options.statuses);
-  }
+    if (options?.statuses && options.statuses.length > 0) {
+      query = query.in("state_name", options.statuses);
+    }
 
-  const { data, error } = await query;
-
-  if (error) {
-    console.error("fetchHubIssues error:", error);
-    throw error;
-  }
+    return query.range(from, to);
+  });
 
   return (data || []).reduce<LinearIssue[]>((acc, row) => {
     const r = row as { linear_id: string; data: Record<string, unknown>; created_at: string; updated_at: string; team_id: string };
@@ -776,42 +775,38 @@ export async function fetchHubRoadmapIssues(
   if (filteredProjectIds.length === 0 && !includeUnassigned) return [];
 
   // Query 1: Issues belonging to specified projects
-  const projectQuery = filteredProjectIds.length > 0
-    ? supabaseAdmin
-        .from("synced_issues")
-        .select("linear_id, data, created_at, updated_at, team_id")
-        .eq("user_id", WORKSPACE_USER_ID)
-        .in("project_id", filteredProjectIds)
-        .order("updated_at", { ascending: false })
-    : null;
-
-  // Query 2: Issues with no project (when include_unassigned_issues is on)
   const teamIds = mappings.map((m) => m.linear_team_id);
-  const unassignedQuery = includeUnassigned
-    ? supabaseAdmin
-        .from("synced_issues")
-        .select("linear_id, data, created_at, updated_at, team_id")
-        .eq("user_id", WORKSPACE_USER_ID)
-        .in("team_id", teamIds)
-        .is("project_id", null)
-        .order("updated_at", { ascending: false })
-    : null;
 
-  const [projectResult, unassignedResult] = await Promise.all([
-    projectQuery ?? Promise.resolve({ data: null, error: null }),
-    unassignedQuery ?? Promise.resolve({ data: null, error: null }),
+  const [projectRows, unassignedRows] = await Promise.all([
+    filteredProjectIds.length > 0
+      ? fetchAllPages("fetchHubRoadmapIssues", (from, to) =>
+          supabaseAdmin
+            .from("synced_issues")
+            .select("linear_id, data, created_at, updated_at, team_id")
+            .eq("user_id", WORKSPACE_USER_ID)
+            .in("project_id", filteredProjectIds)
+            .order("updated_at", { ascending: false })
+            .order("linear_id", { ascending: true })
+            .range(from, to)
+        )
+      : Promise.resolve([]),
+    // Query 2: Issues with no project (when include_unassigned_issues is on)
+    includeUnassigned
+      ? fetchAllPages("fetchHubRoadmapIssues unassigned", (from, to) =>
+          supabaseAdmin
+            .from("synced_issues")
+            .select("linear_id, data, created_at, updated_at, team_id")
+            .eq("user_id", WORKSPACE_USER_ID)
+            .in("team_id", teamIds)
+            .is("project_id", null)
+            .order("updated_at", { ascending: false })
+            .order("linear_id", { ascending: true })
+            .range(from, to)
+        )
+      : Promise.resolve([]),
   ]);
 
-  if (projectResult.error) {
-    console.error("fetchHubRoadmapIssues error:", projectResult.error);
-    throw projectResult.error;
-  }
-  if (unassignedResult.error) {
-    console.error("fetchHubRoadmapIssues unassigned error:", unassignedResult.error);
-    throw unassignedResult.error;
-  }
-
-  const data = [...(projectResult.data || []), ...(unassignedResult.data || [])];
+  const data = [...projectRows, ...unassignedRows];
 
   return (data || []).reduce<RoadmapIssue[]>((acc, row) => {
     const r = row as { linear_id: string; data: Record<string, unknown>; created_at: string; updated_at: string; team_id: string };
@@ -845,17 +840,21 @@ export async function fetchHubCycleIssues(
 
   const teamIds = mappings.map((m) => m.linear_team_id);
 
-  const { data, error } = await supabaseAdmin
-    .from("synced_issues")
-    .select("linear_id, data, created_at, updated_at, team_id")
-    .eq("user_id", WORKSPACE_USER_ID)
-    .in("team_id", teamIds)
-    .order("updated_at", { ascending: false });
-
-  if (error) {
-    console.error("fetchHubCycleIssues error:", error);
-    throw error;
-  }
+  // Filter by cycle in SQL (idx_synced_issues_cycle_id) instead of fetching every
+  // issue for the hub's teams and discarding non-matching cycles in JS. The old
+  // shape also lost issues: PostgREST capped the unfiltered read at 1000 rows,
+  // so cycles in teams with more issues than that rendered incomplete.
+  const data = await fetchAllPages("fetchHubCycleIssues", (from, to) =>
+    supabaseAdmin
+      .from("synced_issues")
+      .select("linear_id, data, created_at, updated_at, team_id")
+      .eq("user_id", WORKSPACE_USER_ID)
+      .in("team_id", teamIds)
+      .eq("data->cycle->>id", cycleLinearId)
+      .order("updated_at", { ascending: false })
+      .order("linear_id", { ascending: true })
+      .range(from, to)
+  );
 
   const overviewOnlyIds = getOverviewOnlyProjectIds(mappings);
   const allowedProjectIds = mergeProjectVisibility(mappings);
@@ -864,8 +863,6 @@ export async function fetchHubCycleIssues(
   return (data || []).reduce<RoadmapIssue[]>((acc, row) => {
     const r = row as { linear_id: string; data: Record<string, unknown>; created_at: string; updated_at: string; team_id: string };
     const d = r.data;
-    const cycle = d.cycle as Record<string, unknown> | undefined;
-    if (!cycle || cycle.id !== cycleLinearId) return acc;
     const projectId = (d.project as Record<string, unknown> | undefined)?.id as string | undefined;
     // Enforce project visibility: project-less issues require opt-in,
     // project issues must be in the allowed set and not overview-only.
@@ -1090,17 +1087,26 @@ export async function fetchHubTeamStats(hubId: string) {
 
   // Fetch open issue counts and latest updated_at per team
   // "Open" = not in completed/cancelled state types
-  const { data: issues } = await supabaseAdmin
-    .from("synced_issues")
-    .select("team_id, data, updated_at")
-    .eq("user_id", WORKSPACE_USER_ID)
-    .in("team_id", teamIds);
+  // Only the state type is needed per issue — not the whole JSONB blob.
+  const issues = await fetchAllPages("fetchHubTeamStats issues", (from, to) =>
+    supabaseAdmin
+      .from("synced_issues")
+      .select("team_id, updated_at, state_type:data->state->>type")
+      .eq("user_id", WORKSPACE_USER_ID)
+      .in("team_id", teamIds)
+      .order("linear_id", { ascending: true })
+      .range(from, to)
+  );
 
-  // Fetch projects and count per team
-  const { data: projects } = await supabaseAdmin
-    .from("synced_projects")
-    .select("linear_id, data")
-    .eq("user_id", WORKSPACE_USER_ID);
+  // Fetch projects and count per team (only the team arrays are read below)
+  const projects = await fetchAllPages("fetchHubTeamStats projects", (from, to) =>
+    supabaseAdmin
+      .from("synced_projects")
+      .select("linear_id, teams:data->teams, teamIds:data->teamIds")
+      .eq("user_id", WORKSPACE_USER_ID)
+      .order("linear_id", { ascending: true })
+      .range(from, to)
+  );
 
   const stats = new Map<string, { projectCount: number; openIssueCount: number; lastActivity: string | null }>();
 
@@ -1115,8 +1121,7 @@ export async function fetchHubTeamStats(hubId: string) {
     const teamStat = stats.get(issue.team_id);
     if (!teamStat) continue;
 
-    const d = issue.data as Record<string, unknown>;
-    const stateType = (d.state as Record<string, unknown> | undefined)?.type as string | undefined;
+    const stateType = (issue as unknown as { state_type?: string | null }).state_type ?? undefined;
     if (!stateType || !completedTypes.has(stateType)) {
       teamStat.openIssueCount++;
     }
@@ -1130,12 +1135,15 @@ export async function fetchHubTeamStats(hubId: string) {
   const allowedProjectIds = mergeProjectVisibility(mappings);
   for (const proj of projects || []) {
     if (allowedProjectIds && !allowedProjectIds.includes(proj.linear_id)) continue;
-    const d = proj.data as Record<string, unknown>;
-    const projTeams = d.teams as Array<{ id: string }> | undefined;
+    const p = proj as unknown as {
+      teams?: Array<{ id: string }> | null;
+      teamIds?: string[] | null;
+    };
+    const projTeams = p.teams;
     const projTeamIds = Array.isArray(projTeams)
       ? projTeams.map((t) => t.id)
-      : Array.isArray(d.teamIds)
-        ? (d.teamIds as string[])
+      : Array.isArray(p.teamIds)
+        ? p.teamIds
         : [];
     for (const tid of projTeamIds) {
       const teamStat = stats.get(tid);
@@ -1633,16 +1641,26 @@ export async function fetchHubMetadata(
     ? getTeamLabelIds(mappings, labelTeamId)
     : null; // No team context = no label filtering (callers should provide teamId)
 
-  let query = supabaseAdmin
-    .from("synced_issues")
-    .select("data, team_id")
-    .eq("user_id", WORKSPACE_USER_ID)
-    .in("team_id", options?.teamId ? [options.teamId] : teamIds);
+  // Project only the JSON paths this function reads. Selecting the whole `data`
+  // blob moved ~2KB per issue over the wire for four small fields.
+  let data: Array<Record<string, unknown>>;
+  try {
+    data = await fetchAllPages("fetchHubMetadata", (from, to) => {
+      let query = supabaseAdmin
+        .from("synced_issues")
+        .select(
+          "team_id, state:data->state, labels:data->labels, cycle:data->cycle, json_project_id:data->project->>id"
+        )
+        .eq("user_id", WORKSPACE_USER_ID)
+        .in("team_id", options?.teamId ? [options.teamId] : teamIds);
 
-  if (options?.projectId) query = query.eq("project_id", options.projectId);
+      if (options?.projectId) query = query.eq("project_id", options.projectId);
 
-  const { data, error } = await query;
-  if (error || !data) return { states: [], labels: [], cycles: [] };
+      return query.order("linear_id", { ascending: true }).range(from, to);
+    });
+  } catch {
+    return { states: [], labels: [], cycles: [] };
+  }
 
   const statesMap = new Map<string, { id: string; name: string; color: string; type: string }>();
   const labelsMap = new Map<string, { id: string; name: string; color: string }>();
@@ -1654,11 +1672,17 @@ export async function fetchHubMetadata(
   const metaIncludeUnassigned = shouldIncludeUnassigned(mappings);
 
   for (const row of data) {
-    const d = row.data as Record<string, unknown>;
-    const rowTeamId = (row as Record<string, unknown>).team_id as string;
+    const d = row as unknown as {
+      team_id: string;
+      state?: { id?: string; name?: string; color?: string; type?: string };
+      labels?: Array<{ id: string; name: string; color: string }>;
+      cycle?: { id?: string; name?: string; number?: number };
+      json_project_id?: string | null;
+    };
+    const rowTeamId = d.team_id;
 
     // Skip hidden issues from metadata extraction
-    const issueLabels = d.labels as Array<{ id: string; name: string; color: string }> | undefined;
+    const issueLabels = d.labels;
     if (issueLabels) {
       const mapping = mappings.find((m) => m.linear_team_id === rowTeamId);
       const hiddenIds = mapping?.hidden_label_ids;
@@ -1667,7 +1691,7 @@ export async function fetchHubMetadata(
       }
     }
 
-    const state = d.state as { id?: string; name?: string; color?: string; type?: string } | undefined;
+    const state = d.state;
     if (state?.name) {
       statesMap.set(state.name, {
         id: state.id ?? "",
@@ -1676,7 +1700,7 @@ export async function fetchHubMetadata(
         type: state.type ?? "",
       });
     }
-    const labels = d.labels as Array<{ id: string; name: string; color: string }> | undefined;
+    const labels = d.labels;
     if (Array.isArray(labels)) {
       // Use per-team label visibility
       const teamLabelIds = labelTeamId
@@ -1690,9 +1714,9 @@ export async function fetchHubMetadata(
       }
     }
     // Only include cycles from issues that are actually visible (respects project scoping)
-    const cycle = d.cycle as { id?: string; name?: string; number?: number } | undefined;
+    const cycle = d.cycle;
     if (cycle?.id) {
-      const pid = (d.project as Record<string, unknown> | undefined)?.id as string | undefined;
+      const pid = d.json_project_id ?? undefined;
       const projectVisible = pid
         ? (!metaAllowedProjectIds || metaAllowedProjectIds.includes(pid)) && !metaOverviewOnlyIds.has(pid)
         : metaIncludeUnassigned;

@@ -222,7 +222,49 @@ Cycle stats: 10,650× less data over the wire. Unread: two round trips and 141 K
 
 Re-run the same measurements after the PR deploys to compare like-for-like (`scripts/load/hub-responsiveness.js`, or the browser snippet above).
 
-## 7. Suggested sequencing (original)
+## 7. Follow-up: the 1000-row truncation bug (found 2026-08-20, second pass)
+
+While rewriting the hub reads I found that **PostgREST caps every response at 1000 rows** (`db-max-rows`) and reports it only in the `Content-Range` header, which supabase-js discards. Confirmed on production:
+
+```
+GET /rest/v1/synced_issues?select=linear_id&user_id=eq.workspace
+content-range: 0-999/11163
+```
+
+No error, no warning — every unpaginated `.select()` over a table with more than 1000 matching rows has been returning silently incomplete data. Four hub teams already hold more than 1000 issues (1947, 1916, 1676, 1456).
+
+Measured impact on hub `54-collective` (1,676 issues, so 676 were invisible):
+
+| Symptom | Was | Actually |
+|---|---:|---:|
+| Issues shown on cycle page `5f3c7902…` | 28 | **184** |
+| Issues shown on cycle page `4318b2fd…` | 3 | **117** |
+| Issues shown on cycle page `42bb94e7…` | 267 | 278 |
+| Total issues hidden across the hub's 8 cycles | — | **318** |
+| `fetchHubTeamStats` open issue count | 346 | **417** |
+| `fetchHubMetadata` distinct labels | 38 | 39 |
+
+It also explains the largest single line in the original audit — 182,607 `synced_issues` upserts totalling 7,406 s. `diffEntities` built its "what do we already have locally?" map from a truncated 1000-row read, so on every 30-minute reconcile every issue past the cap looked *missing* and was re-upserted.
+
+Fixed by `src/lib/supabase-paginate.ts` (`fetchAllPages`), applied to `fetchHubIssues`, `fetchHubRoadmapIssues`, `fetchHubCycleIssues`, `fetchHubTeamStats`, `fetchHubMetadata`, `diffEntities`, and the admin task-rankings page. Any paged query must carry a deterministic `.order(...)` ending in a unique column or rows can repeat or vanish across page boundaries.
+
+### Payload reductions from JSON-path projection
+
+Selecting only the JSON paths each function reads, instead of the whole `data` blob (measured against production, one hub):
+
+| Query | Was | Now |
+|---|---:|---:|
+| `fetchHubMetadata` | 7,397,014 B (3,317 ms) | **341,220 B (858 ms)** |
+| `fetchHubTeamStats` issues | 7,441,910 B | **120,444 B** |
+| `fetchHubTeamStats` projects | 4,599,337 B | **103,617 B** |
+
+`fetchHubCycleIssues` additionally pushes the cycle filter into SQL (`data->cycle->>id`, served by `idx_synced_issues_cycle_id`), so it reads ~278 rows instead of 1,676. Equivalence with the old JS filter was verified per-cycle against production data (278/278, 184/184, 145/145, 131/131, 129/129).
+
+### Still unpaginated (low risk today, worth watching)
+
+These query tables that are currently under 1000 rows, so they are not truncated yet: `synced_teams` (160), `synced_projects` (697), `synced_cycles` (318), `synced_initiatives` (254), `synced_project_updates` (295). They will silently truncate if those tables grow past 1000.
+
+## 8. Suggested sequencing (original)
 
 | Step | Effort | Expected effect |
 |---|---|---|
